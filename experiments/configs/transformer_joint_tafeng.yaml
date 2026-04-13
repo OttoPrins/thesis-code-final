@@ -1,0 +1,40 @@
+# Stage 3 — Extension 2: Transformer on Ta-Feng (high-frequency; Transformer may win here)
+# The proposal specifically expects Transformer to outperform LSTM on Ta-Feng
+# due to longer-range dependencies in high-frequency grocery data.
+dataset:
+  name: tafeng
+  raw_dir: data/raw/tafeng
+  calibration_weeks: 13   # ~3 months; dense data, shorter calibration sufficient
+  holdout_weeks: 4
+  lookback_weeks: 13
+  min_active_weeks: 3
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+
+model:
+  type: transformer
+  input_dim: 2
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
+  joint: true
+
+training:
+  epochs: 100
+  batch_size: 512         # larger batch for larger dataset
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+
+output:
+  run_name: transformer_joint_tafeng_v1
+  results_dir: results
+  save_checkpoint: true

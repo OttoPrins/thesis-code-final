@@ -1,0 +1,52 @@
+# Stage 4 — Extension 3: Covariate ablation on Dunnhumby
+# Quantifies marginal contribution of demographics + campaign exposure to freq vs. spend.
+# Requires SHAP analysis after training (see src/evaluation/).
+dataset:
+  name: dunnhumby
+  raw_dir: data/raw/dunnhumby
+  calibration_weeks: 80
+  holdout_weeks: 4
+  lookback_weeks: 52
+  min_active_weeks: 5
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+  include_covariates: true   # triggers DunnhumbyPipeline.build_covariates()
+
+covariates:
+  demographics:
+    - income_desc        # ordinal encode (low → high)
+    - household_size_desc  # ordinal encode
+  campaign_exposure:
+    - coupon_redemptions_per_week   # count over calibration
+    - campaign_active_flag          # binary: any active campaign that week
+
+model:
+  type: lstm             # run both LSTM and Transformer; keep LSTM as primary
+  input_dim: 2
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  joint: true
+  covariate_dim: 4       # 2 demographics + 2 campaign features
+
+training:
+  epochs: 100
+  batch_size: 128        # smaller dataset
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+
+ablation:
+  method: shap
+  background_samples: 100  # SHAP background set size
+  explanation_samples: 200
+
+output:
+  run_name: extension3_dunnhumby_v1
+  results_dir: results
+  save_checkpoint: true

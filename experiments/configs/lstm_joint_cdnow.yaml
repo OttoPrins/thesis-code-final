@@ -1,0 +1,35 @@
+# Stage 2 — Extension 1: Joint LSTM on CDNOW (frequency + spend, Kendall loss)
+dataset:
+  name: cdnow
+  raw_dir: data/raw/cdnow
+  calibration_weeks: 52
+  holdout_weeks: 52
+  lookback_weeks: 52
+  min_active_weeks: 5
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+
+model:
+  type: lstm
+  input_dim: 2
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  joint: true           # enables spend regression head
+
+training:
+  epochs: 100
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+  seed: 42
+
+loss:
+  type: kendall         # homoscedastic uncertainty weighting (Kendall et al. 2018)
+  n_tasks: 2            # [frequency, spend]
+
+output:
+  run_name: lstm_joint_cdnow_v1
+  results_dir: results
+  save_checkpoint: true

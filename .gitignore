@@ -61,3 +61,6 @@ experiments/runs/
 # OS
 .DS_Store
 Thumbs.db
+
+# OneDrive sync conflicts
+*MacBook*

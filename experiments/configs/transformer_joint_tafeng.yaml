@@ -27,7 +27,7 @@ training:
   batch_size: 512         # larger batch for larger dataset
   lr: 0.001
   weight_decay: 0.0001
-  early_stopping_patience: 10
+  early_stopping_patience: 5   # matches Valendin et al. repo (patience=5)
   seed: 42
 
 loss:

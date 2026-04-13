@@ -27,15 +27,18 @@ Customer base analysis with recurrent neural networks.
 Critical facts to remember every session:
 - Published in **IJRM** — a marketing journal, NOT a machine learning conference.
 - Proposes a **Base LSTM** (frequency only) and **Extended LSTM** (+ static/dynamic covariates).
-- **Architecture:** Stacked LSTM layers → softmax classification head over discretised weekly counts.
-- **Output:** Discretised weekly transaction count per customer: {0, 1, 2, 3+} (4 classes).
-- **Training paradigm:** Self-supervised, rolling-window. The model is trained to predict the
-  next week's transaction count from the full history up to that point.
+- **Output:** Discretised weekly transaction count per customer (integer, clipped at some max).
+- **Training paradigm:** Self-supervised, **sequence-to-sequence**. `return_sequences=True` — the
+  model predicts at EVERY time step, not just the last. Loss computed across all steps.
+- **Inference:** Autoregressive. Calibration history is fed in as a "seed" to warm up the LSTM's
+  cell state; then future weeks are generated step-by-step, feeding each prediction back as input.
 - **Benchmarks evaluated against:** Pareto/NBD, Pareto/GGG (Platzer & Reutterer 2016), GPPM.
 - **Key result:** Cohort-level forecast bias reduced from ~18% to ~2%; MAPE nearly halved.
 - **8 empirical datasets used;** CDNOW is the primary benchmark — used for replication here.
 - **Key gap the paper acknowledges:** NO monetary value prediction — only transaction counts.
-- **Open-source code available:** GitHub (enables direct replication — find it before implementing).
+- **Open-source repo:** `../THesis DSMA/Code/rfm2lstm-main/` — contains `banking_transactions_demo.ipynb`.
+  NOTE: The demo uses Czech banking data (trans.csv), NOT CDNOW. Written in **TensorFlow/Keras**,
+  not PyTorch. Use it as an architectural reference, not as runnable code for this project.
 
 ---
 
@@ -202,12 +205,21 @@ src/data/
 
 ### Key design decisions
 - **Weekly aggregation is standard** (matches Valendin et al. 2022).
-- **Spend transformation:** `log1p(spend)` — add 1 before log to handle zero-spend weeks.
-- **Frequency discretisation:** {0: no purchase, 1: 1 purchase, 2: 2 purchases, 3: 3+}.
-  This matches Valendin et al. (2022)'s 4-class softmax output.
+- **Input representation:** `week` (integer 0-51) and `transaction_count` (integer) are
+  **categorical inputs**, passed through `nn.Embedding` layers — NOT raw floats.
+  Embedding size heuristic from the repo: `int(max_val ** 0.5) + 1`.
+  (week: emb_dim≈8; transaction count: emb_dim depends on max clipped value)
+- **Spend (Extension 1 only):** log1p-transformed spend is an additional continuous input
+  feature and a regression target. It is NOT part of the Base LSTM.
+- **Frequency discretisation:** Clip transaction count at some maximum (check paper for exact
+  value; repo clips at a value determined by the data, then uses all observed classes).
+  Our config sets `freq_bins: [0, 1, 2, 3]` (3 means 3+) as the default — verify against paper.
 - **Minimum sequence length:** Drop customers with fewer than 5 active weeks in calibration.
-- **Padding:** Shorter sequences padded with zeros + mask tensor (do NOT use arbitrary fill values).
-- **Lookback window T:** Configurable per dataset (default=52; Ta-Feng may use shorter windows).
+- **Sequence-to-sequence output:** `y_freq` has shape `(N, T)` — a label at every time step,
+  not just the final step. The dataset must return the full target sequence, not a scalar.
+- **Lookback window T:** The full calibration history is the input (no sliding window needed
+  for training in the base replication). The LSTM is trained on the complete sequence.
+  For Extension 1 and 2, decide whether to use full history or sliding windows.
 
 ---
 
@@ -249,31 +261,61 @@ Transformer       | cdnow    | ...       | ...       | ...       | ...      | ..
 ## 8. Architecture Specifications
 
 ### LSTM (replication target — match Valendin et al. 2022 exactly)
-- Input: sequence of weekly feature vectors
-- Layers: 2 stacked LSTM layers (check paper for exact hidden size; ~64-128 units)
-- Dropout: 0.2 between LSTM layers
-- Frequency head: Linear → Softmax (4 classes: 0, 1, 2, 3+)
-- Spend head (Extension 1): Linear → scalar (log-transformed spend)
-- Loss: CrossEntropy (frequency) + MSE (log-spend), combined via Kendall et al. 2018
+
+Verified from the open-source repo (`banking_transactions_demo.ipynb`, TF/Keras). Our
+implementation is in PyTorch but must match the architecture exactly.
+
+**Input representation:**
+- `week` — integer week-of-year (0–51), passed through an `Embedding` layer.
+  Embedding size heuristic from the repo: `int(max_week ** 0.5) + 1` = 8 for max_week=52.
+- `transaction_count` — integer count (clipped at some max), passed through an `Embedding` layer.
+  Embedding size: `int(max_trans ** 0.5) + 1`.
+- The two embeddings are concatenated along the feature dimension.
+
+**Model:**
+- `memory_units = 128` (confirmed from repo)
+- `dense_units = 128` (Dense layer after LSTM, before softmax)
+- Single LSTM layer with `return_sequences=True` (NOT 2 stacked layers — confirmed from repo)
+- Training uses stateless LSTM; inference uses stateful LSTM (PyTorch equivalent: manage
+  hidden state manually)
+- Final softmax over transaction count classes
+
+**Sequence-to-sequence training (critical):**
+- The model predicts the transaction count at EVERY time step, not just the last.
+- `return_sequences=True` → output shape (B, T, n_classes); loss applied at all T steps.
+- This means during training, the loss is the mean CrossEntropy over all T time steps.
+
+**Autoregressive inference (critical):**
+1. Feed entire calibration history through the LSTM to warm up hidden state `(h, c)`.
+2. Take the output at the last calibration step as first holdout prediction.
+3. For each subsequent holdout week: feed the previous prediction + current week embedding
+   into the LSTM (reusing the accumulated hidden state); sample from the softmax distribution.
+4. Average multiple sampled scenarios (NO_SCENARIOS ≥ 20) to reduce sampling noise.
+
+**For Extension 1 (joint prediction):** Add a parallel regression head on top of the same
+LSTM. At each time step, the LSTM output goes to both the frequency softmax head AND the
+spend regression head. Both losses are computed at every time step.
 
 ### Kendall et al. (2018) Multi-Task Loss
 ```
 L = Σ_i [ L_i / (2σ_i²) + log(σ_i) ]
 ```
-- σ_i = learnable task uncertainty parameter (one per task)
-- Initialise σ_i = 1.0; let it optimise freely
-- L_freq = CrossEntropyLoss; L_spend = MSELoss (on log-spend)
+- σ_i = learnable log-variance parameter (one per task); use `log_var` parameterisation
+- Initialise log_var = 0.0 (i.e. σ² = 1); let it optimise freely
+- L_freq = mean CrossEntropyLoss over all T steps; L_spend = mean MSELoss over all T steps
 
 ### Transformer Encoder (Extension 2)
-- Input: sequence of weekly feature vectors
+- Input: same embedding representation as LSTM (week + transaction count embeddings)
 - Temporal encoding: Time2Vec (learnable) + sinusoidal positional encoding (fixed)
   - Time2Vec: ω·t + φ for linear component; sin(ω_k·t + φ_k) for periodic components
   - Sinusoidal PE: PE(pos, 2i) = sin(pos/10000^(2i/d)), PE(pos, 2i+1) = cos(...)
 - Encoder: Multi-head self-attention (n_heads=4 or 8) + FFN + LayerNorm + residual
 - Depth: 2-3 encoder layers (keep simple; not full BERT scale)
-- Prediction heads: same as Joint LSTM (Softmax + regression)
-- NOTE: Do NOT use causal masking for the encoder (it sees full history at inference).
-  This is an encoder-only model; sequence length = T history weeks.
+- Output: also sequence-to-sequence (predict at every step) to match LSTM training paradigm
+- **Use causal masking** (each position can only attend to past positions) — this is needed
+  because the Transformer sees the full sequence at once during training but must not use
+  future time steps. The LSTM is causal by construction; the Transformer is not.
+- NOTE: Do NOT add tAPE or eRPE.
 
 ---
 
@@ -303,7 +345,7 @@ training:
   batch_size: 256
   lr: 1e-3
   weight_decay: 1e-4
-  early_stopping_patience: 10
+  early_stopping_patience: 5   # matches Valendin et al. repo (patience=5)
   seed: 42
 
 loss:

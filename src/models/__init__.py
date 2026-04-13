@@ -1,4 +1,3 @@
-from src.models.lstm import LSTMEncoder
-from src.models.transformer import TransformerEncoder
-from src.models.heads import FrequencyHead, SpendHead
+from src.models.lstm import LSTMModel, embedding_size
+from src.models.transformer import TransformerModel
 from src.models.losses import KendallMultiTaskLoss

@@ -1,15 +1,18 @@
 """
-Transformer encoder for customer transaction sequence modelling (Extension 2).
+Transformer model for customer transaction sequence modelling (Extension 2).
 
 Architecture per CLAUDE.md and the proposal:
-    - Time2Vec temporal embedding (learnable) — Kazemi et al. (2019)
-    - Sinusoidal positional encoding (fixed) — Vaswani et al. (2017)
+    - Same categorical embedding inputs as the LSTM (week + transaction_count via nn.Embedding)
+    - Time2Vec temporal embedding (learnable) added on top — Kazemi et al. (2019)
+    - Sinusoidal positional encoding (fixed) added on top — Vaswani et al. (2017)
     - N encoder blocks: multi-head self-attention + FFN + LayerNorm + residual
-    - Mean-pooled or last-step representation → prediction heads
+    - Sequence-to-sequence output (predict at every step, matching LSTM training paradigm)
 
 IMPORTANT constraints (from proposal — non-negotiable):
     - Time2Vec + sinusoidal ONLY. Do NOT add tAPE or eRPE.
-    - Encoder-only (no causal masking). The model sees full history at inference.
+    - CAUSAL MASKING required. Unlike the LSTM (causal by construction), the Transformer
+      sees the full sequence at once — causal masking ensures each position only attends
+      to past positions during training, preventing future data leakage.
     - Keep shallow (2-3 layers). This is NOT full BERT scale.
 
 Time2Vec (Kazemi et al. 2019):
@@ -82,28 +85,33 @@ class SinusoidalPositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class TransformerEncoder(nn.Module):
+class TransformerModel(nn.Module):
     """
-    Transformer encoder for customer transaction sequences.
+    Transformer model for customer transaction sequences (Extension 2).
 
-    Input features (F) are first projected to d_model. Then Time2Vec + sinusoidal PE
-    are added. N encoder layers process the sequence. The final representation is
-    the mean-pooled output across the sequence (ignoring padding via mask).
+    Matches the LSTM's input representation (categorical embeddings for week and
+    transaction count) to enable a fair architectural comparison.
+
+    Sequence-to-sequence: predicts at every time step, with causal masking so that
+    position t can only attend to positions 0..t (prevents future leakage).
 
     Args:
-        input_dim    : Number of input features per time step
+        max_week     : Max week index (52); embedding vocab = max_week + 1
+        max_trans    : Max clipped transaction count; embedding vocab = max_trans + 1
         d_model      : Transformer model dimension
-        n_heads      : Number of attention heads (d_model must be divisible by n_heads)
-        n_layers     : Number of encoder blocks
-        d_ff         : Feed-forward inner dimension (typically 4 × d_model)
+        n_heads      : Attention heads (d_model must be divisible by n_heads)
+        n_layers     : Encoder blocks (2-3; keep shallow)
+        d_ff         : Feed-forward inner dimension
         dropout      : Dropout probability
-        time2vec_dim : Dimension of Time2Vec embedding (added to input projection)
-        max_len      : Maximum sequence length for positional encoding
+        time2vec_dim : Time2Vec embedding dimension
+        max_len      : Max sequence length for sinusoidal PE
+        joint        : Enable spend regression head (Extension 1+2 combined)
     """
 
     def __init__(
         self,
-        input_dim: int,
+        max_week: int = 52,
+        max_trans: int = 6,
         d_model: int = 64,
         n_heads: int = 4,
         n_layers: int = 2,
@@ -111,58 +119,91 @@ class TransformerEncoder(nn.Module):
         dropout: float = 0.1,
         time2vec_dim: int = 8,
         max_len: int = 512,
+        joint: bool = False,
     ):
         super().__init__()
-        self.input_proj = nn.Linear(input_dim, d_model)
+        self.joint = joint
+        self.max_trans = max_trans
+        n_classes = max_trans + 1
+
+        # Same categorical embedding inputs as the LSTM
+        from src.models.lstm import embedding_size
+        week_emb_dim = embedding_size(max_week)
+        trans_emb_dim = embedding_size(max_trans)
+        self.embed_week = nn.Embedding(max_week + 1, week_emb_dim)
+        self.embed_trans = nn.Embedding(max_trans + 1, trans_emb_dim)
+
+        emb_dim = week_emb_dim + trans_emb_dim  # combined embedding dimension
+
+        # Project combined embedding to d_model
+        self.input_proj = nn.Linear(emb_dim, d_model)
+
+        # Time2Vec + sinusoidal PE
         self.time2vec = Time2Vec(time2vec_dim)
         self.time_proj = nn.Linear(time2vec_dim, d_model)
         self.pos_enc = SinusoidalPositionalEncoding(d_model, max_len, dropout)
 
+        # Transformer encoder with causal masking applied in forward()
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
             dim_feedforward=d_ff,
             dropout=dropout,
             batch_first=True,
-            norm_first=True,  # Pre-LN (more stable than post-LN)
+            norm_first=True,  # Pre-LN (more stable)
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
-        self.hidden_size = d_model
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None,
-                time_steps: torch.Tensor = None) -> torch.Tensor:
+        # Prediction heads (applied at every time step)
+        self.freq_head = nn.Linear(d_model, n_classes)
+        if joint:
+            self.spend_head = nn.Linear(d_model, 1)
+
+    def forward(
+        self,
+        week: torch.Tensor,   # (B, T) integer week indices
+        trans: torch.Tensor,  # (B, T) integer transaction counts
+        padding_mask: torch.Tensor = None,  # (B, T): 1=real, 0=padding
+    ):
         """
-        Args:
-            x         : (B, T, F) — input sequences
-            mask      : (B, T)    — 1=real, 0=padding
-            time_steps: (B, T)    — week numbers for Time2Vec (float)
+        Sequence-to-sequence with causal attention mask.
+
         Returns:
-            h: (B, d_model) — pooled sequence representation
+            freq_logits : (B, T, n_classes)
+            log_spend   : (B, T) — only if joint=True
         """
-        # Project input features to d_model
+        B, T = week.shape
+
+        # Embed and concatenate
+        e_week = self.embed_week(week.clamp(0, self.embed_week.num_embeddings - 1))   # (B, T, we)
+        e_trans = self.embed_trans(trans.clamp(0, self.max_trans))                     # (B, T, te)
+        x = torch.cat([e_week, e_trans], dim=-1)  # (B, T, emb_dim)
+
+        # Project to d_model
         h = self.input_proj(x)  # (B, T, d_model)
 
-        # Add Time2Vec temporal embeddings if time steps provided
-        if time_steps is not None:
-            t2v = self.time_proj(self.time2vec(time_steps.float()))  # (B, T, d_model)
-            h = h + t2v
+        # Add Time2Vec using week as time signal
+        t2v = self.time_proj(self.time2vec(week.float()))  # (B, T, d_model)
+        h = h + t2v
 
         # Add sinusoidal positional encoding
-        h = self.pos_enc(h)  # (B, T, d_model)
+        h = self.pos_enc(h)
 
-        # Build key padding mask (True = ignore/padding) for PyTorch TransformerEncoder
+        # Causal mask: position i cannot attend to positions j > i
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(T, device=week.device)
+
+        # Padding mask: True where padding (PyTorch convention)
         src_key_padding_mask = None
-        if mask is not None:
-            src_key_padding_mask = (mask == 0)  # (B, T) — True where padding
+        if padding_mask is not None:
+            src_key_padding_mask = (padding_mask == 0)  # (B, T)
 
-        # Transformer encoder layers
-        h = self.transformer(h, src_key_padding_mask=src_key_padding_mask)  # (B, T, d_model)
+        h = self.transformer(h, mask=causal_mask,
+                             src_key_padding_mask=src_key_padding_mask)  # (B, T, d_model)
 
-        # Mean-pool over real (non-padding) time steps
-        if mask is not None:
-            mask_f = mask.unsqueeze(-1).float()  # (B, T, 1)
-            h = (h * mask_f).sum(dim=1) / mask_f.sum(dim=1).clamp(min=1)
-        else:
-            h = h.mean(dim=1)  # (B, d_model)
+        freq_logits = self.freq_head(h)  # (B, T, n_classes)
 
-        return h
+        if self.joint:
+            log_spend = self.spend_head(h).squeeze(-1)  # (B, T)
+            return freq_logits, log_spend
+
+        return freq_logits

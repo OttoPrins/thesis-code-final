@@ -1,4 +1,5 @@
-# Stage 1 — Replication: Base LSTM on CDNOW (frequency only, matches Valendin et al. 2022)
+# Stage 3 — Extension 2: Transformer encoder on CDNOW (Time2Vec + sinusoidal PE)
+# NOTE: Time2Vec + sinusoidal only. No tAPE, no eRPE. (proposal constraint)
 dataset:
   name: cdnow
   raw_dir: data/raw/cdnow
@@ -10,12 +11,15 @@ dataset:
   freq_bins: [0, 1, 2, 3]
 
 model:
-  type: lstm
-  input_dim: 2          # [weekly_freq, log_spend] — spend not predicted but kept as feature
-  hidden_size: 128
-  num_layers: 2
-  dropout: 0.2
-  joint: false          # frequency only (Stage 1 replication)
+  type: transformer
+  input_dim: 2
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
+  joint: true
 
 training:
   epochs: 100
@@ -26,9 +30,10 @@ training:
   seed: 42
 
 loss:
-  type: cross_entropy   # frequency only
+  type: kendall
+  n_tasks: 2
 
 output:
-  run_name: lstm_base_cdnow_v1
+  run_name: transformer_joint_cdnow_v1
   results_dir: results
   save_checkpoint: true

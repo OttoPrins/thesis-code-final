@@ -61,15 +61,19 @@ def autoregressive_inference_lstm(
             customer_ids:    (N,) np.ndarray int64
             pred_freq:       (N, H) np.ndarray float32 — per-week predicted freq
             pred_total_freq: (N,) np.ndarray float32 — total predicted freq
+            pred_spend:      (N, H) np.ndarray float32 — per-week predicted log-spend (joint only)
+            pred_total_spend:(N,) np.ndarray float32 — total predicted log-spend (joint only)
     """
     if device is None:
         device = next(model.parameters()).device
 
     model.eval()
     H = holdout_weeks
+    joint = model.joint
 
     all_customer_ids = []
     all_pred_freq = []
+    all_pred_spend = [] if joint else None
 
     for batch in inference_loader:
         seed_week = batch["seed_week"].to(device)    # (B, T)
@@ -78,11 +82,15 @@ def autoregressive_inference_lstm(
         B = seed_week.size(0)
 
         # Accumulate scenario predictions before averaging
-        scenario_preds = np.zeros((B, H), dtype=np.float64)
+        scenario_freq = np.zeros((B, H), dtype=np.float64)
+        scenario_spend = np.zeros((B, H), dtype=np.float64) if joint else None
 
         for _ in range(n_scenarios):
             # Step 1: Warm up hidden state with full calibration seed
-            freq_logits, hidden = model(seed_week, seed_trans)
+            if joint:
+                freq_logits, log_spend, hidden = model(seed_week, seed_trans)
+            else:
+                freq_logits, hidden = model(seed_week, seed_trans)
             # freq_logits: (B, T, n_classes)  hidden: (h, c)
 
             # Step 2: Sample first holdout prediction from last calibration output
@@ -93,6 +101,10 @@ def autoregressive_inference_lstm(
             preds = np.zeros((B, H), dtype=np.float32)
             preds[:, 0] = prev_trans.cpu().numpy()
 
+            spend_preds = np.zeros((B, H), dtype=np.float32) if joint else None
+            if joint:
+                spend_preds[:, 0] = log_spend[:, -1].cpu().numpy()
+
             # Step 3: Autoregressively generate remaining holdout weeks
             for h in range(1, H):
                 # Week index: calibration_weeks + h (clamped inside model embedding)
@@ -102,28 +114,47 @@ def autoregressive_inference_lstm(
                 )
                 trans_input = prev_trans.unsqueeze(1)  # (B, 1)
 
-                freq_logits_step, hidden = model(week_input, trans_input, hidden)
+                if joint:
+                    freq_logits_step, log_spend_step, hidden = model(
+                        week_input, trans_input, hidden
+                    )
+                    spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
+                else:
+                    freq_logits_step, hidden = model(week_input, trans_input, hidden)
                 # freq_logits_step: (B, 1, n_classes)
 
                 step_probs = torch.softmax(freq_logits_step[:, 0, :], dim=-1)
                 prev_trans = torch.multinomial(step_probs, 1).squeeze(-1)
                 preds[:, h] = prev_trans.cpu().numpy()
 
-            scenario_preds += preds
+            scenario_freq += preds
+            if joint:
+                scenario_spend += spend_preds
 
         # Average across scenarios
-        avg_preds = (scenario_preds / n_scenarios).astype(np.float32)
+        avg_freq = (scenario_freq / n_scenarios).astype(np.float32)
         all_customer_ids.append(customer_ids)
-        all_pred_freq.append(avg_preds)
+        all_pred_freq.append(avg_freq)
+
+        if joint:
+            avg_spend = (scenario_spend / n_scenarios).astype(np.float32)
+            all_pred_spend.append(avg_spend)
 
     all_customer_ids = np.concatenate(all_customer_ids)
     all_pred_freq = np.concatenate(all_pred_freq, axis=0)
 
-    return {
+    result = {
         "customer_ids": all_customer_ids,
         "pred_freq": all_pred_freq,
         "pred_total_freq": all_pred_freq.sum(axis=1),
     }
+
+    if joint:
+        all_pred_spend = np.concatenate(all_pred_spend, axis=0)
+        result["pred_spend"] = all_pred_spend
+        result["pred_total_spend"] = all_pred_spend.sum(axis=1)
+
+    return result
 
 
 @torch.no_grad()
@@ -160,15 +191,19 @@ def autoregressive_inference_transformer(
             customer_ids:    (N,) np.ndarray int64
             pred_freq:       (N, H) np.ndarray float32 — per-week predicted freq
             pred_total_freq: (N,) np.ndarray float32 — total predicted freq
+            pred_spend:      (N, H) np.ndarray float32 — per-week predicted log-spend (joint only)
+            pred_total_spend:(N,) np.ndarray float32 — total predicted log-spend (joint only)
     """
     if device is None:
         device = next(model.parameters()).device
 
     model.eval()
     H = holdout_weeks
+    joint = model.joint
 
     all_customer_ids = []
     all_pred_freq = []
+    all_pred_spend = [] if joint else None
 
     for batch in inference_loader:
         seed_week = batch["seed_week"].to(device)    # (B, T_calib)
@@ -176,7 +211,8 @@ def autoregressive_inference_transformer(
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
-        scenario_preds = np.zeros((B, H), dtype=np.float64)
+        scenario_freq = np.zeros((B, H), dtype=np.float64)
+        scenario_spend = np.zeros((B, H), dtype=np.float64) if joint else None
 
         for _ in range(n_scenarios):
             # Growing context window: start with full calibration seed
@@ -184,12 +220,14 @@ def autoregressive_inference_transformer(
             ctx_trans = seed_trans.clone()  # (B, T_calib)
 
             preds = np.zeros((B, H), dtype=np.float32)
+            spend_preds = np.zeros((B, H), dtype=np.float32) if joint else None
 
             for h in range(H):
                 # Full forward pass over current context (causal mask applied inside model)
                 out = model(ctx_week, ctx_trans)
-                if isinstance(out, tuple):
-                    freq_logits = out[0]  # (B, T_ctx, n_classes)
+                if joint:
+                    freq_logits, log_spend = out
+                    spend_preds[:, h] = log_spend[:, -1].cpu().numpy()
                 else:
                     freq_logits = out
 
@@ -209,17 +247,30 @@ def autoregressive_inference_transformer(
                 ctx_week = torch.cat([ctx_week, next_week], dim=1)
                 ctx_trans = torch.cat([ctx_trans, next_trans], dim=1)
 
-            scenario_preds += preds
+            scenario_freq += preds
+            if joint:
+                scenario_spend += spend_preds
 
-        avg_preds = (scenario_preds / n_scenarios).astype(np.float32)
+        avg_freq = (scenario_freq / n_scenarios).astype(np.float32)
         all_customer_ids.append(customer_ids)
-        all_pred_freq.append(avg_preds)
+        all_pred_freq.append(avg_freq)
+
+        if joint:
+            avg_spend = (scenario_spend / n_scenarios).astype(np.float32)
+            all_pred_spend.append(avg_spend)
 
     all_customer_ids = np.concatenate(all_customer_ids)
     all_pred_freq = np.concatenate(all_pred_freq, axis=0)
 
-    return {
+    result = {
         "customer_ids": all_customer_ids,
         "pred_freq": all_pred_freq,
         "pred_total_freq": all_pred_freq.sum(axis=1),
     }
+
+    if joint:
+        all_pred_spend = np.concatenate(all_pred_spend, axis=0)
+        result["pred_spend"] = all_pred_spend
+        result["pred_total_spend"] = all_pred_spend.sum(axis=1)
+
+    return result

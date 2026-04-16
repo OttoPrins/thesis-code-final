@@ -42,12 +42,14 @@ class Trainer:
         device: torch.device,
         joint: bool = False,
         multi_task_loss: nn.Module = None,
+        max_grad_norm: float = 1.0,
     ):
         self.model = model
         self.optimizer = optimizer
         self.device = device
         self.joint = joint
         self.multi_task_loss = multi_task_loss
+        self.max_grad_norm = max_grad_norm
 
     def _forward(self, batch: dict):
         """
@@ -128,6 +130,8 @@ class Trainer:
             self.optimizer.zero_grad()
             loss, metrics = self._compute_loss(batch)
             loss.backward()
+            if self.max_grad_norm > 0:
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
             for k, v in metrics.items():

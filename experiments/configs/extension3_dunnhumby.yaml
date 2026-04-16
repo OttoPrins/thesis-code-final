@@ -3,7 +3,7 @@
 # Requires SHAP analysis after training (see src/evaluation/).
 dataset:
   name: dunnhumby
-  raw_dir: data/raw/dunnhumby
+  raw_dir: "data/raw/Dunnhumby datasets"
   calibration_weeks: 80
   holdout_weeks: 4
   lookback_weeks: 52

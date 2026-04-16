@@ -175,29 +175,41 @@ class DunnhumbyPipeline(BasePipeline):
         holdout_weeks: int,
         max_trans: int,
     ) -> dict:
-        """Build holdout ground truth arrays for evaluation."""
+        """Build holdout ground truth arrays for evaluation.
+
+        Stores both clipped freq (for per-step comparison) and unclipped
+        raw_freq (for aggregate metrics). total_freq uses unclipped counts
+        for fair comparison with probabilistic benchmarks.
+        """
         N = len(calibration_customer_ids)
         H = holdout_weeks
         freq = np.zeros((N, H), dtype=np.int32)
+        raw_freq = np.zeros((N, H), dtype=np.int32)
         spend = np.zeros((N, H), dtype=np.float32)
 
+        # Vectorized fill using advanced indexing
         cid_to_idx = {cid: i for i, cid in enumerate(calibration_customer_ids)}
 
-        for _, row in holdout_df.iterrows():
-            cid = row["customer_id"]
-            if cid not in cid_to_idx:
-                continue
-            idx = cid_to_idx[cid]
-            week_offset = int(row["week"]) - calib_weeks
-            if 0 <= week_offset < H:
-                freq[idx, week_offset] = min(int(row["weekly_freq"]), max_trans)
-                spend[idx, week_offset] = float(row["log_spend"])
+        df = holdout_df.copy()
+        df["_row"] = df["customer_id"].map(cid_to_idx)
+        df["_col"] = (df["week"].astype(int) - calib_weeks)
+        df = df.dropna(subset=["_row"])
+        df = df[(df["_col"] >= 0) & (df["_col"] < H)]
+
+        row_idx = df["_row"].values.astype(int)
+        col_idx = df["_col"].values.astype(int)
+        raw_vals = df["weekly_freq"].values.astype(np.int32)
+
+        raw_freq[row_idx, col_idx] = raw_vals
+        freq[row_idx, col_idx] = np.minimum(raw_vals, max_trans)
+        spend[row_idx, col_idx] = df["log_spend"].values.astype(np.float32)
 
         return {
             "customer_ids": calibration_customer_ids.copy(),
             "freq": freq,
+            "raw_freq": raw_freq,
             "spend": spend,
-            "total_freq": freq.sum(axis=1).astype(np.int32),
+            "total_freq": raw_freq.sum(axis=1).astype(np.int32),
             "total_spend": spend.sum(axis=1).astype(np.float32),
         }
 

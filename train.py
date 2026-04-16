@@ -154,6 +154,7 @@ def main():
         device=device,
         joint=joint,
         multi_task_loss=multi_task_loss,
+        max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
     )
     history = trainer.fit(
         train_loader=train_loader,
@@ -206,10 +207,17 @@ def main():
     pred_total_freq = results["pred_total_freq"]   # (N,)
     true_total_freq = holdout_gt["total_freq"].astype(np.float32)  # (N,)
 
+    # For spend evaluation (joint models): use log-space totals
+    spend_kwargs = {}
+    if joint and "pred_total_spend" in results:
+        spend_kwargs["y_spend_true_log"] = holdout_gt["total_spend"].astype(np.float32)
+        spend_kwargs["y_spend_pred_log"] = results["pred_total_spend"]
+
     metrics = compute_all_metrics(
         y_freq_true=true_total_freq,
         y_freq_pred=pred_total_freq,
         customer_ids=true_ids,
+        **spend_kwargs,
     )
 
     print("\n=== Holdout Evaluation ===")

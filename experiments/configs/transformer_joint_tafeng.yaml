@@ -3,7 +3,7 @@
 # due to longer-range dependencies in high-frequency grocery data.
 dataset:
   name: tafeng
-  raw_dir: data/raw/tafeng
+  raw_dir: data/raw
   calibration_weeks: 13   # ~3 months; dense data, shorter calibration sufficient
   holdout_weeks: 4
   lookback_weeks: 13

@@ -147,42 +147,38 @@ class SequenceBuilder:
         T = self.calibration_weeks
         spend_col = "log_spend" if "log_spend" in df.columns else "weekly_spend"
 
-        # Build dense grid: every customer gets a row for every week 0..T-1
-        customers = df["customer_id"].unique()
+        # Filter to valid weeks only
+        df_valid = df[(df["week"] >= 0) & (df["week"] < T)].copy()
 
         # Count active weeks per customer and filter
         active_counts = (
-            df[df["weekly_freq"] > 0]
+            df_valid[df_valid["weekly_freq"] > 0]
             .groupby("customer_id")["week"]
             .nunique()
         )
         valid_customers = active_counts[
             active_counts >= self.min_active_weeks
         ].index
-        customers = np.intersect1d(customers, valid_customers)
 
-        # Pre-allocate arrays
+        # Keep only valid customers and sort for deterministic ordering
+        customers = np.sort(np.intersect1d(df_valid["customer_id"].unique(), valid_customers))
         N = len(customers)
+
+        # Pre-allocate arrays (dense grid: every customer gets T weeks, default 0)
         full_weeks = np.tile(np.arange(T, dtype=np.int32), (N, 1))  # (N, T)
         full_trans = np.zeros((N, T), dtype=np.int32)
         full_spend = np.zeros((N, T), dtype=np.float32)
 
-        # Fill in actual transaction data per customer
-        # Index df by (customer_id, week) for fast lookup
-        indexed = df.set_index(["customer_id", "week"])
+        # Vectorized fill: map customer_id → row index, then use advanced indexing
+        cid_to_row = {cid: i for i, cid in enumerate(customers)}
+        df_fill = df_valid[df_valid["customer_id"].isin(customers)].copy()
+        row_idx = df_fill["customer_id"].map(cid_to_row).values.astype(int)
+        col_idx = df_fill["week"].values.astype(int)
 
-        for i, cid in enumerate(customers):
-            if cid not in indexed.index.get_level_values(0):
-                continue
-            cust_data = indexed.loc[cid]
-            if isinstance(cust_data, pd.Series):
-                # Single week — wrap into DataFrame
-                cust_data = cust_data.to_frame().T
-            for week_val, row in cust_data.iterrows():
-                if 0 <= week_val < T:
-                    freq = int(row["weekly_freq"])
-                    full_trans[i, week_val] = min(freq, self.max_trans)
-                    full_spend[i, week_val] = float(row[spend_col])
+        full_trans[row_idx, col_idx] = np.minimum(
+            df_fill["weekly_freq"].values.astype(np.int32), self.max_trans
+        )
+        full_spend[row_idx, col_idx] = df_fill[spend_col].values.astype(np.float32)
 
         # Teacher-forcing shift: input = [0..T-2], target = [1..T-1]
         week_input = full_weeks[:, :-1]       # (N, T-1)

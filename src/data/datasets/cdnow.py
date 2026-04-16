@@ -147,35 +147,46 @@ class CDNOWPipeline(BasePipeline):
 
         Returns dict with:
             customer_ids : (N,)     int64   — same order as calibration
-            freq         : (N, H)   int32   — weekly transaction count (clipped)
+            freq         : (N, H)   int32   — weekly transaction count (clipped at max_trans)
+            raw_freq     : (N, H)   int32   — weekly transaction count (unclipped)
             spend        : (N, H)   float32 — weekly log-spend
-            total_freq   : (N,)     int32   — total transactions in holdout
+            total_freq   : (N,)     int32   — total unclipped transactions in holdout
             total_spend  : (N,)     float32 — total log-spend in holdout
         where H = holdout_weeks.
+
+        Note: total_freq uses unclipped raw counts for fair comparison with
+        probabilistic benchmarks (which predict unclipped counts).
         """
         N = len(calibration_customer_ids)
         H = holdout_weeks
         freq = np.zeros((N, H), dtype=np.int32)
+        raw_freq = np.zeros((N, H), dtype=np.int32)
         spend = np.zeros((N, H), dtype=np.float32)
 
-        # Map customer_id to index
+        # Vectorized fill using advanced indexing
         cid_to_idx = {cid: i for i, cid in enumerate(calibration_customer_ids)}
 
-        for _, row in holdout_df.iterrows():
-            cid = row["customer_id"]
-            if cid not in cid_to_idx:
-                continue
-            idx = cid_to_idx[cid]
-            week_offset = int(row["week"]) - calib_weeks
-            if 0 <= week_offset < H:
-                freq[idx, week_offset] = min(int(row["weekly_freq"]), max_trans)
-                spend[idx, week_offset] = float(row["log_spend"])
+        # Filter to valid holdout rows
+        df = holdout_df.copy()
+        df["_row"] = df["customer_id"].map(cid_to_idx)
+        df["_col"] = (df["week"].astype(int) - calib_weeks)
+        df = df.dropna(subset=["_row"])
+        df = df[(df["_col"] >= 0) & (df["_col"] < H)]
+
+        row_idx = df["_row"].values.astype(int)
+        col_idx = df["_col"].values.astype(int)
+        raw_vals = df["weekly_freq"].values.astype(np.int32)
+
+        raw_freq[row_idx, col_idx] = raw_vals
+        freq[row_idx, col_idx] = np.minimum(raw_vals, max_trans)
+        spend[row_idx, col_idx] = df["log_spend"].values.astype(np.float32)
 
         return {
             "customer_ids": calibration_customer_ids.copy(),
             "freq": freq,
+            "raw_freq": raw_freq,
             "spend": spend,
-            "total_freq": freq.sum(axis=1).astype(np.int32),
+            "total_freq": raw_freq.sum(axis=1).astype(np.int32),
             "total_spend": spend.sum(axis=1).astype(np.float32),
         }
 

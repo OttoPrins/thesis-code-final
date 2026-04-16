@@ -1,21 +1,21 @@
 # Stage 2 — Extension 1: Joint LSTM on CDNOW (frequency + spend, Kendall loss)
 dataset:
   name: cdnow
-  raw_dir: data/raw/cdnow
+  raw_dir: data/raw
   calibration_weeks: 52
   holdout_weeks: 52
-  lookback_weeks: 52
   min_active_weeks: 5
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
 
 model:
   type: lstm
-  input_dim: 2
+  max_week: 52
+  max_trans: 3
   hidden_size: 128
-  num_layers: 2
+  num_layers: 1           # single LSTM layer (confirmed from Valendin et al. repo)
   dropout: 0.2
-  joint: true           # enables spend regression head
+  joint: true             # enables spend regression head
 
 training:
   epochs: 100

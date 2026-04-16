@@ -1,16 +1,18 @@
-# Stage 3 — Extension 2: Transformer on CDNOW (frequency + spend, Time2Vec + sinusoidal PE)
+# Stage 3 — Extension 2: Transformer on Dunnhumby (frequency + spend, Time2Vec + sinusoidal PE)
+# No covariates here — for covariate ablation see extension3_dunnhumby.yaml
 dataset:
-  name: cdnow
-  raw_dir: data/raw
-  calibration_weeks: 52
-  holdout_weeks: 52
+  name: dunnhumby
+  raw_dir: "data/raw/Dunnhumby datasets"
+  calibration_weeks: 78
+  holdout_weeks: 24
   min_active_weeks: 5
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
+  include_covariates: false
 
 model:
   type: transformer
-  max_week: 52
+  max_week: 78
   max_trans: 3
   d_model: 64
   n_heads: 4
@@ -33,6 +35,6 @@ loss:
   n_tasks: 2
 
 output:
-  run_name: transformer_joint_cdnow_v1
+  run_name: transformer_joint_dunnhumby_v1
   results_dir: results
   save_checkpoint: true

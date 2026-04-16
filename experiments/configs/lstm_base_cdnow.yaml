@@ -1,7 +1,7 @@
 # Stage 1 — Replication: Base LSTM on CDNOW (frequency only, matches Valendin et al. 2022)
 dataset:
   name: cdnow
-  raw_dir: data/raw/cdnow
+  raw_dir: data/raw
   calibration_weeks: 52
   holdout_weeks: 52
   lookback_weeks: 52
@@ -11,11 +11,12 @@ dataset:
 
 model:
   type: lstm
-  input_dim: 2          # [weekly_freq, log_spend] — spend not predicted but kept as feature
+  max_week: 52
+  max_trans: 3            # = freq_bins[-1]; gives 4 output classes {0,1,2,3+}
   hidden_size: 128
-  num_layers: 2
+  num_layers: 1           # single LSTM layer (confirmed from Valendin et al. repo)
   dropout: 0.2
-  joint: false          # frequency only (Stage 1 replication)
+  joint: false            # frequency only (Stage 1 replication)
 
 training:
   epochs: 100
@@ -26,7 +27,7 @@ training:
   seed: 42
 
 loss:
-  type: cross_entropy   # frequency only
+  type: cross_entropy     # frequency only
 
 output:
   run_name: lstm_base_cdnow_v1

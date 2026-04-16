@@ -1,0 +1,35 @@
+# Stage 1 — Replication: Base LSTM on Ta-Feng Grocery
+# Data: Taiwanese grocery, Nov 2000 – Feb 2001 (~17 weeks total)
+dataset:
+  name: tafeng
+  raw_dir: data/raw
+  calibration_weeks: 12   # ~3 months calibration
+  holdout_weeks: 5        # ~5 weeks holdout
+  min_active_weeks: 2     # short dataset; lower threshold
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+
+model:
+  type: lstm
+  max_week: 12
+  max_trans: 3
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.2
+  joint: false
+
+training:
+  epochs: 100
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 5
+  seed: 42
+
+loss:
+  type: cross_entropy
+
+output:
+  run_name: lstm_base_tafeng_v1
+  results_dir: results
+  save_checkpoint: true

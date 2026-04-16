@@ -1,0 +1,35 @@
+# Stage 2 — Extension 1: Joint LSTM on UCI Online Retail (frequency + spend, Kendall loss)
+dataset:
+  name: uci
+  raw_dir: data/raw
+  calibration_weeks: 39
+  holdout_weeks: 13
+  min_active_weeks: 3
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+
+model:
+  type: lstm
+  max_week: 39
+  max_trans: 3
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.2
+  joint: true
+
+training:
+  epochs: 100
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 5
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+
+output:
+  run_name: lstm_joint_uci_v1
+  results_dir: results
+  save_checkpoint: true

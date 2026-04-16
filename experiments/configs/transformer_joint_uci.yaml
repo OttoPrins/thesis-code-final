@@ -1,16 +1,16 @@
-# Stage 3 — Extension 2: Transformer on CDNOW (frequency + spend, Time2Vec + sinusoidal PE)
+# Stage 3 — Extension 2: Transformer on UCI Online Retail (frequency + spend, Time2Vec + sinusoidal PE)
 dataset:
-  name: cdnow
+  name: uci
   raw_dir: data/raw
-  calibration_weeks: 52
-  holdout_weeks: 52
-  min_active_weeks: 5
+  calibration_weeks: 39
+  holdout_weeks: 13
+  min_active_weeks: 3
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
 
 model:
   type: transformer
-  max_week: 52
+  max_week: 39
   max_trans: 3
   d_model: 64
   n_heads: 4
@@ -33,6 +33,6 @@ loss:
   n_tasks: 2
 
 output:
-  run_name: transformer_joint_cdnow_v1
+  run_name: transformer_joint_uci_v1
   results_dir: results
   save_checkpoint: true

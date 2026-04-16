@@ -22,9 +22,10 @@ covariates:
 
 model:
   type: lstm             # run both LSTM and Transformer; keep LSTM as primary
-  input_dim: 2
+  max_week: 80
+  max_trans: 3
   hidden_size: 128
-  num_layers: 2
+  num_layers: 1
   dropout: 0.2
   joint: true
   covariate_dim: 4       # 2 demographics + 2 campaign features

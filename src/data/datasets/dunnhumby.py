@@ -42,13 +42,25 @@ HOUSEHOLD_SIZE_ORDER = ["1", "2", "3", "4", "5+"]
 class DunnhumbyPipeline(BasePipeline):
 
     def run(self, config: dict):
-        raw_dir = config.get("raw_dir", "data/raw/dunnhumby")
-        calib_weeks = config["dataset"]["calibration_weeks"]
-        holdout_weeks = config["dataset"]["holdout_weeks"]
-        lookback = config["dataset"]["lookback_weeks"]
-        min_active = config["dataset"].get("min_active_weeks", 5)
-        val_fraction = config["dataset"].get("val_fraction", 0.1)
-        include_covariates = config["dataset"].get("include_covariates", False)
+        """
+        Full pipeline: raw Dunnhumby data → PyTorch datasets.
+
+        Returns:
+            train_ds:             CustomerDataset for training
+            val_ds:               CustomerDataset for validation (with seed for inference)
+            inference_ds:         CustomerDataset with all customers + seeds (for holdout inference)
+            holdout_ground_truth: dict mapping customer_id → (freq_array, spend_array) for holdout
+            scaler:               fitted SpendScaler
+        """
+        dataset_cfg = config["dataset"]
+        raw_dir = dataset_cfg.get("raw_dir", "data/raw/Dunnhumby datasets")
+        calib_weeks = dataset_cfg["calibration_weeks"]
+        holdout_weeks = dataset_cfg["holdout_weeks"]
+        min_active = dataset_cfg.get("min_active_weeks", 5)
+        val_fraction = dataset_cfg.get("val_fraction", 0.1)
+        freq_bins = dataset_cfg.get("freq_bins", [0, 1, 2, 3])
+        include_covariates = dataset_cfg.get("include_covariates", False)
+        seed = config.get("training", {}).get("seed", 42)
 
         df = self.load_raw(raw_dir)
         df = self.clean(df)
@@ -59,53 +71,87 @@ class DunnhumbyPipeline(BasePipeline):
 
         scaler = SpendScaler(scale=True)
         calib = calib.copy()
-        holdout = holdout.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
-        holdout["log_spend"] = scaler.transform(holdout["weekly_spend"].values)
 
-        builder = SequenceBuilder(lookback=lookback, min_active_weeks=min_active)
-        X, y_freq, y_spend, cids, mask = builder.build(calib)
+        builder = SequenceBuilder(
+            calibration_weeks=calib_weeks,
+            min_active_weeks=min_active,
+            freq_bins=freq_bins,
+        )
+        data = builder.build(calib)
 
+        # Build covariates if requested (Extension 3)
         covariates = None
         if include_covariates:
-            covariates = self.build_covariates(raw_dir, calib_weeks)
+            covariates = self.build_covariates(
+                raw_dir, data["customer_ids"], calib_weeks
+            )
 
-        n = len(X)
+        n = len(data["customer_ids"])
+        rng = np.random.RandomState(seed)
+        perm = rng.permutation(n)
         n_val = int(n * val_fraction)
-        idx = list(range(n))
+        val_idx = perm[:n_val]
+        train_idx = perm[n_val:]
 
-        train_ds = CustomerDataset(X[idx[:-n_val]], y_freq[idx[:-n_val]],
-                                   y_spend[idx[:-n_val]], cids[idx[:-n_val]],
-                                   mask[idx[:-n_val]], covariates)
-        val_ds = CustomerDataset(X[idx[-n_val:]], y_freq[idx[-n_val:]],
-                                 y_spend[idx[-n_val:]], cids[idx[-n_val:]],
-                                 mask[idx[-n_val:]], covariates)
+        train_data = _subset_data(data, train_idx)
+        val_data = _subset_data(data, val_idx)
 
-        X_h, y_freq_h, y_spend_h, cids_h, mask_h = builder.build(holdout)
-        test_ds = CustomerDataset(X_h, y_freq_h, y_spend_h, cids_h, mask_h, covariates)
+        # Add covariates if they exist
+        if covariates is not None:
+            train_data["covariates"] = covariates[train_idx]
+            val_data["covariates"] = covariates[val_idx]
+            data["covariates"] = covariates
 
-        return train_ds, val_ds, test_ds
+        train_ds = CustomerDataset(train_data, include_seed=False)
+        val_ds = CustomerDataset(val_data, include_seed=True)
+        inference_ds = CustomerDataset(data, include_seed=True)
+
+        holdout = holdout.copy()
+        holdout["log_spend"] = scaler.transform(holdout["weekly_spend"].values)
+        holdout_ground_truth = self._build_holdout_ground_truth(
+            holdout, data["customer_ids"], calib_weeks, holdout_weeks,
+            max_trans=builder.max_trans,
+        )
+
+        return train_ds, val_ds, inference_ds, holdout_ground_truth, scaler
 
     def load_raw(self, raw_dir: str) -> pd.DataFrame:
-        path = os.path.join(raw_dir, "transaction_data.csv")
-        if not os.path.exists(path):
+        """Load Dunnhumby transaction data from CSV."""
+        candidates = [
+            "transaction_data.csv",
+            "transactions.csv",
+        ]
+        path = None
+        for name in candidates:
+            candidate = os.path.join(raw_dir, name)
+            if os.path.exists(candidate):
+                path = candidate
+                break
+
+        if path is None:
             raise FileNotFoundError(
-                f"Dunnhumby transaction_data.csv not found at {path}. "
-                "Download from: https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey"
+                f"Dunnhumby transaction_data.csv not found in {raw_dir}. "
+                f"Tried: {candidates}. "
+                f"Download from: https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey"
             )
         return pd.read_csv(path)
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df = df.dropna(subset=["household_id", "sales_value"])
-        df = df[df["sales_value"] > 0]
-        # Dunnhumby uses 'day' (integer day number); convert to pseudo-date
-        df["date"] = pd.to_datetime("2000-01-01") + pd.to_timedelta(df["day"], unit="D")
-        df["customer_id"] = df["household_id"].astype(int)
-        df["transaction_amount"] = df["sales_value"].astype(float)
+        # Actual column is 'household_key', not 'household_id'
+        df = df.dropna(subset=["household_key", "SALES_VALUE"])
+        df = df[df["SALES_VALUE"] > 0]
+        # Dunnhumby uses 'DAY' (integer day number); convert to pseudo-date
+        df["date"] = pd.to_datetime("2000-01-01") + pd.to_timedelta(df["DAY"], unit="D")
+        df["customer_id"] = df["household_key"].astype(int)
+        df["transaction_amount"] = df["SALES_VALUE"].astype(float)
         return df[["customer_id", "date", "transaction_amount"]]
 
-    def build_covariates(self, raw_dir: str, calibration_weeks: int) -> np.ndarray:
+    def build_covariates(
+        self, raw_dir: str, calibration_customer_ids: np.ndarray,
+        calibration_weeks: int
+    ) -> np.ndarray:
         """
         Build static covariate matrix for Extension 3.
 
@@ -114,17 +160,51 @@ class DunnhumbyPipeline(BasePipeline):
                      coupon_redemptions_total_in_calib,
                      campaign_exposure_count_in_calib]
         """
-        # Load demographic data
-        demo_path = os.path.join(raw_dir, "hh_demographic.csv")
-        demo = pd.read_csv(demo_path) if os.path.exists(demo_path) else None
-
-        # Load coupon redemptions
-        coupon_path = os.path.join(raw_dir, "coupon_redempt.csv")
-        coupons = pd.read_csv(coupon_path) if os.path.exists(coupon_path) else None
-
         # TODO: Encode demographics (ordinal) + aggregate coupon redemptions per customer
         # over calibration period only. Return numpy array.
         raise NotImplementedError(
             "Implement DunnhumbyPipeline.build_covariates() for Extension 3. "
             "See CLAUDE.md Section 5 for covariate spec."
         )
+
+    @staticmethod
+    def _build_holdout_ground_truth(
+        holdout_df: pd.DataFrame,
+        calibration_customer_ids: np.ndarray,
+        calib_weeks: int,
+        holdout_weeks: int,
+        max_trans: int,
+    ) -> dict:
+        """Build holdout ground truth arrays for evaluation."""
+        N = len(calibration_customer_ids)
+        H = holdout_weeks
+        freq = np.zeros((N, H), dtype=np.int32)
+        spend = np.zeros((N, H), dtype=np.float32)
+
+        cid_to_idx = {cid: i for i, cid in enumerate(calibration_customer_ids)}
+
+        for _, row in holdout_df.iterrows():
+            cid = row["customer_id"]
+            if cid not in cid_to_idx:
+                continue
+            idx = cid_to_idx[cid]
+            week_offset = int(row["week"]) - calib_weeks
+            if 0 <= week_offset < H:
+                freq[idx, week_offset] = min(int(row["weekly_freq"]), max_trans)
+                spend[idx, week_offset] = float(row["log_spend"])
+
+        return {
+            "customer_ids": calibration_customer_ids.copy(),
+            "freq": freq,
+            "spend": spend,
+            "total_freq": freq.sum(axis=1).astype(np.int32),
+            "total_spend": spend.sum(axis=1).astype(np.float32),
+        }
+
+
+def _subset_data(data: dict, indices: np.ndarray) -> dict:
+    """Subset a SequenceBuilder output dict by row indices."""
+    return {
+        k: v[indices] if isinstance(v, np.ndarray) else v
+        for k, v in data.items()
+    }

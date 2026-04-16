@@ -1,0 +1,37 @@
+# Stage 2 — Extension 1: Joint LSTM on Dunnhumby (frequency + spend, Kendall loss)
+# No covariates here — for covariate ablation see extension3_dunnhumby.yaml
+dataset:
+  name: dunnhumby
+  raw_dir: "data/raw/Dunnhumby datasets"
+  calibration_weeks: 78
+  holdout_weeks: 24
+  min_active_weeks: 5
+  val_fraction: 0.1
+  freq_bins: [0, 1, 2, 3]
+  include_covariates: false
+
+model:
+  type: lstm
+  max_week: 78
+  max_trans: 3
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.2
+  joint: true
+
+training:
+  epochs: 100
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 5
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+
+output:
+  run_name: lstm_joint_dunnhumby_v1
+  results_dir: results
+  save_checkpoint: true

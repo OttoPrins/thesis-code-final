@@ -22,13 +22,19 @@ class BasePipeline(ABC):
 
     def run(self, config: dict) -> Tuple:
         """
-        Full pipeline: raw data → PyTorch datasets (train, val, test).
+        Full pipeline: raw data → PyTorch datasets + holdout ground truth.
 
         Args:
             config: Loaded YAML config dict (see experiments/configs/).
 
         Returns:
-            (train_dataset, val_dataset, test_dataset)
+            (train_ds, val_ds, inference_ds, holdout_ground_truth, scaler)
+
+            train_ds:             CustomerDataset for training (no seed sequences)
+            val_ds:               CustomerDataset for validation (with seed for inference)
+            inference_ds:         CustomerDataset with all customers + seeds (for holdout eval)
+            holdout_ground_truth: dict with customer_ids, freq, spend arrays for holdout period
+            scaler:               fitted SpendScaler (for inverse-transforming predictions)
         """
         raise NotImplementedError
 

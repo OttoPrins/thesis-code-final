@@ -9,3 +9,6 @@ scipy>=1.10.0
 pyyaml>=6.0
 tqdm>=4.65.0
 wandb>=0.15.0
+lifetimes>=0.11.3      # Pareto/NBD, BG/NBD, Gamma-Gamma benchmarks
+pymc>=5.0.0            # Pareto/GGG, GPPM benchmarks
+shap>=0.42.0           # Extension 3 covariate ablation

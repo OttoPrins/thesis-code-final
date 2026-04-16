@@ -104,34 +104,108 @@ class SpendScaler:
 
 class SequenceBuilder:
     """
-    Builds (X, y_freq, y_spend, customer_id) sliding-window tensors.
+    Builds full-history, teacher-forced sequences for seq-to-seq training.
 
-    For each customer, slides a window of length T over their weekly history.
-    Label is the week AFTER the window (next-step prediction).
+    Matches Valendin et al. (2022) reference implementation:
+    - One sequence per customer covering the entire calibration period.
+    - Dense weekly grid: inactive weeks filled with (freq=0, spend=0.0).
+    - Teacher-forcing shift: input = steps 0..T-2, target = steps 1..T-1.
+    - Full unshifted sequence stored as "seed" for autoregressive inference.
 
     Input: calibration DataFrame with columns [customer_id, week, weekly_freq, weekly_spend]
-           (spend already log-transformed by SpendScaler)
-    Output: numpy arrays ready for CustomerDataset.
+           (weekly_spend already log-transformed by SpendScaler as 'log_spend')
+    Output: dict of numpy arrays ready for CustomerDataset.
     """
 
-    def __init__(self, lookback: int = 52, min_active_weeks: int = 5,
+    def __init__(self, calibration_weeks: int = 52, min_active_weeks: int = 5,
                  freq_bins: list = None):
-        self.lookback = lookback
+        self.calibration_weeks = calibration_weeks
         self.min_active_weeks = min_active_weeks
         self.freq_bins = freq_bins or [0, 1, 2, 3]
+        self.max_trans = self.freq_bins[-1]  # e.g. 3 for [0,1,2,3]
 
-    def build(self, df: pd.DataFrame):
+    def build(self, df: pd.DataFrame) -> dict:
         """
-        Returns:
-            X           : (N, T, 2) — [weekly_freq_norm, log_spend] per week
-            y_freq      : (N,)       — next-period frequency class {0,1,2,3}
-            y_spend     : (N,)       — next-period log-spend
-            customer_ids: (N,)       — customer_id for each window
-            mask        : (N, T)     — 1=real data, 0=padding
+        Build training sequences from aggregated calibration data.
+
+        Args:
+            df: DataFrame with columns [customer_id, week, weekly_freq, log_spend]
+
+        Returns dict with keys:
+            week_input   : (N, T-1) int32   — week indices for input steps
+            trans_input  : (N, T-1) int32   — transaction counts (teacher forcing)
+            spend_input  : (N, T-1) float32 — log-spend at each input step
+            y_freq       : (N, T-1) int32   — target freq class, shifted +1
+            y_spend      : (N, T-1) float32 — target log-spend, shifted +1
+            customer_ids : (N,)     int64   — customer identifiers
+            mask         : (N, T-1) float32 — 1=real, 0=padding
+            seed_week    : (N, T)   int32   — full calibration weeks (inference)
+            seed_trans   : (N, T)   int32   — full calibration trans (inference)
+            seed_spend   : (N, T)   float32 — full calibration spend (inference)
+            max_trans    : int              — clipping value used
         """
-        # TODO: implement sliding window construction
-        # Hint: for each customer, create a dense week grid (0..max_week),
-        # fill missing weeks with (freq=0, spend=0), then slide window.
-        raise NotImplementedError(
-            "Implement SequenceBuilder.build() — see CLAUDE.md Section 6 for spec."
+        T = self.calibration_weeks
+        spend_col = "log_spend" if "log_spend" in df.columns else "weekly_spend"
+
+        # Build dense grid: every customer gets a row for every week 0..T-1
+        customers = df["customer_id"].unique()
+
+        # Count active weeks per customer and filter
+        active_counts = (
+            df[df["weekly_freq"] > 0]
+            .groupby("customer_id")["week"]
+            .nunique()
         )
+        valid_customers = active_counts[
+            active_counts >= self.min_active_weeks
+        ].index
+        customers = np.intersect1d(customers, valid_customers)
+
+        # Pre-allocate arrays
+        N = len(customers)
+        full_weeks = np.tile(np.arange(T, dtype=np.int32), (N, 1))  # (N, T)
+        full_trans = np.zeros((N, T), dtype=np.int32)
+        full_spend = np.zeros((N, T), dtype=np.float32)
+
+        # Fill in actual transaction data per customer
+        # Index df by (customer_id, week) for fast lookup
+        indexed = df.set_index(["customer_id", "week"])
+
+        for i, cid in enumerate(customers):
+            if cid not in indexed.index.get_level_values(0):
+                continue
+            cust_data = indexed.loc[cid]
+            if isinstance(cust_data, pd.Series):
+                # Single week — wrap into DataFrame
+                cust_data = cust_data.to_frame().T
+            for week_val, row in cust_data.iterrows():
+                if 0 <= week_val < T:
+                    freq = int(row["weekly_freq"])
+                    full_trans[i, week_val] = min(freq, self.max_trans)
+                    full_spend[i, week_val] = float(row[spend_col])
+
+        # Teacher-forcing shift: input = [0..T-2], target = [1..T-1]
+        week_input = full_weeks[:, :-1]       # (N, T-1)
+        trans_input = full_trans[:, :-1]       # (N, T-1)
+        spend_input = full_spend[:, :-1]       # (N, T-1)
+        y_freq = full_trans[:, 1:]             # (N, T-1)
+        y_spend = full_spend[:, 1:]            # (N, T-1)
+
+        # Mask: all ones for fixed calibration period (every week is a valid observation)
+        mask = np.ones((N, T - 1), dtype=np.float32)
+
+        customer_ids = np.array(customers, dtype=np.int64)
+
+        return {
+            "week_input": week_input,
+            "trans_input": trans_input,
+            "spend_input": spend_input,
+            "y_freq": y_freq,
+            "y_spend": y_spend,
+            "customer_ids": customer_ids,
+            "mask": mask,
+            "seed_week": full_weeks,
+            "seed_trans": full_trans,
+            "seed_spend": full_spend,
+            "max_trans": self.max_trans,
+        }

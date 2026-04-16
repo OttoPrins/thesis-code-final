@@ -13,7 +13,8 @@ dataset:
 
 model:
   type: transformer
-  input_dim: 2
+  max_week: 12
+  max_trans: 3
   d_model: 64
   n_heads: 4
   n_layers: 2

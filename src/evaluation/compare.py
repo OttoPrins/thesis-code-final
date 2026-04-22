@@ -1,34 +1,70 @@
 """
-Build comparison tables from all benchmark and DL model results.
+Build comparison tables and visual analytics from all benchmark and DL model results.
 
-Aggregates metrics JSONs into a CSV for thesis reporting.
+Functions:
+    build_comparison_table      — read *_metrics.json files for one dataset → DataFrame + CSV
+    build_all_comparison_tables — run build_comparison_table for all datasets
+    aggregate_all_results       — scan results/ for all *_metrics.json → combined DataFrame
+    export_latex_table          — export DataFrame as publication-ready LaTeX table
+    plot_model_comparison_bars  — grouped bar chart of primary metrics across models/datasets
+    plot_kendall_weight_evolution— line plot of Kendall task weights across training epochs
+
+CLI (python -m src.evaluation.compare):
+    --latex   exports comparison_all.tex to results/tables/
+    --plots   generates bar chart and weight-evolution plots to experiments/insights/
 """
 
+from __future__ import annotations
+
+import argparse
 import json
 import logging
 from pathlib import Path
-from glob import glob
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 logger = logging.getLogger(__name__)
+
+# Canonical model order for table rows
+_MODEL_ORDER = [
+    "pareto_nbd",
+    "bgnbd_gg",
+    "pareto_ggg",
+    "gppm",
+    "lstm_base",
+    "lstm_joint",
+    "transformer_joint",
+    "extension3_lstm",
+    "extension3_transformer",
+]
+
+_PRIMARY_METRICS = ["freq_mape", "bias_pct", "spend_mae_raw"]
+
+
+def _sort_key(model_name: str) -> int:
+    try:
+        return _MODEL_ORDER.index(model_name)
+    except ValueError:
+        return len(_MODEL_ORDER)
 
 
 def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
     """
-    Read all *_{dataset}_metrics.json files and assemble a comparison DataFrame.
-
-    Saves to results/tables/comparison_{dataset}.csv
+    Read all *_{dataset}*_metrics.json files and assemble a comparison DataFrame.
+    Saves to results/tables/comparison_{dataset}.csv.
 
     Args:
         results_dir: Path to results directory (typically "results/")
-        dataset: Dataset name (e.g., "cdnow", "uci", "tafeng", "dunnhumby")
+        dataset:     Dataset name (e.g., "cdnow", "uci", "tafeng", "dunnhumby")
 
     Returns:
         DataFrame with columns:
             model, dataset, freq_rmse, freq_mae, freq_mape, bias_pct,
-            spend_mae, spend_rmse, spend_r2
+            spend_mae, spend_rmse, spend_r2, spend_mae_raw, spend_rmse_raw
     """
     results_dir = Path(results_dir)
     tables_dir = results_dir / "tables"
@@ -37,14 +73,9 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
         logger.warning(f"Results directory {tables_dir} does not exist")
         return pd.DataFrame()
 
-    # Find all metrics files for this dataset.
-    # Benchmark files: "{model}_{dataset}_metrics.json"   e.g. pareto_nbd_cdnow_metrics.json
-    # DL model files:  "{run_name}_metrics.json"          e.g. lstm_base_cdnow_v1_metrics.json
-    # Both contain the dataset name, so we match on that.
+    import glob as _glob
     pattern = str(tables_dir / f"*{dataset}*metrics.json")
-    metrics_files = sorted(glob(pattern))
-
-    # Exclude the comparison CSV itself if it ended up with a .json extension (shouldn't happen)
+    metrics_files = sorted(_glob.glob(pattern))
     metrics_files = [f for f in metrics_files if not Path(f).name.startswith("comparison_")]
 
     if not metrics_files:
@@ -58,95 +89,283 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
         with open(metrics_file) as f:
             metrics = json.load(f)
 
-        # Parse model name from filename.
-        # Strategy: strip trailing "_metrics" suffix, then remove the dataset portion
-        # to recover the model identifier.
-        # e.g. "pareto_nbd_cdnow_metrics"     → strip "_metrics" → "pareto_nbd_cdnow"
-        #                                      → remove trailing "_{dataset}" → "pareto_nbd"
-        # e.g. "lstm_base_cdnow_v1_metrics"   → strip "_metrics" → "lstm_base_cdnow_v1"
-        #                                      → remove first occurrence of "_{dataset}_" → "lstm_base_v1"
-        # Use "model" key from JSON if available (benchmark runner writes it; DL runner does not).
         if "model" in metrics:
             model_name = metrics["model"]
         else:
-            stem = Path(metrics_file).stem  # e.g. "lstm_base_cdnow_v1_metrics"
-            stem = stem.removesuffix("_metrics")  # e.g. "lstm_base_cdnow_v1"
-            # Remove the dataset portion; it can appear mid-name (DL) or at end (benchmark)
+            stem = Path(metrics_file).stem.removesuffix("_metrics")
             model_name = stem.replace(f"_{dataset}_", "_").rstrip(f"_{dataset}")
 
         row = {
             "model": model_name,
             "dataset": dataset,
-            "freq_rmse": metrics.get("freq_rmse", np.nan),
-            "freq_mae": metrics.get("freq_mae", np.nan),
-            "freq_mape": metrics.get("freq_mape", np.nan),
-            "bias_pct": metrics.get("bias_pct", np.nan),
-            "spend_mae": metrics.get("spend_mae", np.nan),
-            "spend_rmse": metrics.get("spend_rmse", np.nan),
-            "spend_r2": metrics.get("spend_r2", np.nan),
+            "freq_rmse":      metrics.get("freq_rmse", np.nan),
+            "freq_mae":       metrics.get("freq_mae", np.nan),
+            "freq_mape":      metrics.get("freq_mape", np.nan),
+            "bias_pct":       metrics.get("bias_pct", np.nan),
+            "spend_mae":      metrics.get("spend_mae", np.nan),
+            "spend_rmse":     metrics.get("spend_rmse", np.nan),
+            "spend_r2":       metrics.get("spend_r2", np.nan),
+            "spend_mae_raw":  metrics.get("spend_mae_raw", np.nan),
+            "spend_rmse_raw": metrics.get("spend_rmse_raw", np.nan),
         }
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df["_sort"] = df["model"].apply(_sort_key)
+    df = df.sort_values("_sort").drop("_sort", axis=1).reset_index(drop=True)
 
-    # Sort by model name (probabilistic benchmarks first, then DL models)
-    benchmark_models = [
-        "pareto_nbd",
-        "bgnbd_gg",
-        "pareto_ggg",
-        "gppm",
-        "lstm_base",
-        "lstm_joint",
-        "transformer_joint",
-    ]
-    # Create a sort key that respects the predefined order
-    def sort_key(model_name):
-        try:
-            return benchmark_models.index(model_name)
-        except ValueError:
-            # Unknown model; put at end
-            return len(benchmark_models)
-
-    df["sort_key"] = df["model"].apply(sort_key)
-    df = df.sort_values("sort_key").drop("sort_key", axis=1).reset_index(drop=True)
-
-    # Save to CSV
     output_path = tables_dir / f"comparison_{dataset}.csv"
     df.to_csv(output_path, index=False)
     logger.info(f"Saved comparison table: {output_path}")
-
     return df
 
 
-def build_all_comparison_tables(results_dir: str, datasets: list = None) -> dict:
-    """
-    Build comparison tables for all datasets (or specified subset).
-
-    Args:
-        results_dir: Path to results directory
-        datasets: List of dataset names (default: all standard datasets)
-
-    Returns:
-        Dict mapping dataset name to comparison DataFrame
-    """
+def build_all_comparison_tables(results_dir: str, datasets: Optional[List[str]] = None) -> Dict[str, pd.DataFrame]:
+    """Build comparison tables for all datasets (or specified subset)."""
     if datasets is None:
         datasets = ["cdnow", "uci", "tafeng", "dunnhumby"]
 
     tables = {}
     for dataset in datasets:
-        logger.info(f"Building comparison table for {dataset}...")
+        logger.info(f"Building comparison table for {dataset} ...")
         df = build_comparison_table(results_dir, dataset)
         if not df.empty:
             tables[dataset] = df
-
     return tables
 
 
-if __name__ == "__main__":
-    import sys
+def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
+    """
+    Scan results/tables/ for all *_metrics.json files and compile into one DataFrame.
+    Includes all metric columns (log-space and raw-currency).
 
-    if len(sys.argv) > 1:
-        dataset = sys.argv[1]
-        build_comparison_table("results/", dataset)
+    Returns:
+        DataFrame with columns: model, dataset, + all available metric columns
+    """
+    tables_dir = Path(results_dir) / "tables"
+    if not tables_dir.exists():
+        logger.warning(f"Results directory {tables_dir} does not exist")
+        return pd.DataFrame()
+
+    import glob as _glob
+    all_files = sorted(_glob.glob(str(tables_dir / "*_metrics.json")))
+    all_files = [f for f in all_files if not Path(f).name.startswith("comparison_")]
+
+    if not all_files:
+        logger.warning(f"No *_metrics.json files found in {tables_dir}")
+        return pd.DataFrame()
+
+    rows = []
+    for fpath in all_files:
+        with open(fpath) as f:
+            metrics = json.load(f)
+
+        stem = Path(fpath).stem.removesuffix("_metrics")
+
+        # Infer dataset name from the run name (heuristic)
+        dataset = "unknown"
+        for ds in ("cdnow", "uci", "tafeng", "dunnhumby"):
+            if ds in stem:
+                dataset = ds
+                break
+
+        model_name = metrics.get("model", stem.replace(f"_{dataset}", "").strip("_"))
+
+        row = {"model": model_name, "dataset": dataset, **metrics}
+        row.pop("model", None)  # avoid duplicate after explicit assignment
+        row = {"model": model_name, "dataset": dataset}
+        row.update({k: v for k, v in metrics.items() if k != "model"})
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df["_sort"] = df["model"].apply(_sort_key)
+    df = df.sort_values(["dataset", "_sort"]).drop("_sort", axis=1).reset_index(drop=True)
+    return df
+
+
+def export_latex_table(
+    df: pd.DataFrame,
+    out_path: str = "results/tables/comparison_all.tex",
+    caption: str = "Model comparison across datasets",
+    label: str = "tab:model_comparison",
+) -> None:
+    """
+    Export DataFrame to a publication-ready booktabs LaTeX table.
+
+    Selects and renames key columns for thesis output. Saves the .tex file
+    directly (not a full document — use \\input{} to embed in thesis).
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cols_order = [
+        "model", "dataset",
+        "freq_rmse", "freq_mape", "bias_pct",
+        "spend_mae", "spend_mae_raw", "spend_r2",
+    ]
+    rename_map = {
+        "model": "Model",
+        "dataset": "Dataset",
+        "freq_rmse": "Freq RMSE",
+        "freq_mape": "Freq MAPE \\%",
+        "bias_pct": "Bias \\%",
+        "spend_mae": "Spend MAE (log)",
+        "spend_mae_raw": "Spend MAE (\\$)",
+        "spend_r2": "Spend $R^2$",
+    }
+
+    # Keep only available columns
+    available = [c for c in cols_order if c in df.columns]
+    sub = df[available].rename(columns=rename_map)
+
+    latex_str = sub.to_latex(
+        index=False,
+        float_format="%.3f",
+        na_rep="—",
+        escape=False,
+        caption=caption,
+        label=label,
+    )
+
+    # Upgrade to booktabs (pandas may not add booktabs rules by default in older versions)
+    latex_str = latex_str.replace("\\begin{tabular}", "\\begin{tabular}")
+    if "\\toprule" not in latex_str:
+        latex_str = latex_str.replace("\\hline\n", "\\toprule\n", 1)
+        latex_str = latex_str.replace("\n\\hline\n", "\n\\midrule\n", 1)
+        latex_str = latex_str.replace("\n\\hline\n", "\n\\bottomrule\n", 1)
+
+    out_path.write_text(latex_str)
+    print(f"LaTeX table saved: {out_path}")
+
+
+def plot_model_comparison_bars(
+    df: pd.DataFrame,
+    out_dir: str = "experiments/insights",
+    metrics: Optional[List[str]] = None,
+) -> None:
+    """
+    Grouped bar chart of primary metrics across models, coloured by dataset.
+    Saves one figure per metric to experiments/insights/.
+    """
+    if metrics is None:
+        metrics = _PRIMARY_METRICS
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    for metric in metrics:
+        if metric not in df.columns:
+            logger.warning(f"Metric {metric!r} not in DataFrame; skipping.")
+            continue
+
+        plot_df = df[["model", "dataset", metric]].dropna(subset=[metric])
+        if plot_df.empty:
+            continue
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        datasets = sorted(plot_df["dataset"].unique())
+        models = list(dict.fromkeys(  # preserve _MODEL_ORDER where possible
+            m for m in _MODEL_ORDER if m in plot_df["model"].values
+        ) | {m for m in plot_df["model"].unique() if m not in _MODEL_ORDER})
+
+        x = np.arange(len(models))
+        width = 0.8 / max(len(datasets), 1)
+        palette = sns.color_palette("tab10", n_colors=len(datasets))
+
+        for i, ds in enumerate(datasets):
+            vals = []
+            for m in models:
+                row = plot_df[(plot_df["model"] == m) & (plot_df["dataset"] == ds)]
+                vals.append(float(row[metric].values[0]) if not row.empty else float("nan"))
+            ax.bar(x + i * width - 0.4 + width / 2, vals, width, label=ds, color=palette[i])
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=30, ha="right")
+        ax.set_ylabel(metric)
+        ax.set_title(f"Model comparison — {metric}")
+        ax.legend(title="Dataset")
+        fig.tight_layout()
+
+        fig_path = out_path / f"comparison_{metric}.png"
+        fig.savefig(fig_path, dpi=300)
+        plt.close(fig)
+        print(f"  Saved: {fig_path}")
+
+
+def plot_kendall_weight_evolution(
+    history_files: Optional[List[str]] = None,
+    results_dir: str = "results/",
+    out_dir: str = "experiments/insights",
+) -> None:
+    """
+    Line plot of Kendall multi-task weight evolution across training epochs.
+    One line per joint model run found in results/tables/*_history.json.
+    """
+    import glob as _glob
+
+    if history_files is None:
+        tables_dir = Path(results_dir) / "tables"
+        history_files = sorted(_glob.glob(str(tables_dir / "*_history.json")))
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    for fpath in history_files:
+        with open(fpath) as f:
+            history = json.load(f)
+
+        if "task_weight_freq" not in history:
+            continue  # base model — no Kendall weights
+
+        run_name = Path(fpath).stem.removesuffix("_history")
+        epochs = list(range(1, len(history["task_weight_freq"]) + 1))
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history["task_weight_freq"], label="freq weight (1/2σ²_freq)",
+                linewidth=1.8, color="#4C72B0")
+        ax.plot(epochs, history["task_weight_spend"], label="spend weight (1/2σ²_spend)",
+                linewidth=1.8, color="#DD8452", linestyle="--")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Task weight")
+        ax.set_title(f"Kendall uncertainty weights — {run_name}")
+        ax.legend()
+        fig.tight_layout()
+
+        fig_path = out_path / f"kendall_weights_{run_name}.png"
+        fig.savefig(fig_path, dpi=300)
+        plt.close(fig)
+        print(f"  Saved: {fig_path}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Aggregate results and generate thesis figures.")
+    parser.add_argument("--results_dir", default="results/", help="Path to results directory")
+    parser.add_argument("--latex", action="store_true", help="Export LaTeX comparison table")
+    parser.add_argument("--plots", action="store_true", help="Generate comparison bar charts")
+    parser.add_argument("--weights", action="store_true",
+                        help="Generate Kendall weight evolution plots")
+    parser.add_argument("--all", action="store_true", help="Run all output types")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+
+    do_all = args.all
+    df = aggregate_all_results(args.results_dir)
+
+    if df.empty:
+        print("No results found. Run train.py experiments first.")
     else:
-        build_all_comparison_tables("results/")
+        print(f"Aggregated {len(df)} model results.")
+
+        if do_all or args.latex:
+            export_latex_table(df, out_path="results/tables/comparison_all.tex")
+
+        if do_all or args.plots:
+            plot_model_comparison_bars(df)
+
+        if do_all or args.weights:
+            plot_kendall_weight_evolution(results_dir=args.results_dir)
+
+        # Always save the aggregated CSV
+        df.to_csv("results/tables/comparison_all.csv", index=False)
+        print("Saved: results/tables/comparison_all.csv")

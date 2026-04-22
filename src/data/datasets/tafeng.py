@@ -123,6 +123,12 @@ class TaFengPipeline(BasePipeline):
         # Column is TRANSACTION_DT, not DATE
         df["date"] = pd.to_datetime(df["TRANSACTION_DT"], errors="coerce")
         df = df.dropna(subset=["date"])
+        # Aggregate to daily shopping trip so weekly_freq counts trips, not product lines
+        df = (
+            df.groupby(["customer_id", "date"])
+            .agg(transaction_amount=("transaction_amount", "sum"))
+            .reset_index()
+        )
         return df[["customer_id", "date", "transaction_amount"]]
 
     @staticmethod

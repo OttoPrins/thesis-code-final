@@ -49,6 +49,8 @@ def build_model(config: dict) -> torch.nn.Module:
     model_cfg = config["model"]
     joint = model_cfg.get("joint", False)
     model_type = model_cfg["type"]
+    covariate_dim = model_cfg.get("covariate_dim", None)
+    covariate_emb_dim = model_cfg.get("covariate_emb_dim", 8)
 
     if model_type == "lstm":
         return LSTMModel(
@@ -58,6 +60,8 @@ def build_model(config: dict) -> torch.nn.Module:
             dense_units=model_cfg["hidden_size"],
             dropout=model_cfg.get("dropout", 0.0),
             joint=joint,
+            covariate_dim=covariate_dim,
+            covariate_emb_dim=covariate_emb_dim,
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -70,6 +74,8 @@ def build_model(config: dict) -> torch.nn.Module:
             dropout=model_cfg.get("dropout", 0.1),
             time2vec_dim=model_cfg.get("time2vec_dim", 8),
             joint=joint,
+            covariate_dim=covariate_dim,
+            covariate_emb_dim=covariate_emb_dim,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
@@ -174,13 +180,16 @@ def main():
 
     # Autoregressive inference on holdout
     print("\nRunning autoregressive inference on holdout period ...")
+    inference_cfg = config.get("inference", {})
+    n_scenarios = inference_cfg.get("n_scenarios", 30)
+
     if model_cfg["type"] == "lstm":
         results = autoregressive_inference_lstm(
             model=model,
             inference_loader=inference_loader,
             holdout_weeks=dataset_cfg["holdout_weeks"],
             calibration_weeks=dataset_cfg["calibration_weeks"],
-            n_scenarios=training_cfg.get("n_scenarios", 50),
+            n_scenarios=n_scenarios,
             device=device,
         )
     elif model_cfg["type"] == "transformer":
@@ -189,8 +198,9 @@ def main():
             inference_loader=inference_loader,
             holdout_weeks=dataset_cfg["holdout_weeks"],
             calibration_weeks=dataset_cfg["calibration_weeks"],
-            n_scenarios=training_cfg.get("n_scenarios", 50),
+            n_scenarios=n_scenarios,
             device=device,
+            use_kv_cache=inference_cfg.get("use_kv_cache", True),
         )
     else:
         raise ValueError(f"Unknown model type for inference: {model_cfg['type']!r}")
@@ -217,6 +227,7 @@ def main():
         y_freq_true=true_total_freq,
         y_freq_pred=pred_total_freq,
         customer_ids=true_ids,
+        scaler=scaler if joint else None,
         **spend_kwargs,
     )
 

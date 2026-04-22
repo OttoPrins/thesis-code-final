@@ -27,7 +27,7 @@ def collate_fn(batch):
         seed_week   : (B, T)    long
         seed_trans  : (B, T)    long
         seed_spend  : (B, T)    float
-        covariate   : (B, C)    float
+        covariates  : (B, T, C) float  — training slice or (B, T_total, C) inference trajectory
     """
     result = {
         "week": torch.stack([item["week"] for item in batch]),
@@ -44,7 +44,8 @@ def collate_fn(batch):
         result["seed_trans"] = torch.stack([item["seed_trans"] for item in batch])
         result["seed_spend"] = torch.stack([item["seed_spend"] for item in batch])
 
-    if "covariate" in batch[0]:
-        result["covariate"] = torch.stack([item["covariate"] for item in batch])
+    if "covariates" in batch[0]:
+        # Handles both (T-1, C) training slices and (T_total, C) inference trajectories
+        result["covariates"] = torch.stack([item["covariates"] for item in batch])
 
     return result

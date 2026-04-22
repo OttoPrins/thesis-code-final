@@ -84,7 +84,7 @@ class DunnhumbyPipeline(BasePipeline):
         covariates = None
         if include_covariates:
             covariates = self.build_covariates(
-                raw_dir, data["customer_ids"], calib_weeks
+                raw_dir, data["customer_ids"], calib_weeks, holdout_weeks
             )
 
         n = len(data["customer_ids"])
@@ -102,6 +102,10 @@ class DunnhumbyPipeline(BasePipeline):
             train_data["covariates"] = covariates[train_idx]
             val_data["covariates"] = covariates[val_idx]
             data["covariates"] = covariates
+            _feature_names = ["income", "household_size",
+                               "coupon_redemptions_week", "campaign_active_flag"]
+            for d in (train_data, val_data, data):
+                d["covariate_feature_names"] = _feature_names
 
         train_ds = CustomerDataset(train_data, include_seed=False)
         val_ds = CustomerDataset(val_data, include_seed=True)
@@ -149,23 +153,113 @@ class DunnhumbyPipeline(BasePipeline):
         return df[["customer_id", "date", "transaction_amount"]]
 
     def build_covariates(
-        self, raw_dir: str, calibration_customer_ids: np.ndarray,
-        calibration_weeks: int
+        self,
+        raw_dir: str,
+        calibration_customer_ids: np.ndarray,
+        calibration_weeks: int,
+        holdout_weeks: int,
     ) -> np.ndarray:
         """
-        Build static covariate matrix for Extension 3.
+        Build time-varying covariate tensor for Extension 3.
 
-        Returns: numpy array of shape (N_customers, C)
-        Covariates: [income_encoded, household_size_encoded,
-                     coupon_redemptions_total_in_calib,
-                     campaign_exposure_count_in_calib]
+        Returns: numpy array of shape (N_customers, T_total, 4), where
+            T_total = calibration_weeks + holdout_weeks, columns:
+                0: income_encoded          — static ordinal, broadcast across T
+                1: hh_size_encoded         — static ordinal, broadcast across T
+                2: coupon_redemptions_week — coupon redemption count per week
+                3: campaign_active_flag    — 1 if any campaign active this week
+
+        Note: campaign exposure in the holdout period represents firm-controlled
+        marketing decisions that are known at prediction time — including them is
+        consistent with CLV forecasting in a marketing planning context, not leakage.
         """
-        # TODO: Encode demographics (ordinal) + aggregate coupon redemptions per customer
-        # over calibration period only. Return numpy array.
-        raise NotImplementedError(
-            "Implement DunnhumbyPipeline.build_covariates() for Extension 3. "
-            "See CLAUDE.md Section 5 for covariate spec."
+        T_total = calibration_weeks + holdout_weeks
+        N = len(calibration_customer_ids)
+        customer_ids_int = calibration_customer_ids.astype(int)
+
+        # --- Demographics (static, will be broadcast across T) ---
+        demo = pd.read_csv(os.path.join(raw_dir, "hh_demographic.csv"))
+        demo["household_key"] = demo["household_key"].astype(int)
+
+        income_enc = OrdinalEncoder(
+            categories=[INCOME_ORDER],
+            handle_unknown="use_encoded_value",
+            unknown_value=-1,
         )
+        demo["income_encoded"] = income_enc.fit_transform(
+            demo[["INCOME_DESC"]]
+        ).flatten()
+
+        size_enc = OrdinalEncoder(
+            categories=[HOUSEHOLD_SIZE_ORDER],
+            handle_unknown="use_encoded_value",
+            unknown_value=-1,
+        )
+        demo["hh_size_encoded"] = size_enc.fit_transform(
+            demo[["HOUSEHOLD_SIZE_DESC"]]
+        ).flatten()
+
+        demo_lookup = (
+            pd.DataFrame({"household_key": customer_ids_int})
+            .merge(demo[["household_key", "income_encoded", "hh_size_encoded"]],
+                   on="household_key", how="left")
+            .fillna(0)
+        )
+        income_vals = demo_lookup["income_encoded"].values.astype(np.float32)   # (N,)
+        hh_size_vals = demo_lookup["hh_size_encoded"].values.astype(np.float32)  # (N,)
+
+        # --- Coupon redemptions per week (time-varying) ---
+        coup = pd.read_csv(os.path.join(raw_dir, "coupon_redempt.csv"))
+        coup["household_key"] = coup["household_key"].astype(int)
+        coup["week"] = coup["DAY"] // 7
+
+        cid_to_idx = {cid: i for i, cid in enumerate(customer_ids_int)}
+        coupon_grid = np.zeros((N, T_total), dtype=np.float32)
+        coup_in_scope = coup[coup["week"] < T_total]
+        coup_in_scope = coup_in_scope[coup_in_scope["household_key"].isin(cid_to_idx)]
+        coup_agg = (
+            coup_in_scope.groupby(["household_key", "week"])
+            .size()
+            .reset_index(name="count")
+        )
+        for _, row in coup_agg.iterrows():
+            hh = int(row["household_key"])
+            wk = int(row["week"])
+            if hh in cid_to_idx and 0 <= wk < T_total:
+                coupon_grid[cid_to_idx[hh], wk] = row["count"]
+
+        # --- Campaign active flag per week (time-varying) ---
+        camp_table = pd.read_csv(os.path.join(raw_dir, "campaign_table.csv"))
+        camp_desc = pd.read_csv(os.path.join(raw_dir, "campaign_desc.csv"))
+        camp_table["household_key"] = camp_table["household_key"].astype(int)
+
+        # Join campaigns with their date ranges
+        camp_merged = camp_table.merge(
+            camp_desc[["CAMPAIGN", "START_DAY", "END_DAY"]], on="CAMPAIGN", how="left"
+        )
+        camp_merged = camp_merged.dropna(subset=["START_DAY", "END_DAY"])
+        camp_merged["start_week"] = (camp_merged["START_DAY"] // 7).astype(int)
+        camp_merged["end_week"] = (camp_merged["END_DAY"] // 7).astype(int)
+
+        campaign_grid = np.zeros((N, T_total), dtype=np.float32)
+        camp_in_scope = camp_merged[camp_merged["household_key"].isin(cid_to_idx)]
+        for _, row in camp_in_scope.iterrows():
+            hh = int(row["household_key"])
+            if hh not in cid_to_idx:
+                continue
+            cust_idx = cid_to_idx[hh]
+            w_start = max(0, int(row["start_week"]))
+            w_end = min(T_total - 1, int(row["end_week"]))
+            if w_start <= w_end:
+                campaign_grid[cust_idx, w_start: w_end + 1] = 1.0
+
+        # --- Assemble (N, T_total, 4) ---
+        covariates = np.zeros((N, T_total, 4), dtype=np.float32)
+        covariates[:, :, 0] = income_vals[:, np.newaxis]    # broadcast across T
+        covariates[:, :, 1] = hh_size_vals[:, np.newaxis]   # broadcast across T
+        covariates[:, :, 2] = coupon_grid
+        covariates[:, :, 3] = campaign_grid
+        return covariates
 
     @staticmethod
     def _build_holdout_ground_truth(

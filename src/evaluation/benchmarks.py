@@ -67,12 +67,13 @@ class ParetoNBDModel(BenchmarkModel):
     def predict_freq(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> np.ndarray:
         """Predict expected transactions in holdout period."""
         assert self.fitted, "Call fit() first"
-        return self.fitter.expected_number_of_purchases_up_to_time(
+        result = self.fitter.conditional_expected_number_of_purchases_up_to_time(
             t=holdout_weeks,
             frequency=rfm_calib["frequency"].values,
             recency=rfm_calib["recency"].values,
             T=rfm_calib["T"].values,
-        ).values.astype(np.float32)
+        )
+        return np.asarray(result).astype(np.float32)
 
     def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> None:
         """Pareto/NBD does not predict spend."""
@@ -119,14 +120,51 @@ class BGNBDGammaGammaModel(BenchmarkModel):
         logger.info(f"Fitted {self.name()} on {len(rfm_calib)} customers")
 
     def predict_freq(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> np.ndarray:
-        """Predict expected transactions in holdout period."""
+        """Predict expected transactions in holdout period.
+
+        One-timers (frequency=0) cause log(negative) in lifetimes' BG/NBD
+        conditional formula when a+b<1 (the hyp2f1 value is negative). We
+        compute their predictions directly — without the log wrapper — using
+        scipy.special.hyp2f1 and the closed-form BG/NBD equation.
+        """
+        from scipy.special import hyp2f1 as scipy_hyp2f1
+
         assert self.fitted, "Call fit() first"
-        return self.bgf.conditional_expected_number_of_purchases_up_to_time(
-            t=holdout_weeks,
-            frequency=rfm_calib["frequency"].values,
-            recency=rfm_calib["recency"].values,
-            T=rfm_calib["T"].values,
-        ).values.astype(np.float32)
+        freq = rfm_calib["frequency"].values.astype(float)
+        recency = rfm_calib["recency"].values.astype(float)
+        T = rfm_calib["T"].values.astype(float)
+
+        # Repeat buyers: standard lifetimes call works fine
+        repeat_mask = freq > 0
+        pred = np.zeros(len(rfm_calib), dtype=np.float64)
+        if repeat_mask.sum() > 0:
+            result = self.bgf.conditional_expected_number_of_purchases_up_to_time(
+                t=holdout_weeks,
+                frequency=freq[repeat_mask],
+                recency=recency[repeat_mask],
+                T=T[repeat_mask],
+            )
+            pred[repeat_mask] = np.asarray(result)
+
+        # One-timers: compute directly using scipy hyp2f1 to avoid log(negative)
+        if (~repeat_mask).sum() > 0:
+            r, alpha, a, b = (
+                float(self.bgf.params_["r"]),
+                float(self.bgf.params_["alpha"]),
+                float(self.bgf.params_["a"]),
+                float(self.bgf.params_["b"]),
+            )
+            T0 = T[~repeat_mask]
+            t = float(holdout_weeks)
+            _a, _b, _c = r, b, a + b - 1
+            _z = t / (alpha + T0 + t)
+            hyp_vals = np.array([scipy_hyp2f1(_a, _b, _c, zi) for zi in _z])
+            ratio = ((alpha + T0) / (alpha + t + T0)) ** r
+            first_term = _c / (a - 1)
+            second_term = 1.0 - hyp_vals * ratio
+            pred[~repeat_mask] = first_term * second_term
+
+        return pred.astype(np.float32)
 
     def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> np.ndarray:
         """
@@ -144,13 +182,12 @@ class BGNBDGammaGammaModel(BenchmarkModel):
         spend_per_txn = np.zeros(len(rfm_calib), dtype=np.float32)
         repeat_mask = (rfm_calib["frequency"] > 0).values
 
-        spend_per_txn[repeat_mask] = (
+        spend_per_txn[repeat_mask] = np.asarray(
             self.ggf.conditional_expected_average_profit(
                 frequency=rfm_calib.loc[repeat_mask, "frequency"].values,
                 monetary_value=rfm_calib.loc[repeat_mask, "monetary_value"].values,
             )
-            .values.astype(np.float32)
-        )
+        ).astype(np.float32)
 
         # Total predicted spend = predicted_freq * E[spend per txn]
         pred_freq = self.predict_freq(rfm_calib, holdout_weeks)
@@ -255,107 +292,70 @@ class ParetoGGGModel(BenchmarkModel):
 
 class GPPMModel(BenchmarkModel):
     """
-    Gaussian Process Propensity Model (Dew & Ansari 2018) via PyMC.
+    Gamma-Poisson propensity model (approximation of Dew & Ansari 2018 GPPM).
 
-    Models customer-level purchase propensity as a draw from a GP indexed by time.
+    Hierarchical model:
+        lambda_i ~ Gamma(alpha, beta)          (per-customer purchase rate)
+        x_i      ~ Poisson(lambda_i * T_i)    (observed repeat transactions)
+
+    Hyperparameters alpha, beta are estimated via MLE on the negative-binomial
+    marginal likelihood (NegBin = Gamma-Poisson compound). Customer-level rates
+    are then computed from the analytical posterior:
+        lambda_i | x_i, T_i ~ Gamma(alpha + x_i, beta + T_i)
+        E[y_i | x_i, T_i]   = (alpha + x_i) / (beta + T_i) * T_star
+
+    This requires only scipy — no MCMC, no pymc.
     """
 
-    def __init__(self, max_customers: int = 500):
-        try:
-            import pymc as pm
-            import pytensor.tensor as pt
-        except ImportError:
-            raise ImportError("Install pymc: pip install pymc")
-
-        self.pm = pm
-        self.pt = pt
-        self.max_customers = max_customers
+    def __init__(self):
+        self.alpha = None
+        self.beta = None
         self.fitted = False
-        self.trace = None
-        self.customer_ids = None
 
     def fit(self, rfm_calib: pd.DataFrame) -> None:
-        """
-        Fit GPPM using PyMC MCMC sampling.
+        from scipy.optimize import minimize
+        from scipy.special import gammaln
 
-        Simplified implementation: Gamma-Poisson hierarchical model.
-          lambda_i ~ Gamma(alpha, beta)   (per-customer purchase rate)
-          x_i      ~ Poisson(lambda_i * T_i)  (observed repeat transactions)
-        Posterior mean of lambda_i is used for holdout prediction.
+        x = rfm_calib["frequency"].values.astype(float)
+        T = rfm_calib["T"].values.astype(float)
+        T = np.where(T <= 0, 1.0, T)  # guard against zero observation windows
 
-        Note: This is a Bayesian Gamma-Poisson (negative-binomial) model, which
-        captures heterogeneity in purchase rates across customers — the core idea
-        of the GPPM family. A full GP over time is infeasible at scale; this
-        implementation yields comparable cohort-level accuracy for holdout forecasting.
-        """
-        # Sample customers if dataset is large
-        if len(rfm_calib) > self.max_customers:
-            logger.warning(
-                f"Dataset has {len(rfm_calib)} customers; sampling {self.max_customers} "
-                "for GPPM fitting due to computational constraints."
-            )
-            sample_idx = np.random.choice(len(rfm_calib), self.max_customers, replace=False)
-            rfm_sample = rfm_calib.iloc[sample_idx].reset_index(drop=True)
-        else:
-            rfm_sample = rfm_calib.reset_index(drop=True)
+        def neg_log_likelihood(params):
+            # Negative binomial log-likelihood for Gamma-Poisson compound.
+            # x ~ NegBin(r=alpha, p=beta/(beta+T))
+            log_a, log_b = params
+            a = np.exp(log_a)
+            b = np.exp(log_b)
+            p = b / (b + T)
+            nll = -(
+                gammaln(a + x) - gammaln(a) - gammaln(x + 1)
+                + a * np.log(p)
+                + x * np.log(1 - p)
+            ).sum()
+            return nll
 
-        self.customer_ids = rfm_sample["customer_id"].values
-
-        # Observed data: frequency per customer
-        frequencies = rfm_sample["frequency"].values
-        T_values = rfm_sample["T"].values
-        recency_values = rfm_sample["recency"].values
-
-        with self.pm.Model() as model:
-            # Hyperpriors
-            alpha = self.pm.Exponential("alpha", 1.0)
-            beta = self.pm.Exponential("beta", 1.0)
-
-            # Customer-level propensity (latent rate parameter)
-            # Simplified model: propensity ~ Gamma(alpha, beta)
-            propensity = self.pm.Gamma("propensity", alpha=alpha, beta=beta, shape=len(rfm_sample))
-
-            # Observed frequency ~ Poisson(propensity * T)
-            obs_freq = self.pm.Poisson("obs_freq", mu=propensity * T_values, observed=frequencies)
-
-            # Sample
-            self.trace = self.pm.sample(
-                tune=500,
-                draws=500,
-                cores=1,
-                progressbar=False,
-                return_inferencedata=True,
-            )
-
+        res = minimize(
+            neg_log_likelihood,
+            x0=[0.0, 0.0],  # log(1), log(1) as starting point
+            method="Nelder-Mead",
+            options={"maxiter": 2000, "xatol": 1e-6, "fatol": 1e-6},
+        )
+        self.alpha = float(np.exp(res.x[0]))
+        self.beta = float(np.exp(res.x[1]))
         self.fitted = True
-        logger.info(f"Fitted {self.name()} on {len(rfm_sample)} customers")
+        logger.info(
+            f"Fitted {self.name()} on {len(rfm_calib)} customers "
+            f"(alpha={self.alpha:.4f}, beta={self.beta:.4f})"
+        )
 
     def predict_freq(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> np.ndarray:
-        """
-        Predict expected transactions in holdout using posterior mean propensity.
-        Customers not in the sampling subset (large datasets) receive the
-        posterior mean of the population-level rate (alpha/beta).
-        """
+        """E[y_i] = (alpha + x_i) / (beta + T_i) * T_star."""
         assert self.fitted, "Call fit() first"
-
-        # Posterior mean propensity per sampled customer
-        post = self.trace.posterior["propensity"].values  # (chains, draws, N_sample)
-        posterior_mean_propensity = post.reshape(-1, len(self.customer_ids)).mean(axis=0)
-
-        # Population-level rate for unsampled customers
-        alpha_post = self.trace.posterior["alpha"].values.mean()
-        beta_post = self.trace.posterior["beta"].values.mean()
-        pop_rate = alpha_post / beta_post
-
-        # Build lookup: customer_id → posterior mean rate
-        rate_lookup = dict(zip(self.customer_ids, posterior_mean_propensity))
-
-        # Assign rates to all calibration customers
-        rates = np.array(
-            [rate_lookup.get(cid, pop_rate) for cid in rfm_calib["customer_id"].values],
-            dtype=np.float32,
-        )
-        return (rates * holdout_weeks).astype(np.float32)
+        x = rfm_calib["frequency"].values.astype(float)
+        T = rfm_calib["T"].values.astype(float)
+        T = np.where(T <= 0, 1.0, T)
+        posterior_rate = (self.alpha + x) / (self.beta + T)
+        return (posterior_rate * holdout_weeks).astype(np.float32)
 
     def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> None:
         """GPPM does not predict spend."""

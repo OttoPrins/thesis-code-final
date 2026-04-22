@@ -103,7 +103,7 @@ encoder. They must be trained jointly, not as two separate models.
 - **Domain:** Music retail (CD purchases), USA, 1997–1998
 - **Size:** 2,357 customers, ~69,659 transactions
 - **Format:** `customer_id, date, num_cds, amount` (USD)
-- **Standard split:** Calibration = first 52 weeks (Jan–Dec 1997), Holdout = next 52 weeks
+- **Standard split:** Calibration = first 52 weeks (Jan–Dec 1997), Holdout = next 26 weeks (Jan–Jun 1998). Dataset ends at week 77; only 26 real holdout weeks available.
 - **Source:** Available from BTYD R package / Fader's Wharton page
 - **Weekly aggregation:** 7-day bins from first purchase date
 - **Notes:** 10% sample of the full dataset. Used in Fader et al. (2005) and Valendin et al. (2022).

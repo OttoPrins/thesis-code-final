@@ -1,6 +1,6 @@
 torch>=2.0.0
 pytorch-lightning>=2.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 matplotlib>=3.7.0
@@ -10,5 +10,7 @@ pyyaml>=6.0
 tqdm>=4.65.0
 wandb>=0.15.0
 lifetimes>=0.11.3      # Pareto/NBD, BG/NBD, Gamma-Gamma benchmarks
-pymc>=5.0.0            # Pareto/GGG, GPPM benchmarks
+# pymc is intentionally excluded: all versions conflict with numpy 1.26 + torch 2.2.
+# GPPM is implemented analytically (Gamma-Poisson MLE + posterior) using scipy only.
+rpy2>=3.5.0            # optional: Pareto/GGG via R BTYD.plus; also needs R + install.packages("BTYD.plus")
 shap>=0.42.0           # Extension 3 covariate ablation

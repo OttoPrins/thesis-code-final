@@ -125,6 +125,12 @@ class UCIRetailPipeline(BasePipeline):
         df["customer_id"] = df["CustomerID"].astype(int)
         df["date"] = pd.to_datetime(df["InvoiceDate"], dayfirst=True, errors="coerce")
         df = df.dropna(subset=["date"])
+        # Aggregate to invoice level so weekly_freq counts shopping trips, not line items
+        df = (
+            df.groupby(["customer_id", "InvoiceNo", "date"])
+            .agg(transaction_amount=("transaction_amount", "sum"))
+            .reset_index()
+        )
         return df[["customer_id", "date", "transaction_amount"]]
 
     @staticmethod

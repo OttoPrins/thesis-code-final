@@ -36,3 +36,7 @@ output:
   run_name: transformer_joint_cdnow_v1
   results_dir: results
   save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  use_kv_cache: true

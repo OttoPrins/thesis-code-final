@@ -5,24 +5,28 @@ Replication target: Valendin et al. (2022) Base LSTM.
 Published in IJRM — NOT a machine learning conference paper.
 
 Architecture verified from the open-source repo (banking_transactions_demo.ipynb, TF/Keras).
-This is a PyTorch re-implementation matching that architecture.
+This is a PyTorch re-implementation matching that architecture exactly.
 
-KEY FACTS from the repo:
+KEY FACTS from the repo (non-negotiable):
     - Inputs: week (int, 0-51) and transaction_count (int) — both EMBEDDED, not raw floats
     - Embedding size heuristic: int(max_val ** 0.5) + 1
-    - memory_units = 128 (single LSTM layer, NOT 2 stacked)
+    - memory_units = 128 (SINGLE LSTM layer — verified, NOT 2 stacked)
     - dense_units = 128 (Dense layer after LSTM, before softmax)
     - return_sequences=True — sequence-to-sequence, predicts at every time step
     - Training: stateless; Inference: stateful (manage hidden state manually)
     - Loss: mean CrossEntropy over all T time steps
+    - num_layers is FIXED at 1 to match the rfm2lstm reference implementation.
 
 INFERENCE PROCEDURE (autoregressive):
     1. Feed calibration history through LSTM to warm up (h, c) state.
     2. Use last output as first holdout prediction (sample from softmax).
     3. For each subsequent holdout step: feed previous prediction + week embedding,
        carry (h, c) forward, sample from new softmax.
-    4. Average NO_SCENARIOS ≥ 20 sampled futures to reduce noise.
+    4. Average NO_SCENARIOS >= 20 sampled futures to reduce noise.
 """
+
+from __future__ import annotations
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -39,15 +43,20 @@ class LSTMModel(nn.Module):
     Full Base LSTM model: embeddings → LSTM → Dense → Softmax.
     Sequence-to-sequence: predicts at every time step.
 
-    Args:
-        max_week:       Maximum week index (52 for weekly; embedding vocab size = max_week + 1)
-        max_trans:      Maximum transaction count after clipping (embedding vocab size = max_trans + 1)
-        memory_units:   LSTM hidden size (128, from repo)
-        dense_units:    Dense layer size (128, from repo)
-        n_classes:      Number of frequency classes (= max_trans + 1)
-        dropout:        Dropout on dense layer output (not in original, add conservatively)
+    Architecture matches Valendin et al. (2022) / rfm2lstm exactly:
+        - Single LSTM layer (num_layers=1, fixed)
+        - Dense layer (128 units) between LSTM output and prediction heads
 
-    For Extension 1 (joint prediction), set joint=True to enable the spend regression head.
+    Args:
+        max_week:         Maximum week index (52 for weekly; embedding vocab = max_week + 1)
+        max_trans:        Maximum transaction count after clipping (embedding vocab = max_trans + 1)
+        memory_units:     LSTM hidden size (128, from repo)
+        dense_units:      Dense layer size (128, from repo)
+        n_classes:        Number of frequency classes (= max_trans + 1)
+        dropout:          Dropout on dense layer output
+        joint:            Extension 1: enable spend regression head
+        covariate_dim:    Optional number of covariate features (Extension 3 only)
+        covariate_emb_dim: Projection dimension for covariates (default 8)
     """
 
     def __init__(
@@ -57,23 +66,32 @@ class LSTMModel(nn.Module):
         memory_units: int = 128,
         dense_units: int = 128,
         dropout: float = 0.0,
-        joint: bool = False,      # Extension 1: enable spend head
+        joint: bool = False,
+        covariate_dim: Optional[int] = None,
+        covariate_emb_dim: int = 8,
     ):
         super().__init__()
         self.joint = joint
         self.max_trans = max_trans
-        n_classes = max_trans + 1  # 0, 1, ..., max_trans
+        self.covariate_dim = covariate_dim
+        n_classes = max_trans + 1
 
         # Embedding layers (categorical inputs — not raw floats)
         week_emb_dim = embedding_size(max_week)     # ≈ 8 for max_week=52
-        trans_emb_dim = embedding_size(max_trans)   # depends on max_trans
+        trans_emb_dim = embedding_size(max_trans)
 
         self.embed_week = nn.Embedding(max_week + 1, week_emb_dim)
         self.embed_trans = nn.Embedding(max_trans + 1, trans_emb_dim)
 
         lstm_input_dim = week_emb_dim + trans_emb_dim
 
-        # Single LSTM layer (return_sequences=True equivalent: return all outputs)
+        # Optional covariate projection (Extension 3)
+        self.covariate_proj: Optional[nn.Linear] = None
+        if covariate_dim is not None:
+            self.covariate_proj = nn.Linear(covariate_dim, covariate_emb_dim)
+            lstm_input_dim += covariate_emb_dim
+
+        # Single LSTM layer — fixed at num_layers=1 to match Valendin et al. (2022)
         self.lstm = nn.LSTM(
             input_size=lstm_input_dim,
             hidden_size=memory_units,
@@ -81,7 +99,7 @@ class LSTMModel(nn.Module):
             batch_first=True,
         )
 
-        # Dense layer after LSTM
+        # Dense layer after LSTM (matches rfm2lstm Dense(128) before output heads)
         self.dense = nn.Linear(memory_units, dense_units)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
@@ -95,17 +113,17 @@ class LSTMModel(nn.Module):
 
     def forward(
         self,
-        week: torch.Tensor,         # (B, T) — integer week indices
-        trans: torch.Tensor,        # (B, T) — integer transaction counts (previous step or padded)
-        hidden=None,                # optional: (h_0, c_0) for stateful inference
+        week: torch.Tensor,                      # (B, T) integer week indices
+        trans: torch.Tensor,                     # (B, T) integer transaction counts
+        hidden: Optional[Tuple] = None,          # (h_0, c_0) for stateful inference
+        covariates: Optional[torch.Tensor] = None,  # (B, T, C) optional covariate features
     ):
         """
         Sequence-to-sequence forward pass.
 
         During TRAINING:
             week  = full calibration sequence of week indices (B, T)
-            trans = full calibration sequence of transaction counts, SHIFTED by 1
-                    (teacher-forced: feed ground-truth previous count, predict next)
+            trans = full calibration sequence, teacher-forced (B, T)
             hidden = None (stateless; reset each batch)
 
         During INFERENCE (autoregressive):
@@ -114,23 +132,23 @@ class LSTMModel(nn.Module):
             hidden = (h, c) from previous step (carry forward)
 
         Returns:
-            freq_logits: (B, T, n_classes) — one distribution per time step
+            freq_logits: (B, T, n_classes)
             log_spend:   (B, T) — only if joint=True
-            hidden:      (h_n, c_n) — final hidden state (needed for autoregressive inference)
+            hidden:      (h_n, c_n)
         """
-        # Embed categorical inputs
-        e_week = self.embed_week(week.clamp(0, self.embed_week.num_embeddings - 1))   # (B, T, week_emb_dim)
-        e_trans = self.embed_trans(trans.clamp(0, self.max_trans))                     # (B, T, trans_emb_dim)
+        e_week = self.embed_week(week.clamp(0, self.embed_week.num_embeddings - 1))
+        e_trans = self.embed_trans(trans.clamp(0, self.max_trans))
 
-        x = torch.cat([e_week, e_trans], dim=-1)  # (B, T, lstm_input_dim)
+        x = torch.cat([e_week, e_trans], dim=-1)  # (B, T, week_emb + trans_emb)
 
-        # LSTM — returns all time steps
+        if self.covariate_proj is not None and covariates is not None:
+            cov_emb = self.covariate_proj(covariates)  # (B, T, covariate_emb_dim)
+            x = torch.cat([x, cov_emb], dim=-1)
+
         lstm_out, hidden = self.lstm(x, hidden)  # lstm_out: (B, T, memory_units)
 
-        # Dense layer applied at every time step
         h = self.dropout(self.relu(self.dense(lstm_out)))  # (B, T, dense_units)
 
-        # Frequency head
         freq_logits = self.freq_head(h)  # (B, T, n_classes)
 
         if self.joint:

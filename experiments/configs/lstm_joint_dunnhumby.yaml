@@ -35,3 +35,6 @@ output:
   run_name: lstm_joint_dunnhumby_v1
   results_dir: results
   save_checkpoint: true
+
+inference:
+  n_scenarios: 30

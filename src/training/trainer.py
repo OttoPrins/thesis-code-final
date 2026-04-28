@@ -112,7 +112,13 @@ class Trainer:
         if self.joint:
             y_spend = batch["y_spend"].to(self.device)
             mse_per_step = F.mse_loss(log_spend, y_spend, reduction="none")
-            spend_loss = (mse_per_step * mask).sum() / mask.sum()
+            # Mask zero-purchase weeks: spend regression target is 0 on inactive
+            # weeks, which would teach the model to predict ~0 everywhere. Train
+            # the spend head only on weeks where a purchase actually happened.
+            activity_mask = (y_freq > 0).float()
+            spend_mask = mask * activity_mask
+            spend_denom = spend_mask.sum().clamp(min=1.0)
+            spend_loss = (mse_per_step * spend_mask).sum() / spend_denom
             total_loss = self.multi_task_loss([freq_loss, spend_loss])
 
             # Log Kendall task weights (exp(-log_var) per task)

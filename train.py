@@ -84,6 +84,14 @@ def build_model(config: dict) -> torch.nn.Module:
 def main():
     parser = argparse.ArgumentParser(description="Train a CLV deep learning model.")
     parser.add_argument("--config", required=True, help="Path to YAML config file.")
+    parser.add_argument(
+        "--seed_override", type=int, default=None,
+        help="Override training.seed from YAML. Appends _seed<N> to run_name."
+    )
+    parser.add_argument(
+        "--inference_mode", choices=["sample", "expected"], default=None,
+        help="Override inference.mode from YAML. Appends _<mode> to run_name."
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -91,6 +99,13 @@ def main():
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
     output_cfg = config["output"]
+
+    if args.seed_override is not None:
+        training_cfg["seed"] = args.seed_override
+        output_cfg["run_name"] = f"{output_cfg['run_name']}_seed{args.seed_override}"
+    if args.inference_mode is not None:
+        config.setdefault("inference", {})["mode"] = args.inference_mode
+        output_cfg["run_name"] = f"{output_cfg['run_name']}_{args.inference_mode}"
 
     print(f"Config: {args.config}")
     print(f"Run: {output_cfg['run_name']}")
@@ -182,6 +197,8 @@ def main():
     print("\nRunning autoregressive inference on holdout period ...")
     inference_cfg = config.get("inference", {})
     n_scenarios = inference_cfg.get("n_scenarios", 30)
+    inference_mode = inference_cfg.get("mode", "sample")
+    print(f"  inference mode: {inference_mode}  n_scenarios: {n_scenarios}")
 
     if model_cfg["type"] == "lstm":
         results = autoregressive_inference_lstm(
@@ -191,6 +208,7 @@ def main():
             calibration_weeks=dataset_cfg["calibration_weeks"],
             n_scenarios=n_scenarios,
             device=device,
+            mode=inference_mode,
         )
     elif model_cfg["type"] == "transformer":
         results = autoregressive_inference_transformer(
@@ -201,6 +219,7 @@ def main():
             n_scenarios=n_scenarios,
             device=device,
             use_kv_cache=inference_cfg.get("use_kv_cache", True),
+            mode=inference_mode,
         )
     else:
         raise ValueError(f"Unknown model type for inference: {model_cfg['type']!r}")
@@ -217,11 +236,19 @@ def main():
     pred_total_freq = results["pred_total_freq"]   # (N,)
     true_total_freq = holdout_gt["total_freq"].astype(np.float32)  # (N,)
 
-    # For spend evaluation (joint models): use log-space totals
+    # For spend (joint models): pass per-week scaled log arrays; compute_all_metrics
+    # inverse-transforms per week and sums to raw currency (the only correct way).
+    # Activity weights gate spend so that weeks the model predicts as inactive
+    # contribute zero raw revenue (matches the masked spend training regime).
     spend_kwargs = {}
-    if joint and "pred_total_spend" in results:
-        spend_kwargs["y_spend_true_log"] = holdout_gt["total_spend"].astype(np.float32)
-        spend_kwargs["y_spend_pred_log"] = results["pred_total_spend"]
+    if joint and "pred_spend" in results:
+        spend_kwargs["y_spend_true_per_week"] = holdout_gt["spend"].astype(np.float32)
+        spend_kwargs["y_spend_pred_per_week"] = results["pred_spend"].astype(np.float32)
+        spend_kwargs["pred_activity_per_week"] = results["pred_activity"].astype(np.float32)
+        # Ground-truth spend is multiplied by the binary activity indicator so
+        # the inverse log1p(0)≈0 doesn't leak any "active" mass into the totals.
+        true_activity = (holdout_gt["raw_freq"] > 0).astype(np.float32)
+        spend_kwargs["true_activity_per_week"] = true_activity
 
     metrics = compute_all_metrics(
         y_freq_true=true_total_freq,
@@ -230,6 +257,25 @@ def main():
         scaler=scaler if joint else None,
         **spend_kwargs,
     )
+
+    # Prediction diagnostics — helps identify exposure bias / class distribution issues.
+    # pred_per_week values are Monte Carlo averages (floats), so we compare means and
+    # distributions rather than exact class counts.
+    pred_per_week = results["pred_freq"]   # (N, H) float averages over n_scenarios
+    true_per_week = holdout_gt.get("raw_freq")  # (N, H) integers or None
+    print("\n=== Prediction Diagnostics ===")
+    print(f"  Mean predicted freq/week:    {pred_per_week.mean():.4f}")
+    if true_per_week is not None:
+        print(f"  Mean actual freq/week:       {true_per_week.mean():.4f}")
+        print(f"  Over-prediction ratio:       {pred_per_week.mean() / max(true_per_week.mean(), 1e-9):.3f}x")
+        # % of customers with zero total predicted transactions
+        zero_pred = (pred_per_week.sum(axis=1) < 0.5).mean()
+        zero_true = (true_per_week.sum(axis=1) == 0).mean()
+        print(f"  Customers predicted as zero total:  {zero_pred:.3f}")
+        print(f"  Customers actually zero total:      {zero_true:.3f}")
+        # Mean non-zero purchase rate per week
+        print(f"  Non-zero rate (pred, avg > 0.05):  {(pred_per_week > 0.05).mean():.3f}")
+        print(f"  Non-zero rate (true):               {(true_per_week > 0).mean():.3f}")
 
     print("\n=== Holdout Evaluation ===")
     for k, v in metrics.items():

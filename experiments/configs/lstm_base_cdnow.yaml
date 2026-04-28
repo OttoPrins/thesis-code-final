@@ -7,7 +7,7 @@ dataset:
   lookback_weeks: 52
   min_active_weeks: 5
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
+  freq_bins: [0, 1, 2, 3]   # CDNOW: 99.68% of active weeks <=3 trans; keep paper-faithful
 
 model:
   type: lstm
@@ -30,9 +30,10 @@ loss:
   type: cross_entropy     # frequency only
 
 output:
-  run_name: lstm_base_cdnow_v1
+  run_name: lstm_base_cdnow_v3
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample             # 'sample' (Valendin MC) or 'expected' (deterministic E[k]=sum k*p(k))

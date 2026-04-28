@@ -6,7 +6,9 @@ Pipeline:
 
 Design constraints (from CLAUDE.md):
     - Weekly aggregation matches Valendin et al. (2022)
-    - Frequency discretised to {0, 1, 2, 3+} (4 classes; 3 means 3 or more)
+    - Frequency discretised to {0, 1, ..., cap} where the cap is the 99th
+      percentile of nonzero weekly counts on the calibration set (Valendin's
+      "use all observed classes" rule, made data-driven)
     - Spend always log1p-transformed
     - Scaler fitted on calibration set ONLY (no holdout leakage)
     - Sequences padded with zeros; mask marks padding positions
@@ -16,6 +18,51 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
+
+
+def compute_freq_cap(weekly_freq: np.ndarray, q: float = 0.99) -> int:
+    """
+    Pick the frequency-class cap from calibration weekly counts.
+
+    Cap = ceil( q-quantile of nonzero weekly counts ), floored at 1.
+    Using only nonzero weeks avoids the long tail of "this customer didn't shop
+    that week" zeros dominating the quantile.
+    """
+    nonzero = weekly_freq[weekly_freq > 0]
+    if nonzero.size == 0:
+        return 1
+    cap = int(np.ceil(np.quantile(nonzero, q)))
+    return max(1, cap)
+
+
+def resolve_freq_bins(dataset_cfg: dict, calib_weekly_freq: np.ndarray) -> list:
+    """
+    Resolve the freq_bins list from a dataset config + calibration data.
+
+    Precedence:
+        1. Explicit `freq_bins: [0, 1, ..., k]` in YAML — used as-is.
+        2. Explicit `freq_cap: <int>` in YAML — bins become [0..cap].
+        3. `freq_cap: auto` (or unspecified) — cap derived from calibration via
+           compute_freq_cap (q=0.99 by default; override with `freq_cap_quantile`).
+
+    Logs the chosen cap for traceability.
+    """
+    bins = dataset_cfg.get("freq_bins")
+    if bins is not None:
+        print(f"[pipeline] freq_bins from config: {bins}")
+        return list(bins)
+
+    cap_setting = dataset_cfg.get("freq_cap", "auto")
+    if isinstance(cap_setting, int):
+        cap = cap_setting
+        source = "explicit"
+    else:
+        q = float(dataset_cfg.get("freq_cap_quantile", 0.99))
+        cap = compute_freq_cap(np.asarray(calib_weekly_freq), q=q)
+        source = f"auto q={q}"
+    bins = list(range(cap + 1))
+    print(f"[pipeline] freq_cap={cap} ({source}) → freq_bins={bins[:4]}{'...' if len(bins)>4 else ''} (n_classes={len(bins)})")
+    return bins
 
 
 class WeeklyAggregator:
@@ -44,7 +91,7 @@ class WeeklyAggregator:
 
     @staticmethod
     def discretise_freq(freq_series: pd.Series, bins: list = None) -> pd.Series:
-        """Map raw frequency to class label {0, 1, 2, 3} where 3 means 3+."""
+        """Map raw frequency to class label {0, 1, ..., bins[-1]} (top class is 'k+')."""
         if bins is None:
             bins = [0, 1, 2, 3]
         return freq_series.clip(upper=bins[-1]).astype(int)

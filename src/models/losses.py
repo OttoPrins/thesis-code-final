@@ -6,11 +6,14 @@ KendallMultiTaskLoss implements the homoscedastic uncertainty weighting from:
     Multi-task learning using uncertainty to weigh losses in scene geometry and semantics.
     CVPR 2018.
 
-Formula:
-    L = Σ_i [ L_i / (2σ_i²) + log(σ_i) ]
+Canonical form (Equation 7 in Kendall et al. 2018), with log_var = log(σ²):
+    L = Σ_i [ 0.5 · exp(-log_var_i) · L_i + 0.5 · log_var_i ]
 
-where σ_i are learnable scalar uncertainty parameters, one per task.
-Initialised to 1.0. The log(σ_i) term acts as a regulariser to prevent σ_i → ∞.
+The 0.5 factors are the canonical constants; omitting them multiplies the loss
+by a scalar (equivalent to a doubled learning rate) and makes results
+non-comparable to the published formulation.
+
+The log_var term acts as a regulariser preventing σ_i → ∞.
 
 Usage:
     loss_fn = KendallMultiTaskLoss(n_tasks=2)
@@ -39,13 +42,15 @@ class KendallMultiTaskLoss(nn.Module):
         Returns:
             total_loss: Scalar combined loss
         """
-        total = 0.0
+        total = torch.zeros((), device=losses[0].device, dtype=losses[0].dtype)
         for i, loss in enumerate(losses):
-            precision = torch.exp(-self.log_vars[i])
-            total = total + precision * loss + self.log_vars[i]
+            # Clamp guards against exp(-log_var) overflow if log_var drifts
+            log_var = self.log_vars[i].clamp(-10.0, 10.0)
+            precision = torch.exp(-log_var)
+            total = total + 0.5 * precision * loss + 0.5 * log_var
         return total
 
     @property
     def task_weights(self):
         """Return current effective task weights (1 / 2σ²) for logging."""
-        return torch.exp(-self.log_vars).detach()
+        return (0.5 * torch.exp(-self.log_vars)).detach()

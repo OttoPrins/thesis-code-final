@@ -6,12 +6,12 @@ dataset:
   holdout_weeks: 5
   min_active_weeks: 2
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
+  freq_cap: auto           # 99th-percentile cap from calibration
 
 model:
   type: lstm
   max_week: 12
-  max_trans: 3
+  max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
   dropout: 0.2
@@ -30,9 +30,10 @@ loss:
   n_tasks: 2
 
 output:
-  run_name: lstm_joint_tafeng_v1
+  run_name: lstm_joint_tafeng_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample

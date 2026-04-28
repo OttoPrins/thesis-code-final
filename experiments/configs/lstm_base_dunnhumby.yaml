@@ -7,13 +7,13 @@ dataset:
   holdout_weeks: 24       # ~6 months holdout
   min_active_weeks: 5
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
+  freq_cap: auto           # 99th-pct cap from calibration (Dunnhumby: ~60/week)
   include_covariates: false   # set true for Extension 3 only
 
 model:
   type: lstm
   max_week: 78
-  max_trans: 3
+  max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
   dropout: 0.2
@@ -31,9 +31,10 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_dunnhumby_v1
+  run_name: lstm_base_dunnhumby_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample

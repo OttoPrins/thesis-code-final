@@ -4,17 +4,16 @@
 dataset:
   name: tafeng
   raw_dir: data/raw
-  calibration_weeks: 13   # ~3 months; dense data, shorter calibration sufficient
-  holdout_weeks: 4
-  lookback_weeks: 13
-  min_active_weeks: 3
+  calibration_weeks: 12   # aligned with lstm_*_tafeng configs for fair comparison
+  holdout_weeks: 5
+  min_active_weeks: 2
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
+  freq_cap: auto           # 99th-percentile cap from calibration
 
 model:
   type: transformer
   max_week: 12
-  max_trans: 3
+  max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   d_model: 64
   n_heads: 4
   n_layers: 2
@@ -36,10 +35,11 @@ loss:
   n_tasks: 2
 
 output:
-  run_name: transformer_joint_tafeng_v1
+  run_name: transformer_joint_tafeng_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample
   use_kv_cache: true

@@ -7,12 +7,12 @@ dataset:
   holdout_weeks: 13        # ~3 months holdout
   min_active_weeks: 3      # UCI is sparser than CDNOW; lower threshold
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3, 4, 5]
+  freq_cap: auto           # 99th-percentile cap derived from calibration weekly counts
 
 model:
   type: lstm
   max_week: 39
-  max_trans: 5
+  max_trans: 5             # placeholder; pipeline overrides from freq_cap=auto at runtime
   hidden_size: 128
   num_layers: 1
   dropout: 0.2
@@ -30,9 +30,10 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_uci_v1
+  run_name: lstm_base_uci_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample             # 'sample' or 'expected'

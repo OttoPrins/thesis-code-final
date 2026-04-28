@@ -139,7 +139,9 @@ encoder. They must be trained jointly, not as two separate models.
 - **Covariates for Extension 3:**
   - Demographics: `income_desc` (encode as ordinal), `household_size_desc` (encode as ordinal)
   - Campaign exposure: coupon redemptions per week, campaign exposure flag per week
-- **Split:** First 80 weeks calibration, last 4 weeks holdout (match Dunnhumby's week_no)
+- **Split:**
+  - Stages 1–3 (`lstm_base_dunnhumby`, `lstm_joint_dunnhumby`, `transformer_joint_dunnhumby`): 80 weeks calibration + 24 weeks holdout. Longer horizon for stable frequency/spend estimation, consistent with the other datasets.
+  - Extension 3 covariate ablation (`extension3_dunnhumby`): 80 weeks calibration + 4 weeks holdout, to match Dunnhumby's original week_no window and keep SHAP attribution on a short, dense period.
 
 ---
 

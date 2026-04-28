@@ -73,7 +73,11 @@ class ParetoNBDModel(BenchmarkModel):
             recency=rfm_calib["recency"].values,
             T=rfm_calib["T"].values,
         )
-        return np.asarray(result).astype(np.float32)
+        # Guard against NaN/inf from logaddexp numerical instability (lifetimes issue
+        # when alpha+T or beta+T approaches certain edge cases). Assign 0 for affected
+        # customers — conservative but acceptable for a small minority.
+        result = np.nan_to_num(np.asarray(result, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+        return result.astype(np.float32)
 
     def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> None:
         """Pareto/NBD does not predict spend."""

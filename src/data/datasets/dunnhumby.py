@@ -25,7 +25,13 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OrdinalEncoder
 from src.data.pipeline import BasePipeline
-from src.data.transforms import WeeklyAggregator, TemporalSplitter, SpendScaler, SequenceBuilder
+from src.data.transforms import (
+    WeeklyAggregator,
+    TemporalSplitter,
+    SpendScaler,
+    SequenceBuilder,
+    resolve_freq_bins,
+)
 from src.data.dataset import CustomerDataset
 
 # Ordinal encoding order for income (low → high)
@@ -58,7 +64,6 @@ class DunnhumbyPipeline(BasePipeline):
         holdout_weeks = dataset_cfg["holdout_weeks"]
         min_active = dataset_cfg.get("min_active_weeks", 5)
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
-        freq_bins = dataset_cfg.get("freq_bins", [0, 1, 2, 3])
         include_covariates = dataset_cfg.get("include_covariates", False)
         seed = config.get("training", {}).get("seed", 42)
 
@@ -73,6 +78,8 @@ class DunnhumbyPipeline(BasePipeline):
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 
+        freq_bins = resolve_freq_bins(dataset_cfg, calib["weekly_freq"].values)
+        config.setdefault("model", {})["max_trans"] = freq_bins[-1]
         builder = SequenceBuilder(
             calibration_weeks=calib_weeks,
             min_active_weeks=min_active,
@@ -150,6 +157,14 @@ class DunnhumbyPipeline(BasePipeline):
         df["date"] = pd.to_datetime("2000-01-01") + pd.to_timedelta(df["DAY"], unit="D")
         df["customer_id"] = df["household_key"].astype(int)
         df["transaction_amount"] = df["SALES_VALUE"].astype(float)
+        # Raw data has one row per product per basket. Aggregate to basket level
+        # (one row per shopping trip) so that weekly_freq counts basket visits,
+        # not product scans. This is the correct unit for Pareto/NBD and CLV models.
+        df = (
+            df.groupby(["customer_id", "BASKET_ID", "date"])["transaction_amount"]
+            .sum()
+            .reset_index()
+        )
         return df[["customer_id", "date", "transaction_amount"]]
 
     def build_covariates(
@@ -205,8 +220,17 @@ class DunnhumbyPipeline(BasePipeline):
                    on="household_key", how="left")
             .fillna(0)
         )
-        income_vals = demo_lookup["income_encoded"].values.astype(np.float32)   # (N,)
-        hh_size_vals = demo_lookup["hh_size_encoded"].values.astype(np.float32)  # (N,)
+        # Normalise ordinals to [0, 1] so they sit on the same scale as the
+        # binary campaign flag and count-based coupon feature. Divisors come
+        # from the hardcoded category lists (no data dependence ⇒ no leakage).
+        income_max = float(len(INCOME_ORDER) - 1)           # 11
+        hh_size_max = float(len(HOUSEHOLD_SIZE_ORDER) - 1)  # 4
+        income_vals = (
+            demo_lookup["income_encoded"].values.astype(np.float32) / income_max
+        )
+        hh_size_vals = (
+            demo_lookup["hh_size_encoded"].values.astype(np.float32) / hh_size_max
+        )
 
         # --- Coupon redemptions per week (time-varying) ---
         coup = pd.read_csv(os.path.join(raw_dir, "coupon_redempt.csv"))
@@ -304,7 +328,6 @@ class DunnhumbyPipeline(BasePipeline):
             "raw_freq": raw_freq,
             "spend": spend,
             "total_freq": raw_freq.sum(axis=1).astype(np.int32),
-            "total_spend": spend.sum(axis=1).astype(np.float32),
         }
 
 

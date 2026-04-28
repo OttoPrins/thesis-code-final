@@ -3,7 +3,7 @@ dataset:
   name: cdnow
   raw_dir: data/raw
   calibration_weeks: 52
-  holdout_weeks: 52
+  holdout_weeks: 26   # dataset ends at week 77; only 26 real holdout weeks available
   min_active_weeks: 5
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
@@ -22,7 +22,7 @@ training:
   batch_size: 256
   lr: 0.001
   weight_decay: 0.0001
-  early_stopping_patience: 10
+  early_stopping_patience: 5   # matches Valendin et al. repo (patience=5)
   seed: 42
 
 loss:
@@ -30,9 +30,10 @@ loss:
   n_tasks: 2            # [frequency, spend]
 
 output:
-  run_name: lstm_joint_cdnow_v1
+  run_name: lstm_joint_cdnow_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample             # 'sample' (Valendin MC) or 'expected' (deterministic)

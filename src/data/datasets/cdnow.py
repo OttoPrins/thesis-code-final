@@ -22,7 +22,13 @@ import os
 import numpy as np
 import pandas as pd
 from src.data.pipeline import BasePipeline
-from src.data.transforms import WeeklyAggregator, TemporalSplitter, SpendScaler, SequenceBuilder
+from src.data.transforms import (
+    WeeklyAggregator,
+    TemporalSplitter,
+    SpendScaler,
+    SequenceBuilder,
+    resolve_freq_bins,
+)
 from src.data.dataset import CustomerDataset
 
 
@@ -45,7 +51,6 @@ class CDNOWPipeline(BasePipeline):
         holdout_weeks = dataset_cfg["holdout_weeks"]
         min_active = dataset_cfg.get("min_active_weeks", 5)
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
-        freq_bins = dataset_cfg.get("freq_bins", [0, 1, 2, 3])
         seed = config.get("training", {}).get("seed", 42)
 
         # Stage 1: Load and clean
@@ -64,7 +69,9 @@ class CDNOWPipeline(BasePipeline):
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 
-        # Stage 5: Build sequences from calibration data
+        # Stage 5: Resolve freq bins from data (or YAML override) and build sequences
+        freq_bins = resolve_freq_bins(dataset_cfg, calib["weekly_freq"].values)
+        config.setdefault("model", {})["max_trans"] = freq_bins[-1]
         builder = SequenceBuilder(
             calibration_weeks=calib_weeks,
             min_active_weeks=min_active,
@@ -149,13 +156,14 @@ class CDNOWPipeline(BasePipeline):
             customer_ids : (N,)     int64   — same order as calibration
             freq         : (N, H)   int32   — weekly transaction count (clipped at max_trans)
             raw_freq     : (N, H)   int32   — weekly transaction count (unclipped)
-            spend        : (N, H)   float32 — weekly log-spend
+            spend        : (N, H)   float32 — per-week scaled log-spend (for DL eval)
             total_freq   : (N,)     int32   — total unclipped transactions in holdout
-            total_spend  : (N,)     float32 — total log-spend in holdout
         where H = holdout_weeks.
 
         Note: total_freq uses unclipped raw counts for fair comparison with
         probabilistic benchmarks (which predict unclipped counts).
+        Total spend in raw currency is derived downstream by inverse-transforming
+        `spend` per week and summing (see aggregate_spend_to_raw_total).
         """
         N = len(calibration_customer_ids)
         H = holdout_weeks
@@ -187,7 +195,6 @@ class CDNOWPipeline(BasePipeline):
             "raw_freq": raw_freq,
             "spend": spend,
             "total_freq": raw_freq.sum(axis=1).astype(np.int32),
-            "total_spend": spend.sum(axis=1).astype(np.float32),
         }
 
 

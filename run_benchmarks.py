@@ -106,25 +106,23 @@ def main():
             pred_freq = model.predict_freq(rfm_calib, holdout_weeks)
             true_freq = rfm_holdout["actual_freq"].values
 
-            # Predict spend (optional; None for frequency-only models)
+            # Predict spend (optional; None for frequency-only models).
+            # Benchmarks return raw-currency totals directly, so we pass them to
+            # compute_all_metrics via the *_raw_total path (no scaler inversion).
             pred_spend = model.predict_spend(rfm_calib, holdout_weeks)
             true_spend = rfm_holdout["actual_spend"].values if pred_spend is not None else None
 
-            # Log-transform spend if available
+            spend_kwargs = {}
             if true_spend is not None and pred_spend is not None:
-                pred_spend_log = np.log1p(pred_spend)
-                true_spend_log = np.log1p(true_spend)
-            else:
-                pred_spend_log = None
-                true_spend_log = None
+                spend_kwargs["y_spend_true_raw_total"] = true_spend.astype(np.float32)
+                spend_kwargs["y_spend_pred_raw_total"] = pred_spend.astype(np.float32)
 
             # Compute metrics
             metrics = compute_all_metrics(
                 y_freq_true=true_freq.astype(np.float32),
                 y_freq_pred=pred_freq,
-                y_spend_true_log=true_spend_log,
-                y_spend_pred_log=pred_spend_log,
                 customer_ids=customer_ids,
+                **spend_kwargs,
             )
 
             # Add model name and dataset
@@ -152,16 +150,16 @@ def main():
     # Print summary table
     if results_list:
         print("\n=== Summary ===")
-        print(f"{'Model':<15} {'Freq RMSE':<12} {'Freq MAPE':<12} {'Bias %':<10} {'Spend MAE':<12} {'Spend R²':<10}")
-        print("-" * 75)
+        print(f"{'Model':<15} {'Freq RMSE':<12} {'Freq MAPE':<12} {'Bias %':<10} {'Spend MAE raw':<15} {'Spend R² log':<14}")
+        print("-" * 82)
         for res in results_list:
             model = res["model"]
             freq_rmse = f"{res.get('freq_rmse', np.nan):.4f}"
             freq_mape = f"{res.get('freq_mape', np.nan):.4f}"
             bias_pct = f"{res.get('bias_pct', np.nan):.2f}"
-            spend_mae = f"{res.get('spend_mae', np.nan):.4f}"
-            spend_r2 = f"{res.get('spend_r2', np.nan):.4f}"
-            print(f"{model:<15} {freq_rmse:<12} {freq_mape:<12} {bias_pct:<10} {spend_mae:<12} {spend_r2:<10}")
+            spend_mae_raw = f"{res.get('spend_mae_raw', np.nan):.4f}"
+            spend_r2_log = f"{res.get('spend_r2_log', np.nan):.4f}"
+            print(f"{model:<15} {freq_rmse:<12} {freq_mape:<12} {bias_pct:<10} {spend_mae_raw:<15} {spend_r2_log:<14}")
 
 
 if __name__ == "__main__":

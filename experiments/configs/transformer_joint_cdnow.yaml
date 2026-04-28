@@ -3,7 +3,7 @@ dataset:
   name: cdnow
   raw_dir: data/raw
   calibration_weeks: 52
-  holdout_weeks: 52
+  holdout_weeks: 26   # dataset ends at week 77; only 26 real holdout weeks available
   min_active_weeks: 5
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
@@ -33,10 +33,11 @@ loss:
   n_tasks: 2
 
 output:
-  run_name: transformer_joint_cdnow_v1
+  run_name: transformer_joint_cdnow_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
+  mode: sample             # 'sample' or 'expected'
   use_kv_cache: true

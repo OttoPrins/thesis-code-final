@@ -22,7 +22,13 @@ import os
 import numpy as np
 import pandas as pd
 from src.data.pipeline import BasePipeline
-from src.data.transforms import WeeklyAggregator, TemporalSplitter, SpendScaler, SequenceBuilder
+from src.data.transforms import (
+    WeeklyAggregator,
+    TemporalSplitter,
+    SpendScaler,
+    SequenceBuilder,
+    resolve_freq_bins,
+)
 from src.data.dataset import CustomerDataset
 
 
@@ -45,7 +51,6 @@ class UCIRetailPipeline(BasePipeline):
         holdout_weeks = dataset_cfg["holdout_weeks"]
         min_active = dataset_cfg.get("min_active_weeks", 5)
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
-        freq_bins = dataset_cfg.get("freq_bins", [0, 1, 2, 3])
         seed = config.get("training", {}).get("seed", 42)
 
         df = self.load_raw(raw_dir)
@@ -59,6 +64,8 @@ class UCIRetailPipeline(BasePipeline):
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 
+        freq_bins = resolve_freq_bins(dataset_cfg, calib["weekly_freq"].values)
+        config.setdefault("model", {})["max_trans"] = freq_bins[-1]
         builder = SequenceBuilder(
             calibration_weeks=calib_weeks,
             min_active_weeks=min_active,
@@ -176,7 +183,6 @@ class UCIRetailPipeline(BasePipeline):
             "raw_freq": raw_freq,
             "spend": spend,
             "total_freq": raw_freq.sum(axis=1).astype(np.int32),
-            "total_spend": spend.sum(axis=1).astype(np.float32),
         }
 
 

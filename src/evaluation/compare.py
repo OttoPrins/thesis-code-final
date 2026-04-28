@@ -2,9 +2,11 @@
 Build comparison tables and visual analytics from all benchmark and DL model results.
 
 Functions:
+    parse_run_name              — split run_name into (canonical_model, dataset, version, seed, mode)
     build_comparison_table      — read *_metrics.json files for one dataset → DataFrame + CSV
     build_all_comparison_tables — run build_comparison_table for all datasets
     aggregate_all_results       — scan results/ for all *_metrics.json → combined DataFrame
+    aggregate_seeds             — group by (model, dataset, mode) and report mean ± std
     export_latex_table          — export DataFrame as publication-ready LaTeX table
     plot_model_comparison_bars  — grouped bar chart of primary metrics across models/datasets
     plot_kendall_weight_evolution— line plot of Kendall task weights across training epochs
@@ -12,6 +14,7 @@ Functions:
 CLI (python -m src.evaluation.compare):
     --latex   exports comparison_all.tex to results/tables/
     --plots   generates bar chart and weight-evolution plots to experiments/insights/
+    --seeds   aggregates seeded runs with mean ± std into comparison_seeds.csv
 """
 
 from __future__ import annotations
@@ -19,8 +22,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,6 +32,18 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 logger = logging.getLogger(__name__)
+
+# run_name patterns we care about, in order of specificity:
+#   <model>_<dataset>_v<N>_seed<S>_<mode>
+#   <model>_<dataset>_v<N>_seed<S>
+#   <model>_<dataset>_v<N>
+#   <model>_<dataset>
+# where <model> ∈ {lstm_base, lstm_joint, transformer_joint, extension3, ...}
+# and <dataset> ∈ {cdnow, uci, tafeng, dunnhumby}
+_DATASETS = ("cdnow", "uci", "tafeng", "dunnhumby")
+_MODE_RE = re.compile(r"_(sample|expected)$")
+_SEED_RE = re.compile(r"_seed(\d+)$")
+_VERSION_RE = re.compile(r"_v\d+$")
 
 # Canonical model order for table rows
 _MODEL_ORDER = [
@@ -50,6 +66,43 @@ def _sort_key(model_name: str) -> int:
         return _MODEL_ORDER.index(model_name)
     except ValueError:
         return len(_MODEL_ORDER)
+
+
+def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], Optional[str]]:
+    """
+    Decompose a run_name like 'lstm_joint_cdnow_v2_seed42_expected' into
+    (canonical_model, dataset, version, seed, mode).
+
+    Returns tuple where missing components are None / 'unknown'. Stripping order:
+        1. trailing _<mode>
+        2. trailing _seed<N>
+        3. trailing _v<N>
+        4. trailing _<dataset>
+    """
+    s = stem
+    mode = None
+    m = _MODE_RE.search(s)
+    if m:
+        mode = m.group(1)
+        s = s[:m.start()]
+    seed = None
+    m = _SEED_RE.search(s)
+    if m:
+        seed = int(m.group(1))
+        s = s[:m.start()]
+    version = None
+    m = _VERSION_RE.search(s)
+    if m:
+        version = m.group(0).lstrip("_")
+        s = s[:m.start()]
+    dataset = "unknown"
+    for ds in _DATASETS:
+        if s.endswith(f"_{ds}"):
+            dataset = ds
+            s = s[: -(len(ds) + 1)]
+            break
+    canonical_model = s
+    return canonical_model, dataset, version, seed, mode
 
 
 def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
@@ -137,10 +190,14 @@ def build_all_comparison_tables(results_dir: str, datasets: Optional[List[str]] 
 def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
     """
     Scan results/tables/ for all *_metrics.json files and compile into one DataFrame.
-    Includes all metric columns (log-space and raw-currency).
+
+    Each file becomes one row; canonical_model / dataset / version / seed / mode
+    are parsed from the run_name via parse_run_name. Includes all metric columns
+    (log-space and raw-currency).
 
     Returns:
-        DataFrame with columns: model, dataset, + all available metric columns
+        DataFrame with columns:
+            model, dataset, version, seed, mode, + all available metric columns
     """
     tables_dir = Path(results_dir) / "tables"
     if not tables_dir.exists():
@@ -161,26 +218,78 @@ def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
             metrics = json.load(f)
 
         stem = Path(fpath).stem.removesuffix("_metrics")
+        canonical_model, dataset, version, seed, mode = parse_run_name(stem)
+        # Benchmarks store dataset/model directly in the JSON; prefer those.
+        if "dataset" in metrics:
+            dataset = metrics["dataset"]
+        if "model" in metrics:
+            canonical_model = metrics["model"]
 
-        # Infer dataset name from the run name (heuristic)
-        dataset = "unknown"
-        for ds in ("cdnow", "uci", "tafeng", "dunnhumby"):
-            if ds in stem:
-                dataset = ds
-                break
-
-        model_name = metrics.get("model", stem.replace(f"_{dataset}", "").strip("_"))
-
-        row = {"model": model_name, "dataset": dataset, **metrics}
-        row.pop("model", None)  # avoid duplicate after explicit assignment
-        row = {"model": model_name, "dataset": dataset}
-        row.update({k: v for k, v in metrics.items() if k != "model"})
+        row = {
+            "model": canonical_model,
+            "dataset": dataset,
+            "version": version,
+            "seed": seed,
+            "mode": mode,
+        }
+        row.update({k: v for k, v in metrics.items() if k not in ("model", "dataset")})
         rows.append(row)
 
     df = pd.DataFrame(rows)
     df["_sort"] = df["model"].apply(_sort_key)
     df = df.sort_values(["dataset", "_sort"]).drop("_sort", axis=1).reset_index(drop=True)
     return df
+
+
+def aggregate_seeds(
+    df: pd.DataFrame,
+    metric_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """
+    Group seeded runs by (model, dataset, mode, version) and report mean ± std.
+
+    For benchmarks (no seed column), the row passes through unchanged with
+    mean = value and std = NaN.
+
+    Args:
+        df:          DataFrame from aggregate_all_results.
+        metric_cols: Which metric columns to aggregate. Defaults to the union of
+                     numeric columns minus identifying ones.
+
+    Returns:
+        DataFrame with columns: model, dataset, mode, version, n_seeds, and for
+        each metric two columns "<metric>_mean" and "<metric>_std".
+    """
+    if df.empty:
+        return df
+
+    if metric_cols is None:
+        ignore = {"model", "dataset", "version", "seed", "mode"}
+        metric_cols = [
+            c for c in df.columns
+            if c not in ignore and pd.api.types.is_numeric_dtype(df[c])
+        ]
+
+    group_keys = ["model", "dataset", "mode", "version"]
+    rows = []
+    # Use dropna=False so benchmark rows (mode/version/seed all NaN) still group.
+    for keys, sub in df.groupby(group_keys, dropna=False):
+        out = dict(zip(group_keys, keys))
+        out["n_seeds"] = int(sub["seed"].notna().sum()) if "seed" in sub.columns else 0
+        for col in metric_cols:
+            vals = sub[col].dropna().astype(float)
+            if vals.empty:
+                out[f"{col}_mean"] = float("nan")
+                out[f"{col}_std"] = float("nan")
+            else:
+                out[f"{col}_mean"] = float(vals.mean())
+                out[f"{col}_std"] = float(vals.std(ddof=1)) if len(vals) > 1 else 0.0
+        rows.append(out)
+
+    agg = pd.DataFrame(rows)
+    agg["_sort"] = agg["model"].apply(_sort_key)
+    agg = agg.sort_values(["dataset", "_sort"]).drop("_sort", axis=1).reset_index(drop=True)
+    return agg
 
 
 def export_latex_table(
@@ -344,6 +453,8 @@ if __name__ == "__main__":
     parser.add_argument("--plots", action="store_true", help="Generate comparison bar charts")
     parser.add_argument("--weights", action="store_true",
                         help="Generate Kendall weight evolution plots")
+    parser.add_argument("--seeds", action="store_true",
+                        help="Aggregate seeded runs (mean ± std) into comparison_seeds.csv")
     parser.add_argument("--all", action="store_true", help="Run all output types")
     args = parser.parse_args()
 
@@ -366,6 +477,12 @@ if __name__ == "__main__":
         if do_all or args.weights:
             plot_kendall_weight_evolution(results_dir=args.results_dir)
 
+        if do_all or args.seeds:
+            seeds_df = aggregate_seeds(df)
+            out_path = Path(args.results_dir) / "tables" / "comparison_seeds.csv"
+            seeds_df.to_csv(out_path, index=False)
+            print(f"Saved: {out_path}")
+
         # Always save the aggregated CSV
-        df.to_csv("results/tables/comparison_all.csv", index=False)
-        print("Saved: results/tables/comparison_all.csv")
+        df.to_csv(Path(args.results_dir) / "tables" / "comparison_all.csv", index=False)
+        print(f"Saved: {Path(args.results_dir) / 'tables' / 'comparison_all.csv'}")

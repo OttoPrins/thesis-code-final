@@ -4,7 +4,7 @@ dataset:
   raw_dir: data/raw
   calibration_weeks: 39
   holdout_weeks: 13
-  min_active_weeks: 3
+  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-percentile cap from calibration data
 

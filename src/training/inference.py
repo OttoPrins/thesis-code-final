@@ -300,6 +300,12 @@ def autoregressive_inference_transformer(
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
+        # Elapsed-time seed (precomputed in SequenceBuilder); fall back to zeros
+        # for legacy datasets that don't expose it.
+        seed_delta_t = batch.get("seed_delta_t")
+        if seed_delta_t is not None:
+            seed_delta_t = seed_delta_t.to(device)
+
         covariates = None
         if "covariates" in batch and batch["covariates"] is not None:
             covariates = batch["covariates"].to(device)  # (B, T_total, C)
@@ -313,13 +319,21 @@ def autoregressive_inference_transformer(
             activity = np.zeros((B, H), dtype=np.float32)
             spend_preds = np.zeros((B, H), dtype=np.float32) if joint else None
 
+            # delta_t state at the end of warm-up: weeks since last purchase as
+            # of step T_calib - 1. Updated each holdout step from the freshly
+            # sampled (or expected) prev_trans.
+            cur_delta_t: Optional[torch.Tensor] = None
+            if seed_delta_t is not None:
+                cur_delta_t = seed_delta_t[:, -1].clone()  # (B,)
+
             if use_kv_cache:
                 # --- KV-cached path ---
                 cov_warmup = (
                     covariates[:, :calibration_weeks, :] if covariates is not None else None
                 )
                 warmup_out = model(
-                    seed_week, seed_trans, kv_cache=[], covariates=cov_warmup
+                    seed_week, seed_trans, kv_cache=[],
+                    covariates=cov_warmup, delta_t=seed_delta_t,
                 )
                 if joint:
                     freq_logits, log_spend, kv_cache = warmup_out
@@ -340,6 +354,13 @@ def autoregressive_inference_transformer(
                     week_input = torch.full((B, 1), week_idx, dtype=torch.long, device=device)
                     trans_input = prev_trans.unsqueeze(1)
 
+                    # Update elapsed-time state from the just-sampled prev_trans.
+                    delta_t_step: Optional[torch.Tensor] = None
+                    if cur_delta_t is not None:
+                        purchased = (prev_trans > 0).to(cur_delta_t.dtype)
+                        cur_delta_t = (1.0 - purchased) * (cur_delta_t + 1.0)
+                        delta_t_step = cur_delta_t.unsqueeze(1)  # (B, 1)
+
                     cov_step = None
                     if covariates is not None:
                         step_idx = calibration_weeks + h
@@ -347,7 +368,8 @@ def autoregressive_inference_transformer(
                             cov_step = covariates[:, step_idx: step_idx + 1, :]
 
                     step_out = model(
-                        week_input, trans_input, kv_cache=kv_cache, covariates=cov_step
+                        week_input, trans_input, kv_cache=kv_cache,
+                        covariates=cov_step, delta_t=delta_t_step,
                     )
                     if joint:
                         freq_logits_step, log_spend_step, kv_cache = step_out
@@ -365,12 +387,17 @@ def autoregressive_inference_transformer(
                 # --- Non-cached path (for correctness verification) ---
                 ctx_week = seed_week.clone()
                 ctx_trans = seed_trans.clone()
+                ctx_delta_t = (
+                    seed_delta_t.clone() if seed_delta_t is not None else None
+                )
 
                 for h in range(H):
                     cov_ctx = (
                         covariates[:, :calibration_weeks + h, :] if covariates is not None else None
                     )
-                    out = model(ctx_week, ctx_trans, covariates=cov_ctx)
+                    out = model(
+                        ctx_week, ctx_trans, covariates=cov_ctx, delta_t=ctx_delta_t
+                    )
                     if joint:
                         freq_logits, log_spend = out
                         spend_preds[:, h] = log_spend[:, -1].cpu().numpy()
@@ -389,6 +416,12 @@ def autoregressive_inference_transformer(
                     )
                     ctx_week = torch.cat([ctx_week, next_week], dim=1)
                     ctx_trans = torch.cat([ctx_trans, next_class.unsqueeze(1)], dim=1)
+                    if ctx_delta_t is not None:
+                        purchased = (next_class > 0).to(ctx_delta_t.dtype)
+                        next_delta_t = (1.0 - purchased) * (ctx_delta_t[:, -1] + 1.0)
+                        ctx_delta_t = torch.cat(
+                            [ctx_delta_t, next_delta_t.unsqueeze(1)], dim=1
+                        )
 
             scenario_freq += preds
             scenario_activity += activity

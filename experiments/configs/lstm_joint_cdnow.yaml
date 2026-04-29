@@ -4,7 +4,7 @@ dataset:
   raw_dir: data/raw
   calibration_weeks: 52
   holdout_weeks: 26   # dataset ends at week 77; only 26 real holdout weeks available
-  min_active_weeks: 5
+  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
 

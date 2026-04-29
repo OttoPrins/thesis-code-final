@@ -77,7 +77,14 @@ class Trainer:
                 freq_logits, _ = self.model(week, trans, covariates=covariates)
                 log_spend = None
         elif isinstance(self.model, TransformerModel):
-            out = self.model(week, trans, padding_mask=mask, covariates=covariates)
+            # Pass elapsed-time feature so Time2Vec learns inter-transaction
+            # regularities (the BTYD signal) rather than absolute calendar position.
+            delta_t = batch.get("delta_t")
+            if delta_t is not None:
+                delta_t = delta_t.to(self.device)
+            out = self.model(
+                week, trans, padding_mask=mask, covariates=covariates, delta_t=delta_t
+            )
             if self.joint:
                 freq_logits, log_spend = out
             else:

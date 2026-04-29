@@ -5,7 +5,7 @@ dataset:
   raw_dir: data/raw
   calibration_weeks: 39    # ~9 months calibration
   holdout_weeks: 13        # ~3 months holdout
-  min_active_weeks: 3      # UCI is sparser than CDNOW; lower threshold
+  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-percentile cap derived from calibration weekly counts
 

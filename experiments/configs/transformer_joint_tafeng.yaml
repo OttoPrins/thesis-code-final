@@ -6,7 +6,7 @@ dataset:
   raw_dir: data/raw
   calibration_weeks: 12   # aligned with lstm_*_tafeng configs for fair comparison
   holdout_weeks: 5
-  min_active_weeks: 2
+  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-percentile cap from calibration
 

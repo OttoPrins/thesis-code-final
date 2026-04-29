@@ -9,15 +9,18 @@ Design constraints (from CLAUDE.md):
     - Frequency discretised to {0, 1, ..., cap} where the cap is the 99th
       percentile of nonzero weekly counts on the calibration set (Valendin's
       "use all observed classes" rule, made data-driven)
-    - Spend always log1p-transformed
+    - Spend always log1p-transformed (no further scaling — see SpendScaler)
     - Scaler fitted on calibration set ONLY (no holdout leakage)
     - Sequences padded with zeros; mask marks padding positions
+    - min_active_weeks defaults to 1: every customer that ever transacted in
+      calibration is kept. This preserves the long tail of one-time / infrequent
+      buyers that BTYD (and the deep models that replace it) need to learn
+      latent churn from.
 """
 
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
 
 
 def compute_freq_cap(weekly_freq: np.ndarray, q: float = 0.99) -> int:
@@ -63,6 +66,36 @@ def resolve_freq_bins(dataset_cfg: dict, calib_weekly_freq: np.ndarray) -> list:
     bins = list(range(cap + 1))
     print(f"[pipeline] freq_cap={cap} ({source}) → freq_bins={bins[:4]}{'...' if len(bins)>4 else ''} (n_classes={len(bins)})")
     return bins
+
+
+def compute_delta_t(trans_grid: np.ndarray) -> np.ndarray:
+    """
+    Per-step elapsed time since the most recent purchase.
+
+    Args:
+        trans_grid: (N, T) integer transaction counts on a dense weekly grid.
+
+    Returns:
+        delta_t: (N, T) float32 — at each step t, weeks since the most recent
+                 purchase observed at or before t. Zero before the customer's
+                 first purchase (sentinel "no history yet"). Zero on a step
+                 where the customer just transacted.
+
+    BTYD models (Pareto/NBD, Pareto/GGG) infer churn from inter-transaction
+    times — i.e., elapsed time, not absolute calendar position. Feeding this
+    feature to attention-based models gives them the same regularity signal
+    that their probabilistic counterparts rely on.
+    """
+    N, T = trans_grid.shape
+    delta_t = np.zeros((N, T), dtype=np.float32)
+    weeks_since = np.zeros(N, dtype=np.float32)
+    has_purchased = np.zeros(N, dtype=bool)
+    for t in range(T):
+        purchased_now = trans_grid[:, t] > 0
+        weeks_since = np.where(purchased_now, 0.0, weeks_since + 1.0)
+        has_purchased = has_purchased | purchased_now
+        delta_t[:, t] = np.where(has_purchased, weeks_since, 0.0)
+    return delta_t
 
 
 class WeeklyAggregator:
@@ -122,30 +155,43 @@ class TemporalSplitter:
 
 class SpendScaler:
     """
-    Applies log1p to spend, then optionally MinMax-scales to [0, 1].
+    Applies log1p to spend. No further scaling.
 
-    Fitted on calibration set only. Applied to both calibration and holdout.
+    Why no MinMaxScaler: with Kendall homoscedastic uncertainty weighting
+    (Kendall et al. 2018), the per-task variances σ_i² are learnable
+    parameters that adapt to the natural scale of each loss. If we crush
+    log-spend into [0, 1], the MSE loss becomes orders of magnitude smaller
+    than the cross-entropy loss; log_var_spend then has to compensate by
+    becoming very negative, but the gradient signal flowing into the spend
+    head is correspondingly tiny. Working in raw log-space lets the
+    uncertainty parameters do their job on losses with comparable scales.
+
+    log1p (rather than plain log) handles the log(0) on inactive weeks where
+    weekly_spend = 0; spend masking in the trainer ensures inactive-week
+    targets do not contribute to the spend loss.
+
+    Fitted on calibration set only (kept stateless to make leakage impossible).
     """
 
-    def __init__(self, scale: bool = True):
-        self.scale = scale
-        self._scaler = MinMaxScaler() if scale else None
+    def __init__(self, scale: bool = False):
+        # `scale` is retained for API compatibility but is now a no-op.
+        # Explicitly forbid the historical MinMax behaviour: it interacts badly
+        # with Kendall's homoscedastic loss weighting.
+        if scale:
+            raise ValueError(
+                "SpendScaler(scale=True) is deprecated. Pass scale=False (default); "
+                "raw log1p-spend keeps the spend MSE on a scale comparable to the "
+                "frequency CrossEntropy, which is what Kendall task uncertainty "
+                "weighting assumes."
+            )
 
     def fit_transform(self, spend: np.ndarray) -> np.ndarray:
-        log_spend = np.log1p(spend)
-        if self.scale:
-            log_spend = self._scaler.fit_transform(log_spend.reshape(-1, 1)).flatten()
-        return log_spend
+        return np.log1p(spend).astype(np.float32)
 
     def transform(self, spend: np.ndarray) -> np.ndarray:
-        log_spend = np.log1p(spend)
-        if self.scale and self._scaler is not None:
-            log_spend = self._scaler.transform(log_spend.reshape(-1, 1)).flatten()
-        return log_spend
+        return np.log1p(spend).astype(np.float32)
 
     def inverse_transform_spend(self, log_spend: np.ndarray) -> np.ndarray:
-        if self.scale and self._scaler is not None:
-            log_spend = self._scaler.inverse_transform(log_spend.reshape(-1, 1)).flatten()
         return np.expm1(log_spend)
 
 
@@ -159,12 +205,19 @@ class SequenceBuilder:
     - Teacher-forcing shift: input = steps 0..T-2, target = steps 1..T-1.
     - Full unshifted sequence stored as "seed" for autoregressive inference.
 
+    Long-tail policy:
+    - min_active_weeks defaults to 1. Customers with as few as one purchase in
+      calibration are kept. Filtering low-frequency buyers introduces survivorship
+      bias and removes precisely the customers BTYD models rely on to learn
+      latent churn signals.
+
     Input: calibration DataFrame with columns [customer_id, week, weekly_freq, weekly_spend]
            (weekly_spend already log-transformed by SpendScaler as 'log_spend')
-    Output: dict of numpy arrays ready for CustomerDataset.
+    Output: dict of numpy arrays ready for CustomerDataset (also includes delta_t,
+            the per-step elapsed-time signal used by the Transformer's Time2Vec).
     """
 
-    def __init__(self, calibration_weeks: int = 52, min_active_weeks: int = 5,
+    def __init__(self, calibration_weeks: int = 52, min_active_weeks: int = 1,
                  freq_bins: list = None):
         self.calibration_weeks = calibration_weeks
         self.min_active_weeks = min_active_weeks
@@ -179,17 +232,19 @@ class SequenceBuilder:
             df: DataFrame with columns [customer_id, week, weekly_freq, log_spend]
 
         Returns dict with keys:
-            week_input   : (N, T-1) int32   — week indices for input steps
-            trans_input  : (N, T-1) int32   — transaction counts (teacher forcing)
-            spend_input  : (N, T-1) float32 — log-spend at each input step
-            y_freq       : (N, T-1) int32   — target freq class, shifted +1
-            y_spend      : (N, T-1) float32 — target log-spend, shifted +1
-            customer_ids : (N,)     int64   — customer identifiers
-            mask         : (N, T-1) float32 — 1=real, 0=padding
-            seed_week    : (N, T)   int32   — full calibration weeks (inference)
-            seed_trans   : (N, T)   int32   — full calibration trans (inference)
-            seed_spend   : (N, T)   float32 — full calibration spend (inference)
-            max_trans    : int              — clipping value used
+            week_input    : (N, T-1) int32   — week indices for input steps
+            trans_input   : (N, T-1) int32   — transaction counts (teacher forcing)
+            spend_input   : (N, T-1) float32 — log-spend at each input step
+            delta_t_input : (N, T-1) float32 — weeks since last purchase at each input step
+            y_freq        : (N, T-1) int32   — target freq class, shifted +1
+            y_spend       : (N, T-1) float32 — target log-spend, shifted +1
+            customer_ids  : (N,)     int64   — customer identifiers
+            mask          : (N, T-1) float32 — 1=real, 0=padding
+            seed_week     : (N, T)   int32   — full calibration weeks (inference)
+            seed_trans    : (N, T)   int32   — full calibration trans (inference)
+            seed_spend    : (N, T)   float32 — full calibration spend (inference)
+            seed_delta_t  : (N, T)   float32 — full calibration delta_t (inference seed)
+            max_trans     : int              — clipping value used
         """
         T = self.calibration_weeks
         spend_col = "log_spend" if "log_spend" in df.columns else "weekly_spend"
@@ -197,7 +252,9 @@ class SequenceBuilder:
         # Filter to valid weeks only
         df_valid = df[(df["week"] >= 0) & (df["week"] < T)].copy()
 
-        # Count active weeks per customer and filter
+        # Count active weeks per customer and apply the long-tail-friendly threshold.
+        # min_active_weeks=1 keeps every customer with at least one transaction in
+        # the calibration window — required for BTYD-style latent churn modelling.
         active_counts = (
             df_valid[df_valid["weekly_freq"] > 0]
             .groupby("customer_id")["week"]
@@ -227,12 +284,17 @@ class SequenceBuilder:
         )
         full_spend[row_idx, col_idx] = df_fill[spend_col].values.astype(np.float32)
 
+        # Per-step elapsed-time signal — computed AFTER the dense grid is filled
+        # so the values reflect actual customer behaviour over the full window.
+        full_delta_t = compute_delta_t(full_trans)  # (N, T) float32
+
         # Teacher-forcing shift: input = [0..T-2], target = [1..T-1]
         week_input = full_weeks[:, :-1]       # (N, T-1)
-        trans_input = full_trans[:, :-1]       # (N, T-1)
-        spend_input = full_spend[:, :-1]       # (N, T-1)
-        y_freq = full_trans[:, 1:]             # (N, T-1)
-        y_spend = full_spend[:, 1:]            # (N, T-1)
+        trans_input = full_trans[:, :-1]      # (N, T-1)
+        spend_input = full_spend[:, :-1]      # (N, T-1)
+        delta_t_input = full_delta_t[:, :-1]  # (N, T-1)
+        y_freq = full_trans[:, 1:]            # (N, T-1)
+        y_spend = full_spend[:, 1:]           # (N, T-1)
 
         # Mask: all ones for fixed calibration period (every week is a valid observation)
         mask = np.ones((N, T - 1), dtype=np.float32)
@@ -243,6 +305,7 @@ class SequenceBuilder:
             "week_input": week_input,
             "trans_input": trans_input,
             "spend_input": spend_input,
+            "delta_t_input": delta_t_input,
             "y_freq": y_freq,
             "y_spend": y_spend,
             "customer_ids": customer_ids,
@@ -250,5 +313,6 @@ class SequenceBuilder:
             "seed_week": full_weeks,
             "seed_trans": full_trans,
             "seed_spend": full_spend,
+            "seed_delta_t": full_delta_t,
             "max_trans": self.max_trans,
         }

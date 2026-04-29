@@ -74,7 +74,7 @@ class DunnhumbyPipeline(BasePipeline):
         splitter = TemporalSplitter(calib_weeks, holdout_weeks)
         calib, holdout = splitter.split(agg)
 
-        scaler = SpendScaler(scale=True)
+        scaler = SpendScaler()
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 

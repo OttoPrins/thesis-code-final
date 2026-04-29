@@ -13,6 +13,16 @@ IMPORTANT constraints (from proposal — non-negotiable):
     - CAUSAL MASKING required during training. Each position can only attend to past positions.
     - Keep shallow (2-3 layers). This is NOT full BERT scale.
 
+ELAPSED-TIME INPUT (delta_t):
+    BTYD (Pareto/NBD, Pareto/GGG) infer churn from inter-transaction times — i.e.
+    elapsed time, not absolute calendar position. The Transformer is fed an
+    explicit `delta_t` tensor (weeks since the most recent purchase) and Time2Vec
+    operates on this elapsed-time signal rather than the absolute week index.
+    Sequential ordering is still injected through the sinusoidal positional
+    encoding; week-of-year periodicity is captured by the categorical week
+    embedding. If `delta_t` is omitted (e.g. for ablation), the model falls back
+    to the absolute week index for backwards-compatibility.
+
 KV CACHE (for efficient autoregressive inference):
     - CachedTransformerEncoderLayer implements per-layer key/value caching.
     - After warm-up over calibration sequence, cached K,V allow O(1) per new token
@@ -270,12 +280,18 @@ class TransformerModel(nn.Module):
         padding_mask: Optional[torch.Tensor] = None, # (B, T): 1=real, 0=padding
         kv_cache: Optional[List[Dict]] = None,       # per-layer cache for inference
         covariates: Optional[torch.Tensor] = None,   # (B, T, C) covariate features
+        delta_t: Optional[torch.Tensor] = None,      # (B, T) weeks since last purchase
     ):
         """
         Sequence-to-sequence with causal attention.
 
         Training (kv_cache=None): full causal self-attention via is_causal=True.
         Inference (kv_cache provided): single-token query over accumulated K,V cache.
+
+        delta_t: per-step elapsed time since the most recent purchase. Fed into
+        Time2Vec so the model sees a BTYD-style inter-transaction-time signal
+        rather than an absolute calendar index. If None (legacy callers),
+        falls back to the absolute week index.
 
         Returns:
             Without kv_cache:
@@ -293,8 +309,11 @@ class TransformerModel(nn.Module):
 
         h = self.input_proj(x)                     # (B, T, d_model)
 
-        # Time2Vec + sinusoidal PE (applied to full sequence for warmup; single step for gen)
-        t2v = self.time_proj(self.time2vec(week.float()))
+        # Time2Vec on elapsed time (BTYD-aligned). Sequential ordering is still
+        # provided by the sinusoidal positional encoding below; week-of-year
+        # periodicity is captured by the categorical week embedding above.
+        time_signal = delta_t.float() if delta_t is not None else week.float()
+        t2v = self.time_proj(self.time2vec(time_signal))
         h = h + t2v
         h = self.pos_enc(h)
 

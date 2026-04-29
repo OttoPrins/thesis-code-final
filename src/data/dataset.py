@@ -31,6 +31,7 @@ class CustomerDataset(Dataset):
         week        : (T-1,)  int   — week indices for input steps
         trans       : (T-1,)  int   — transaction counts (teacher forcing input)
         spend       : (T-1,)  float — log-spend at each input step
+        delta_t     : (T-1,)  float — weeks since last purchase at each step
         y_freq      : (T-1,)  int   — target frequency class at each step
         y_spend     : (T-1,)  float — target log-spend at each step
         mask        : (T-1,)  float — 1=real data, 0=padding
@@ -38,10 +39,11 @@ class CustomerDataset(Dataset):
         covariates  : (T-1, C) float — optional; covariate features for input steps
 
     Optional (for autoregressive inference, include_seed=True):
-        seed_week   : (T,)    int   — full calibration week sequence
-        seed_trans  : (T,)    int   — full calibration transaction sequence
-        seed_spend  : (T,)    float — full calibration spend sequence
-        covariates  : (T_total, C) float — full covariate trajectory (calib + holdout)
+        seed_week    : (T,)    int   — full calibration week sequence
+        seed_trans   : (T,)    int   — full calibration transaction sequence
+        seed_spend   : (T,)    float — full calibration spend sequence
+        seed_delta_t : (T,)    float — full calibration elapsed-time sequence
+        covariates   : (T_total, C) float — full covariate trajectory (calib + holdout)
     """
 
     def __init__(self, data: dict, include_seed: bool = False):
@@ -56,6 +58,13 @@ class CustomerDataset(Dataset):
         self.week = torch.tensor(data["week_input"], dtype=torch.long)    # (N, T-1)
         self.trans = torch.tensor(data["trans_input"], dtype=torch.long)
         self.spend = torch.tensor(data["spend_input"], dtype=torch.float32)
+        # delta_t (elapsed weeks since last purchase) is a recent addition; older
+        # cached pickles may not include it, so fall back to zeros to stay
+        # backwards-compatible.
+        if "delta_t_input" in data:
+            self.delta_t = torch.tensor(data["delta_t_input"], dtype=torch.float32)
+        else:
+            self.delta_t = torch.zeros_like(self.spend)
         self.y_freq = torch.tensor(data["y_freq"], dtype=torch.long)
         self.y_spend = torch.tensor(data["y_spend"], dtype=torch.float32)
         self.customer_ids = torch.tensor(data["customer_ids"], dtype=torch.long)
@@ -71,8 +80,13 @@ class CustomerDataset(Dataset):
             self.seed_week = torch.tensor(data["seed_week"], dtype=torch.long)
             self.seed_trans = torch.tensor(data["seed_trans"], dtype=torch.long)
             self.seed_spend = torch.tensor(data["seed_spend"], dtype=torch.float32)
+            if "seed_delta_t" in data:
+                self.seed_delta_t = torch.tensor(data["seed_delta_t"], dtype=torch.float32)
+            else:
+                self.seed_delta_t = torch.zeros_like(self.seed_spend)
         else:
             self.seed_week = None
+            self.seed_delta_t = None
 
         # Optional covariates (N, T_total, C) — Extension 3 (Dunnhumby only)
         self.covariates: Optional[torch.Tensor] = None
@@ -94,6 +108,7 @@ class CustomerDataset(Dataset):
             "week": self.week[idx],
             "trans": self.trans[idx],
             "spend": self.spend[idx],
+            "delta_t": self.delta_t[idx],
             "y_freq": self.y_freq[idx],
             "y_spend": self.y_spend[idx],
             "customer_id": self.customer_ids[idx],
@@ -103,6 +118,8 @@ class CustomerDataset(Dataset):
             item["seed_week"] = self.seed_week[idx]
             item["seed_trans"] = self.seed_trans[idx]
             item["seed_spend"] = self.seed_spend[idx]
+            if self.seed_delta_t is not None:
+                item["seed_delta_t"] = self.seed_delta_t[idx]
 
         if self.covariates is not None:
             if self.include_seed:

@@ -5,7 +5,7 @@ dataset:
   raw_dir: "data/raw/Dunnhumby datasets"
   calibration_weeks: 78
   holdout_weeks: 24
-  min_active_weeks: 5
+  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-pct cap from calibration
   include_covariates: false

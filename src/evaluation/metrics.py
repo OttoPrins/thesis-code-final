@@ -10,9 +10,9 @@ Cohort-level metrics:
     bias_pct:   Percentage bias = (sum_pred - sum_actual) / sum_actual * 100
 
 Spend aggregation (critical):
-    The model predicts per-week spend in a MinMax-scaled log1p space. To obtain
+    The model predicts per-week spend in raw log1p space. To obtain
     holdout-period total spend in raw currency we must inverse-transform each
-    week individually and then sum the raw-currency values. Summing the scaled
+    week individually (expm1) and then sum the raw-currency values. Summing
     log-space values directly is mathematically incoherent (sum of logs ≠ log
     of sum) and produces meaningless raw-currency results after inversion.
 
@@ -117,7 +117,7 @@ def aggregate_spend_to_raw_total(
     N, H = per_week_scaled_log.shape
     raw = scaler.inverse_transform_spend(per_week_scaled_log.reshape(-1))
     raw = raw.reshape(N, H)
-    # Floor small negatives from numerical error in inverse MinMax
+    # Floor any small negatives that numerical error in expm1 may introduce
     raw = np.clip(raw, 0.0, None)
     if activity_weights is not None:
         raw = raw * np.asarray(activity_weights, dtype=raw.dtype)

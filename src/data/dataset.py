@@ -9,10 +9,11 @@ Matches the input format expected by LSTMModel and TransformerModel:
     - trans: (B, T) integer transaction counts → nn.Embedding
 
 Optional covariate support (Extension 3 — Dunnhumby only):
-    Covariates are stored as (N, T_total, C) tensors where T_total covers both
-    calibration and holdout weeks.  During training __getitem__ returns the
-    calibration-input slice (T-1, C); inference items return the full (T_total, C)
-    trajectory so the autoregressive loop can pull holdout-week covariates step-by-step.
+    Static covariates (e.g. income, household size) are stored as (N, S) vectors —
+    constant per customer, no time dimension.
+    Dynamic covariates (e.g. coupon redemptions, campaign flag) are stored as
+    (N, T_total, D) tensors covering both calibration and holdout weeks, so the
+    autoregressive inference loop can slice holdout steps individually.
 """
 
 from __future__ import annotations
@@ -36,14 +37,17 @@ class CustomerDataset(Dataset):
         y_spend     : (T-1,)  float — target log-spend at each step
         mask        : (T-1,)  float — 1=real data, 0=padding
         customer_id : ()      int   — customer identifier
-        covariates  : (T-1, C) float — optional; covariate features for input steps
+
+    Optional (Extension 3 — Dunnhumby only):
+        static_covariates  : (S,)        float — static per-customer features (no time dim)
+        dynamic_covariates : (T-1, D) or (T_total, D) float — time-varying features;
+                             training slice = (T-1, D), inference = full (T_total, D)
 
     Optional (for autoregressive inference, include_seed=True):
         seed_week    : (T,)    int   — full calibration week sequence
         seed_trans   : (T,)    int   — full calibration transaction sequence
         seed_spend   : (T,)    float — full calibration spend sequence
         seed_delta_t : (T,)    float — full calibration elapsed-time sequence
-        covariates   : (T_total, C) float — full covariate trajectory (calib + holdout)
     """
 
     def __init__(self, data: dict, include_seed: bool = False):
@@ -52,7 +56,8 @@ class CustomerDataset(Dataset):
             data: dict from SequenceBuilder.build() with keys:
                   week_input, trans_input, spend_input,
                   y_freq, y_spend, customer_ids, mask
-                  Optionally: seed_week, seed_trans, seed_spend, covariates
+                  Optionally: seed_week, seed_trans, seed_spend,
+                              static_covariates, dynamic_covariates
             include_seed: if True, also store seed sequences (for inference)
         """
         self.week = torch.tensor(data["week_input"], dtype=torch.long)    # (N, T-1)
@@ -72,7 +77,7 @@ class CustomerDataset(Dataset):
         self.max_trans = data["max_trans"]
         self.include_seed = include_seed
 
-        # T-1 = input sequence length per sample (used for covariate slicing)
+        # T-1 = input sequence length per sample (used for dynamic covariate slicing)
         self._T_train = self.week.shape[1]
 
         # Seed sequences (for autoregressive inference)
@@ -88,17 +93,29 @@ class CustomerDataset(Dataset):
             self.seed_week = None
             self.seed_delta_t = None
 
-        # Optional covariates (N, T_total, C) — Extension 3 (Dunnhumby only)
-        self.covariates: Optional[torch.Tensor] = None
-        self.covariate_feature_names: Optional[List[str]] = None
-        if "covariates" in data and data["covariates"] is not None:
-            cov = data["covariates"]
-            self.covariates = torch.tensor(
-                cov if isinstance(cov, np.ndarray) else np.array(cov),
+        # Static covariates: (N, S) — constant per customer, no time dimension
+        self.static_covariates: Optional[torch.Tensor] = None
+        self.static_feature_names: Optional[List[str]] = None
+        if "static_covariates" in data and data["static_covariates"] is not None:
+            sc = data["static_covariates"]
+            self.static_covariates = torch.tensor(
+                sc if isinstance(sc, np.ndarray) else np.array(sc),
                 dtype=torch.float32,
-            )  # (N, T_total, C)
-        if "covariate_feature_names" in data:
-            self.covariate_feature_names = data["covariate_feature_names"]
+            )  # (N, S)
+        if "static_feature_names" in data:
+            self.static_feature_names = data["static_feature_names"]
+
+        # Dynamic covariates: (N, T_total, D) — time-varying, covers calib + holdout
+        self.dynamic_covariates: Optional[torch.Tensor] = None
+        self.dynamic_feature_names: Optional[List[str]] = None
+        if "dynamic_covariates" in data and data["dynamic_covariates"] is not None:
+            dc = data["dynamic_covariates"]
+            self.dynamic_covariates = torch.tensor(
+                dc if isinstance(dc, np.ndarray) else np.array(dc),
+                dtype=torch.float32,
+            )  # (N, T_total, D)
+        if "dynamic_feature_names" in data:
+            self.dynamic_feature_names = data["dynamic_feature_names"]
 
     def __len__(self):
         return len(self.week)
@@ -121,12 +138,16 @@ class CustomerDataset(Dataset):
             if self.seed_delta_t is not None:
                 item["seed_delta_t"] = self.seed_delta_t[idx]
 
-        if self.covariates is not None:
+        # Static covariates: always (S,) — same for training and inference
+        if self.static_covariates is not None:
+            item["static_covariates"] = self.static_covariates[idx]  # (S,)
+
+        # Dynamic covariates: training → input-aligned slice (T-1, D);
+        # inference → full trajectory (T_total, D) for holdout step slicing
+        if self.dynamic_covariates is not None:
             if self.include_seed:
-                # Inference: return full trajectory so holdout steps can be sliced
-                item["covariates"] = self.covariates[idx]          # (T_total, C)
+                item["dynamic_covariates"] = self.dynamic_covariates[idx]           # (T_total, D)
             else:
-                # Training: return only the input-aligned (T-1, C) slice
-                item["covariates"] = self.covariates[idx, :self._T_train, :]
+                item["dynamic_covariates"] = self.dynamic_covariates[idx, :self._T_train, :]  # (T-1, D)
 
         return item

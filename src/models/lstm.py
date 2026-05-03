@@ -55,8 +55,10 @@ class LSTMModel(nn.Module):
         n_classes:        Number of frequency classes (= max_trans + 1)
         dropout:          Dropout on dense layer output
         joint:            Extension 1: enable spend regression head
-        covariate_dim:    Optional number of covariate features (Extension 3 only)
-        covariate_emb_dim: Projection dimension for covariates (default 8)
+        static_cov_dim:   Number of static covariate features (e.g. income, hh_size).
+                          These are constant per customer and broadcast across T.
+        dynamic_cov_dim:  Number of time-varying covariate features (e.g. coupons, campaigns).
+        cov_emb_dim:      Projection dimension for each covariate type (default 8).
     """
 
     def __init__(
@@ -67,13 +69,15 @@ class LSTMModel(nn.Module):
         dense_units: int = 128,
         dropout: float = 0.0,
         joint: bool = False,
-        covariate_dim: Optional[int] = None,
-        covariate_emb_dim: int = 8,
+        static_cov_dim: int = 0,
+        dynamic_cov_dim: int = 0,
+        cov_emb_dim: int = 8,
     ):
         super().__init__()
         self.joint = joint
         self.max_trans = max_trans
-        self.covariate_dim = covariate_dim
+        self.static_cov_dim = static_cov_dim
+        self.dynamic_cov_dim = dynamic_cov_dim
         n_classes = max_trans + 1
 
         # Embedding layers (categorical inputs — not raw floats)
@@ -85,11 +89,17 @@ class LSTMModel(nn.Module):
 
         lstm_input_dim = week_emb_dim + trans_emb_dim
 
-        # Optional covariate projection (Extension 3)
-        self.covariate_proj: Optional[nn.Linear] = None
-        if covariate_dim is not None:
-            self.covariate_proj = nn.Linear(covariate_dim, covariate_emb_dim)
-            lstm_input_dim += covariate_emb_dim
+        # Static covariate projection (Extension 3): constant per customer, broadcast across T
+        self.static_proj: Optional[nn.Linear] = None
+        if static_cov_dim > 0:
+            self.static_proj = nn.Linear(static_cov_dim, cov_emb_dim)
+            lstm_input_dim += cov_emb_dim
+
+        # Dynamic covariate projection (Extension 3): time-varying per customer
+        self.dynamic_proj: Optional[nn.Linear] = None
+        if dynamic_cov_dim > 0:
+            self.dynamic_proj = nn.Linear(dynamic_cov_dim, cov_emb_dim)
+            lstm_input_dim += cov_emb_dim
 
         # Single LSTM layer — fixed at num_layers=1 to match Valendin et al. (2022)
         self.lstm = nn.LSTM(
@@ -113,10 +123,11 @@ class LSTMModel(nn.Module):
 
     def forward(
         self,
-        week: torch.Tensor,                      # (B, T) integer week indices
-        trans: torch.Tensor,                     # (B, T) integer transaction counts
-        hidden: Optional[Tuple] = None,          # (h_0, c_0) for stateful inference
-        covariates: Optional[torch.Tensor] = None,  # (B, T, C) optional covariate features
+        week: torch.Tensor,                              # (B, T) integer week indices
+        trans: torch.Tensor,                             # (B, T) integer transaction counts
+        hidden: Optional[Tuple] = None,                  # (h_0, c_0) for stateful inference
+        static_covariates: Optional[torch.Tensor] = None,   # (B, S) static per-customer
+        dynamic_covariates: Optional[torch.Tensor] = None,  # (B, T, D) time-varying
     ):
         """
         Sequence-to-sequence forward pass.
@@ -131,19 +142,32 @@ class LSTMModel(nn.Module):
             trans = previous prediction (B, 1)
             hidden = (h, c) from previous step (carry forward)
 
+        Covariate shapes:
+            static_covariates:  (B, S) — projected and broadcast across all T positions
+            dynamic_covariates: (B, T, D) — projected and concatenated per time step
+
         Returns:
             freq_logits: (B, T, n_classes)
             log_spend:   (B, T) — only if joint=True
             hidden:      (h_n, c_n)
         """
+        B, T = week.shape
+
         e_week = self.embed_week(week.clamp(0, self.embed_week.num_embeddings - 1))
         e_trans = self.embed_trans(trans.clamp(0, self.max_trans))
 
         x = torch.cat([e_week, e_trans], dim=-1)  # (B, T, week_emb + trans_emb)
 
-        if self.covariate_proj is not None and covariates is not None:
-            cov_emb = self.covariate_proj(covariates)  # (B, T, covariate_emb_dim)
-            x = torch.cat([x, cov_emb], dim=-1)
+        # Static covariates: project (B, S) → (B, cov_emb_dim), expand across T
+        if self.static_proj is not None and static_covariates is not None:
+            s_emb = self.static_proj(static_covariates)          # (B, cov_emb_dim)
+            s_emb = s_emb.unsqueeze(1).expand(-1, T, -1)        # (B, T, cov_emb_dim)
+            x = torch.cat([x, s_emb], dim=-1)
+
+        # Dynamic covariates: project (B, T, D) → (B, T, cov_emb_dim), concatenate
+        if self.dynamic_proj is not None and dynamic_covariates is not None:
+            d_emb = self.dynamic_proj(dynamic_covariates)        # (B, T, cov_emb_dim)
+            x = torch.cat([x, d_emb], dim=-1)
 
         lstm_out, hidden = self.lstm(x, hidden)  # lstm_out: (B, T, memory_units)
 

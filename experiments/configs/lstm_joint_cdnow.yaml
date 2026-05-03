@@ -27,7 +27,8 @@ training:
 
 loss:
   type: kendall         # homoscedastic uncertainty weighting (Kendall et al. 2018)
-  n_tasks: 2            # [frequency, spend]
+  n_tasks: 2
+  warmup_epochs: 5            # [frequency, spend]
 
 output:
   run_name: lstm_joint_cdnow_v2

@@ -54,3 +54,13 @@ class KendallMultiTaskLoss(nn.Module):
     def task_weights(self):
         """Return current effective task weights (1 / 2σ²) for logging."""
         return (0.5 * torch.exp(-self.log_vars)).detach()
+
+    def freeze_log_vars(self):
+        """Freeze log_vars at zero (equal task weighting) for warm-up epochs."""
+        self.log_vars.requires_grad_(False)
+        with torch.no_grad():
+            self.log_vars.zero_()
+
+    def unfreeze_log_vars(self):
+        """Unfreeze log_vars so Kendall weighting adapts dynamically."""
+        self.log_vars.requires_grad_(True)

@@ -89,10 +89,45 @@ def aggregate_cohort(
     }
 
 
+def compute_smearing_factor(
+    true_log1p: np.ndarray,
+    pred_log1p: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+) -> float:
+    """
+    Estimate Duan's smearing factor from validation residuals.
+
+    Computes S = mean(exp(true_log1p - pred_log1p)) over active validation steps.
+    Apply as: corrected_spend = raw_spend * S, where raw_spend = expm1(pred_log1p).
+
+    This corrects the downward bias from Jensen's Inequality: E[expm1(Z)] > expm1(E[Z]),
+    so naively inverting predicted log1p spend systematically under-predicts revenue.
+
+    Args:
+        true_log1p: (N, ...) array of true log1p spend values (e.g. validation y_spend)
+        pred_log1p: (N, ...) matching predicted log1p spend
+        mask:       optional boolean/float array of same shape; only masked-True
+                    positions contribute (e.g. active weeks where y_freq > 0).
+
+    Returns:
+        S: float smearing factor (>= 1 for right-skewed spend distributions)
+    """
+    residuals = np.asarray(true_log1p, dtype=np.float64) - np.asarray(pred_log1p, dtype=np.float64)
+    if mask is not None:
+        m = np.asarray(mask, dtype=bool).ravel()
+        residuals = residuals.ravel()[m]
+    else:
+        residuals = residuals.ravel()
+    if residuals.size == 0:
+        return 1.0
+    return float(np.mean(np.exp(residuals)))
+
+
 def aggregate_spend_to_raw_total(
     per_week_scaled_log: np.ndarray,
     scaler,
     activity_weights: Optional[np.ndarray] = None,
+    smearing_factor: Optional[float] = None,
 ) -> np.ndarray:
     """
     Convert a per-week scaled log-spend array to per-customer raw-currency totals.
@@ -110,6 +145,10 @@ def aggregate_spend_to_raw_total(
                              Used by deep models so a week the model predicts as
                              inactive contributes zero raw spend (sampling: 0/1
                              indicator; expected-value: P(freq>0)).
+        smearing_factor:     optional Duan's smearing correction (computed from
+                             validation residuals via compute_smearing_factor).
+                             Applied to predictions only — not to ground-truth paths.
+                             Corrects the downward bias from Jensen's Inequality.
 
     Returns:
         (N,) raw-currency holdout totals
@@ -119,6 +158,8 @@ def aggregate_spend_to_raw_total(
     raw = raw.reshape(N, H)
     # Floor any small negatives that numerical error in expm1 may introduce
     raw = np.clip(raw, 0.0, None)
+    if smearing_factor is not None and smearing_factor != 1.0:
+        raw = raw * float(smearing_factor)
     if activity_weights is not None:
         raw = raw * np.asarray(activity_weights, dtype=raw.dtype)
     return raw.sum(axis=1).astype(np.float32)
@@ -135,6 +176,7 @@ def compute_all_metrics(
     scaler=None,
     pred_activity_per_week: Optional[np.ndarray] = None,
     true_activity_per_week: Optional[np.ndarray] = None,
+    smearing_factor: Optional[float] = None,
 ) -> dict:
     """
     Compute all evaluation metrics and return as a flat dict.
@@ -156,6 +198,9 @@ def compute_all_metrics(
         y_spend_pred_per_week:   (N, H) per-week scaled log spend — prediction
         customer_ids:            (N,) customer identifiers (for cohort aggregation)
         scaler:                  fitted SpendScaler (required when per-week arrays given)
+        smearing_factor:         Duan's smearing correction factor from validation
+                                 residuals (applied to predictions only). Omit or pass
+                                 None to disable. Compute with compute_smearing_factor().
     """
     metrics = {
         "freq_rmse": freq_rmse(y_freq_true, y_freq_pred),
@@ -183,14 +228,20 @@ def compute_all_metrics(
             true_activity_per_week.astype(np.float32)
             if true_activity_per_week is not None else None
         )
+        # Ground truth: no smearing correction (we're inverting observed values)
         true_raw_total = aggregate_spend_to_raw_total(
             y_spend_true_per_week, scaler, activity_weights=true_weights,
         )
+        # Predictions: apply Duan's smearing factor to correct Jensen's Inequality bias
         pred_raw_total = aggregate_spend_to_raw_total(
-            y_spend_pred_per_week, scaler, activity_weights=pred_activity_per_week,
+            y_spend_pred_per_week, scaler,
+            activity_weights=pred_activity_per_week,
+            smearing_factor=smearing_factor,
         )
 
     if true_raw_total is not None and pred_raw_total is not None:
+        if smearing_factor is not None:
+            metrics["smearing_factor"] = float(smearing_factor)
         metrics["spend_mae_raw"] = _mae(true_raw_total, pred_raw_total)
         metrics["spend_rmse_raw"] = _rmse(true_raw_total, pred_raw_total)
 

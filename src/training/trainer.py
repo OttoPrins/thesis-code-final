@@ -6,10 +6,12 @@ Supports both base (frequency only) and joint (frequency + spend) models.
 Supports optional covariate features (Extension 3 — Dunnhumby only).
 
 Architecture:
-    - LSTMModel.forward(week, trans, hidden=None, covariates=None) → (freq_logits, hidden)
-      or (freq_logits, log_spend, hidden) when joint=True
-    - TransformerModel.forward(week, trans, padding_mask=None, covariates=None) → freq_logits
-      or (freq_logits, log_spend) when joint=True
+    - LSTMModel.forward(week, trans, hidden=None,
+                        static_covariates=None, dynamic_covariates=None)
+      → (freq_logits, hidden) or (freq_logits, log_spend, hidden) when joint=True
+    - TransformerModel.forward(week, trans, padding_mask=None,
+                               static_covariates=None, dynamic_covariates=None)
+      → freq_logits or (freq_logits, log_spend) when joint=True
 
 Loss:
     - Base: masked mean CrossEntropy over all T time steps
@@ -45,6 +47,7 @@ class Trainer:
         joint: bool = False,
         multi_task_loss: nn.Module = None,
         max_grad_norm: float = 1.0,
+        kendall_warmup_epochs: int = 5,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -52,6 +55,8 @@ class Trainer:
         self.joint = joint
         self.multi_task_loss = multi_task_loss
         self.max_grad_norm = max_grad_norm
+        self.kendall_warmup_epochs = kendall_warmup_epochs
+        self.current_epoch: int = 0
 
     def _forward(self, batch: dict):
         """
@@ -65,16 +70,27 @@ class Trainer:
         trans = batch["trans"].to(self.device)
         mask = batch["mask"].to(self.device)
 
-        # Covariates are optional (Extension 3 only)
-        covariates = None
-        if "covariates" in batch and batch["covariates"] is not None:
-            covariates = batch["covariates"].to(self.device)  # (B, T, C)
+        # Covariates are optional (Extension 3 — Dunnhumby only)
+        static_cov = None
+        dynamic_cov = None
+        if "static_covariates" in batch and batch["static_covariates"] is not None:
+            static_cov = batch["static_covariates"].to(self.device)   # (B, S)
+        if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
+            dynamic_cov = batch["dynamic_covariates"].to(self.device)  # (B, T, D)
 
         if isinstance(self.model, LSTMModel):
             if self.joint:
-                freq_logits, log_spend, _ = self.model(week, trans, covariates=covariates)
+                freq_logits, log_spend, _ = self.model(
+                    week, trans,
+                    static_covariates=static_cov,
+                    dynamic_covariates=dynamic_cov,
+                )
             else:
-                freq_logits, _ = self.model(week, trans, covariates=covariates)
+                freq_logits, _ = self.model(
+                    week, trans,
+                    static_covariates=static_cov,
+                    dynamic_covariates=dynamic_cov,
+                )
                 log_spend = None
         elif isinstance(self.model, TransformerModel):
             # Pass elapsed-time feature so Time2Vec learns inter-transaction
@@ -83,7 +99,11 @@ class Trainer:
             if delta_t is not None:
                 delta_t = delta_t.to(self.device)
             out = self.model(
-                week, trans, padding_mask=mask, covariates=covariates, delta_t=delta_t
+                week, trans,
+                padding_mask=mask,
+                static_covariates=static_cov,
+                dynamic_covariates=dynamic_cov,
+                delta_t=delta_t,
             )
             if self.joint:
                 freq_logits, log_spend = out
@@ -194,7 +214,24 @@ class Trainer:
             history["task_weight_freq"] = []
             history["task_weight_spend"] = []
 
+        # Freeze Kendall log_vars during warm-up so a large initial spend MSE
+        # doesn't drive log_var_spend to +10 and collapse the spend loss weight.
+        if self.joint and self.multi_task_loss is not None and self.kendall_warmup_epochs > 0:
+            self.multi_task_loss.freeze_log_vars()
+            print(f"[Kendall] log_vars frozen for {self.kendall_warmup_epochs} warm-up epochs.")
+
         for epoch in range(epochs):
+            self.current_epoch = epoch
+
+            # Unfreeze Kendall log_vars after warm-up
+            if (
+                self.joint
+                and self.multi_task_loss is not None
+                and epoch == self.kendall_warmup_epochs
+            ):
+                self.multi_task_loss.unfreeze_log_vars()
+                print(f"[Kendall] log_vars unfrozen at epoch {epoch + 1}.")
+
             train_metrics = self.train_epoch(train_loader)
             val_metrics = self.validate(val_loader)
 

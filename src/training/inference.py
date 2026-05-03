@@ -40,9 +40,11 @@ Spend prediction:
     inactive weeks contribute zero raw revenue.
 
 Covariate support (Extension 3):
-    When the inference batch contains a "covariates" key of shape (B, T_total, C),
-    the calibration slice [:,  :calibration_weeks, :] is fed during warm-up, and
-    covariate[:, calibration_weeks + h, :] is fed at each holdout step h.
+    When the inference batch contains "static_covariates" (B, S) and/or
+    "dynamic_covariates" (B, T_total, D) keys:
+    - static_covariates are passed unchanged at every step (they don't vary over time).
+    - dynamic_covariates[:,  :calibration_weeks, :] is fed during warm-up, and
+      dynamic_covariates[:, calibration_weeks + h, :] is fed at each holdout step h.
 """
 
 from __future__ import annotations
@@ -149,10 +151,15 @@ def autoregressive_inference_lstm(
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
-        # Covariates: (B, T_total, C) or None
-        covariates = None
-        if "covariates" in batch and batch["covariates"] is not None:
-            covariates = batch["covariates"].to(device)
+        # Static covariates: (B, S) — same at every step
+        static_cov = None
+        if "static_covariates" in batch and batch["static_covariates"] is not None:
+            static_cov = batch["static_covariates"].to(device)
+
+        # Dynamic covariates: (B, T_total, D) — slice per step
+        dynamic_cov = None
+        if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
+            dynamic_cov = batch["dynamic_covariates"].to(device)
 
         scenario_freq = np.zeros((B, H), dtype=np.float64)
         scenario_activity = np.zeros((B, H), dtype=np.float64)
@@ -160,13 +167,19 @@ def autoregressive_inference_lstm(
 
         for _ in range(n_scenarios):
             # Warm up: feed full calibration seed
-            cov_warmup = covariates[:, :calibration_weeks, :] if covariates is not None else None
+            dyn_warmup = dynamic_cov[:, :calibration_weeks, :] if dynamic_cov is not None else None
             if joint:
                 freq_logits, log_spend, hidden = model(
-                    seed_week, seed_trans, covariates=cov_warmup
+                    seed_week, seed_trans,
+                    static_covariates=static_cov,
+                    dynamic_covariates=dyn_warmup,
                 )
             else:
-                freq_logits, hidden = model(seed_week, seed_trans, covariates=cov_warmup)
+                freq_logits, hidden = model(
+                    seed_week, seed_trans,
+                    static_covariates=static_cov,
+                    dynamic_covariates=dyn_warmup,
+                )
 
             # Step 0 of holdout from last calibration output
             last_logits = freq_logits[:, -1, :]
@@ -188,21 +201,25 @@ def autoregressive_inference_lstm(
                 week_input = torch.full((B, 1), week_idx, dtype=torch.long, device=device)
                 trans_input = prev_trans.unsqueeze(1)
 
-                # Per-step covariate slice: (B, 1, C)
-                cov_step = None
-                if covariates is not None:
+                # Dynamic covariate slice for this holdout step: (B, 1, D)
+                dyn_step = None
+                if dynamic_cov is not None:
                     step_idx = calibration_weeks + h
-                    if step_idx < covariates.size(1):
-                        cov_step = covariates[:, step_idx: step_idx + 1, :]
+                    if step_idx < dynamic_cov.size(1):
+                        dyn_step = dynamic_cov[:, step_idx: step_idx + 1, :]
 
                 if joint:
                     freq_logits_step, log_spend_step, hidden = model(
-                        week_input, trans_input, hidden, covariates=cov_step
+                        week_input, trans_input, hidden,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dyn_step,
                     )
                     spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
                 else:
                     freq_logits_step, hidden = model(
-                        week_input, trans_input, hidden, covariates=cov_step
+                        week_input, trans_input, hidden,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dyn_step,
                     )
 
                 prev_trans, pred_val, p_active = _step_from_logits(
@@ -306,9 +323,13 @@ def autoregressive_inference_transformer(
         if seed_delta_t is not None:
             seed_delta_t = seed_delta_t.to(device)
 
-        covariates = None
-        if "covariates" in batch and batch["covariates"] is not None:
-            covariates = batch["covariates"].to(device)  # (B, T_total, C)
+        # Separate static / dynamic covariates (Extension 3 — Dunnhumby only)
+        static_cov = None
+        dynamic_cov = None
+        if "static_covariates" in batch and batch["static_covariates"] is not None:
+            static_cov = batch["static_covariates"].to(device)   # (B, S)
+        if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
+            dynamic_cov = batch["dynamic_covariates"].to(device)  # (B, T_total, D)
 
         scenario_freq = np.zeros((B, H), dtype=np.float64)
         scenario_activity = np.zeros((B, H), dtype=np.float64)
@@ -328,12 +349,14 @@ def autoregressive_inference_transformer(
 
             if use_kv_cache:
                 # --- KV-cached path ---
-                cov_warmup = (
-                    covariates[:, :calibration_weeks, :] if covariates is not None else None
+                dyn_warmup = (
+                    dynamic_cov[:, :calibration_weeks, :] if dynamic_cov is not None else None
                 )
                 warmup_out = model(
                     seed_week, seed_trans, kv_cache=[],
-                    covariates=cov_warmup, delta_t=seed_delta_t,
+                    static_covariates=static_cov,
+                    dynamic_covariates=dyn_warmup,
+                    delta_t=seed_delta_t,
                 )
                 if joint:
                     freq_logits, log_spend, kv_cache = warmup_out
@@ -361,15 +384,18 @@ def autoregressive_inference_transformer(
                         cur_delta_t = (1.0 - purchased) * (cur_delta_t + 1.0)
                         delta_t_step = cur_delta_t.unsqueeze(1)  # (B, 1)
 
-                    cov_step = None
-                    if covariates is not None:
+                    # Dynamic covariate slice for this step: (B, 1, D)
+                    dyn_step = None
+                    if dynamic_cov is not None:
                         step_idx = calibration_weeks + h
-                        if step_idx < covariates.size(1):
-                            cov_step = covariates[:, step_idx: step_idx + 1, :]
+                        if step_idx < dynamic_cov.size(1):
+                            dyn_step = dynamic_cov[:, step_idx: step_idx + 1, :]
 
                     step_out = model(
                         week_input, trans_input, kv_cache=kv_cache,
-                        covariates=cov_step, delta_t=delta_t_step,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dyn_step,
+                        delta_t=delta_t_step,
                     )
                     if joint:
                         freq_logits_step, log_spend_step, kv_cache = step_out
@@ -392,11 +418,14 @@ def autoregressive_inference_transformer(
                 )
 
                 for h in range(H):
-                    cov_ctx = (
-                        covariates[:, :calibration_weeks + h, :] if covariates is not None else None
+                    dyn_ctx = (
+                        dynamic_cov[:, :calibration_weeks + h, :] if dynamic_cov is not None else None
                     )
                     out = model(
-                        ctx_week, ctx_trans, covariates=cov_ctx, delta_t=ctx_delta_t
+                        ctx_week, ctx_trans,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dyn_ctx,
+                        delta_t=ctx_delta_t,
                     )
                     if joint:
                         freq_logits, log_spend = out

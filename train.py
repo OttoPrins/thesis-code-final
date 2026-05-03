@@ -49,8 +49,9 @@ def build_model(config: dict) -> torch.nn.Module:
     model_cfg = config["model"]
     joint = model_cfg.get("joint", False)
     model_type = model_cfg["type"]
-    covariate_dim = model_cfg.get("covariate_dim", None)
-    covariate_emb_dim = model_cfg.get("covariate_emb_dim", 8)
+    static_cov_dim = model_cfg.get("static_cov_dim", 0)
+    dynamic_cov_dim = model_cfg.get("dynamic_cov_dim", 0)
+    cov_emb_dim = model_cfg.get("cov_emb_dim", 8)
 
     if model_type == "lstm":
         return LSTMModel(
@@ -60,8 +61,9 @@ def build_model(config: dict) -> torch.nn.Module:
             dense_units=model_cfg["hidden_size"],
             dropout=model_cfg.get("dropout", 0.0),
             joint=joint,
-            covariate_dim=covariate_dim,
-            covariate_emb_dim=covariate_emb_dim,
+            static_cov_dim=static_cov_dim,
+            dynamic_cov_dim=dynamic_cov_dim,
+            cov_emb_dim=cov_emb_dim,
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -74,8 +76,9 @@ def build_model(config: dict) -> torch.nn.Module:
             dropout=model_cfg.get("dropout", 0.1),
             time2vec_dim=model_cfg.get("time2vec_dim", 8),
             joint=joint,
-            covariate_dim=covariate_dim,
-            covariate_emb_dim=covariate_emb_dim,
+            static_cov_dim=static_cov_dim,
+            dynamic_cov_dim=dynamic_cov_dim,
+            cov_emb_dim=cov_emb_dim,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
@@ -169,6 +172,7 @@ def main():
 
     # Train
     print(f"\nTraining for up to {training_cfg['epochs']} epochs ...")
+    loss_cfg = config.get("loss", {})
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
@@ -176,6 +180,7 @@ def main():
         joint=joint,
         multi_task_loss=multi_task_loss,
         max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
+        kendall_warmup_epochs=loss_cfg.get("warmup_epochs", 5),
     )
     history = trainer.fit(
         train_loader=train_loader,

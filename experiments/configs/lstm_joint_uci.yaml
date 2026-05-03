@@ -28,6 +28,7 @@ training:
 loss:
   type: kendall
   n_tasks: 2
+  warmup_epochs: 5
 
 output:
   run_name: lstm_joint_uci_v2

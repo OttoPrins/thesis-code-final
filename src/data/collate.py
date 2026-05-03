@@ -24,12 +24,15 @@ def collate_fn(batch):
         y_spend     : (B, T-1)  float
         customer_id : (B,)      long
         mask        : (B, T-1)  float
-    Optional:
+    Optional (Extension 3 — Dunnhumby only):
+        static_covariates  : (B, S)        float — static per-customer features
+        dynamic_covariates : (B, T, D)     float — training slice or (B, T_total, D)
+                             for inference trajectories
+    Optional (inference seed):
         seed_week    : (B, T)    long
         seed_trans   : (B, T)    long
         seed_spend   : (B, T)    float
         seed_delta_t : (B, T)    float
-        covariates   : (B, T, C) float  — training slice or (B, T_total, C) inference trajectory
     """
     result = {
         "week": torch.stack([item["week"] for item in batch]),
@@ -53,8 +56,14 @@ def collate_fn(batch):
                 [item["seed_delta_t"] for item in batch]
             )
 
-    if "covariates" in batch[0]:
-        # Handles both (T-1, C) training slices and (T_total, C) inference trajectories
-        result["covariates"] = torch.stack([item["covariates"] for item in batch])
+    if "static_covariates" in batch[0]:
+        result["static_covariates"] = torch.stack(
+            [item["static_covariates"] for item in batch]
+        )  # (B, S)
+
+    if "dynamic_covariates" in batch[0]:
+        result["dynamic_covariates"] = torch.stack(
+            [item["dynamic_covariates"] for item in batch]
+        )  # (B, T, D) or (B, T_total, D)
 
     return result

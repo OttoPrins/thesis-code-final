@@ -88,9 +88,10 @@ class DunnhumbyPipeline(BasePipeline):
         data = builder.build(calib)
 
         # Build covariates if requested (Extension 3)
-        covariates = None
+        static_cov = None
+        dynamic_cov = None
         if include_covariates:
-            covariates = self.build_covariates(
+            static_cov, dynamic_cov = self.build_covariates(
                 raw_dir, data["customer_ids"], calib_weeks, holdout_weeks
             )
 
@@ -104,15 +105,14 @@ class DunnhumbyPipeline(BasePipeline):
         train_data = _subset_data(data, train_idx)
         val_data = _subset_data(data, val_idx)
 
-        # Add covariates if they exist
-        if covariates is not None:
-            train_data["covariates"] = covariates[train_idx]
-            val_data["covariates"] = covariates[val_idx]
-            data["covariates"] = covariates
-            _feature_names = ["income", "household_size",
-                               "coupon_redemptions_week", "campaign_active_flag"]
+        # Attach separated static and dynamic covariates
+        if static_cov is not None:
+            for dset, idx in [(train_data, train_idx), (val_data, val_idx), (data, slice(None))]:
+                dset["static_covariates"] = static_cov[idx]
+                dset["dynamic_covariates"] = dynamic_cov[idx]
             for d in (train_data, val_data, data):
-                d["covariate_feature_names"] = _feature_names
+                d["static_feature_names"] = ["income", "household_size"]
+                d["dynamic_feature_names"] = ["coupon_redemptions_week", "campaign_active_flag"]
 
         train_ds = CustomerDataset(train_data, include_seed=False)
         val_ds = CustomerDataset(val_data, include_seed=True)
@@ -173,16 +173,15 @@ class DunnhumbyPipeline(BasePipeline):
         calibration_customer_ids: np.ndarray,
         calibration_weeks: int,
         holdout_weeks: int,
-    ) -> np.ndarray:
+    ):
         """
-        Build time-varying covariate tensor for Extension 3.
+        Build covariate tensors for Extension 3.
 
-        Returns: numpy array of shape (N_customers, T_total, 4), where
-            T_total = calibration_weeks + holdout_weeks, columns:
-                0: income_encoded          — static ordinal, broadcast across T
-                1: hh_size_encoded         — static ordinal, broadcast across T
-                2: coupon_redemptions_week — coupon redemption count per week
-                3: campaign_active_flag    — 1 if any campaign active this week
+        Returns a tuple (static_covariates, dynamic_covariates):
+            static_covariates:  (N, 2) — [income_encoded, hh_size_encoded]
+                                Constant per customer; broadcast over T at model input.
+            dynamic_covariates: (N, T_total, 2) — [coupon_redemptions_per_week,
+                                campaign_active_flag]. T_total = calib + holdout.
 
         Note: campaign exposure in the holdout period represents firm-controlled
         marketing decisions that are known at prediction time — including them is
@@ -277,13 +276,14 @@ class DunnhumbyPipeline(BasePipeline):
             if w_start <= w_end:
                 campaign_grid[cust_idx, w_start: w_end + 1] = 1.0
 
-        # --- Assemble (N, T_total, 4) ---
-        covariates = np.zeros((N, T_total, 4), dtype=np.float32)
-        covariates[:, :, 0] = income_vals[:, np.newaxis]    # broadcast across T
-        covariates[:, :, 1] = hh_size_vals[:, np.newaxis]   # broadcast across T
-        covariates[:, :, 2] = coupon_grid
-        covariates[:, :, 3] = campaign_grid
-        return covariates
+        # --- Assemble separated tensors ---
+        # Static: (N, 2) — income and household size (constant per customer)
+        static_covariates = np.stack([income_vals, hh_size_vals], axis=1)  # (N, 2)
+
+        # Dynamic: (N, T_total, 2) — coupon redemptions and campaign activity
+        dynamic_covariates = np.stack([coupon_grid, campaign_grid], axis=-1)  # (N, T_total, 2)
+
+        return static_covariates, dynamic_covariates
 
     @staticmethod
     def _build_holdout_ground_truth(

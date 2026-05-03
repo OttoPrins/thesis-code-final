@@ -149,11 +149,14 @@ class CachedTransformerEncoderLayer(nn.Module):
         self,
         x: torch.Tensor,                        # (B, T_new, d_model)
         kv_cache: Optional[Dict[str, torch.Tensor]] = None,
+        padding_mask: Optional[torch.Tensor] = None,  # (B, T_kv): 1=real, 0=padding
     ) -> Tuple[torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
         """
         Args:
-            x:        Input tensor — full sequence during training, single token during inference.
-            kv_cache: Dict {"k": (B, T_past, D), "v": (B, T_past, D)} or None.
+            x:            Input tensor — full sequence during training, single token during inference.
+            kv_cache:     Dict {"k": (B, T_past, D), "v": (B, T_past, D)} or None.
+            padding_mask: (B, T_kv) bool/float, 1=real token, 0=padding. Combined with
+                          the causal mask so padded positions never contribute to attention.
 
         Returns:
             output:    (B, T_new, d_model)
@@ -183,18 +186,42 @@ class CachedTransformerEncoderLayer(nn.Module):
         k_h = self._split_heads(k)
         v_h = self._split_heads(v)
 
-        # Use causal masking for full-sequence passes (training and warmup).
-        # Skip it only for single-step generation, where Q attends to all past K,V by construction.
-        # kv_cache=None     → training (full seq)     → causal=True
-        # kv_cache={} or missing "k" → warmup (full seq) → causal=True
-        # kv_cache={"k":..} → step (single token)    → causal=False
-        is_causal = (kv_cache is None) or ("k" not in kv_cache)
+        # Build combined attention mask when padding info is available.
+        # kv_cache=None     → training (full seq)     → need causal mask
+        # kv_cache={} or missing "k" → warmup (full seq) → need causal mask
+        # kv_cache={"k":..} → step (single token)    → no causal mask needed
+        is_full_sequence = (kv_cache is None) or ("k" not in kv_cache)
         dropout_p = self._dropout_p if self.training else 0.0
-        attn_out = F.scaled_dot_product_attention(
-            q_h, k_h, v_h, dropout_p=dropout_p, is_causal=is_causal
-        )  # (B, H, T_q, head_dim)
+
+        if padding_mask is not None:
+            # Build explicit additive mask: -inf where masked, 0 elsewhere.
+            # Shape: (B, 1, T_q, T_kv) for broadcasting over heads.
+            B, T_kv = k.shape[0], k.shape[1]
+            T_q = q.shape[1]
+            # padding_mask: (B, T_kv) — True means real token
+            pad = padding_mask.bool()[:, None, None, :]  # (B, 1, 1, T_kv)
+            # Expand to (B, 1, T_q, T_kv) to suppress masked key positions
+            attn_mask = torch.zeros(B, 1, T_q, T_kv, dtype=q.dtype, device=q.device)
+            attn_mask = attn_mask.masked_fill(~pad, float("-inf"))
+            if is_full_sequence:
+                # OR in upper-triangular causal mask (mask future positions too)
+                causal = torch.ones(T_q, T_kv, dtype=torch.bool, device=q.device).triu(1)
+                attn_mask = attn_mask.masked_fill(causal[None, None], float("-inf"))
+            attn_out = F.scaled_dot_product_attention(
+                q_h, k_h, v_h, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=False
+            )
+        else:
+            # No padding mask: use the fast is_causal path (avoids materialising the mask)
+            attn_out = F.scaled_dot_product_attention(
+                q_h, k_h, v_h, dropout_p=dropout_p, is_causal=is_full_sequence
+            )
+        # (B, H, T_q, head_dim)
 
         attn_out = self._merge_heads(attn_out)         # (B, T_q, D)
+        # Padding queries that have only padding keys (common with causal + begin-padding)
+        # produce NaN attention output because softmax(all -inf) = NaN. Replace with
+        # zeros to prevent propagation through residual connections to real positions.
+        attn_out = torch.nan_to_num(attn_out, nan=0.0)
         x = x + self.dropout(self.out_proj(attn_out))
 
         # Pre-LN FFN
@@ -241,13 +268,16 @@ class TransformerModel(nn.Module):
         time2vec_dim: int = 8,
         max_len: int = 512,
         joint: bool = False,
-        covariate_dim: Optional[int] = None,
-        covariate_emb_dim: int = 8,
+        static_cov_dim: int = 0,
+        dynamic_cov_dim: int = 0,
+        cov_emb_dim: int = 8,
     ):
         super().__init__()
         self.joint = joint
         self.max_trans = max_trans
-        self.covariate_dim = covariate_dim
+        self.static_cov_dim = static_cov_dim
+        self.dynamic_cov_dim = dynamic_cov_dim
+        self.d_model = d_model
         n_classes = max_trans + 1
 
         from src.models.lstm import embedding_size
@@ -264,10 +294,15 @@ class TransformerModel(nn.Module):
         self.time_proj = nn.Linear(time2vec_dim, d_model)
         self.pos_enc = SinusoidalPositionalEncoding(d_model, max_len, dropout)
 
-        # Optional covariate projection (additive injection into d_model space)
-        self.covariate_proj: Optional[nn.Linear] = None
-        if covariate_dim is not None:
-            self.covariate_proj = nn.Linear(covariate_dim, d_model)
+        # Static covariate projection (Extension 3): projects to d_model, broadcast across T
+        self.static_proj: Optional[nn.Linear] = None
+        if static_cov_dim > 0:
+            self.static_proj = nn.Linear(static_cov_dim, d_model)
+
+        # Dynamic covariate projection (Extension 3): projects to d_model, added per step
+        self.dynamic_proj: Optional[nn.Linear] = None
+        if dynamic_cov_dim > 0:
+            self.dynamic_proj = nn.Linear(dynamic_cov_dim, d_model)
 
         # Encoder layers with KV-cache support
         self.layers = nn.ModuleList([
@@ -282,18 +317,26 @@ class TransformerModel(nn.Module):
 
     def forward(
         self,
-        week: torch.Tensor,                          # (B, T) integer week indices
-        trans: torch.Tensor,                         # (B, T) integer transaction counts
-        padding_mask: Optional[torch.Tensor] = None, # (B, T): 1=real, 0=padding
-        kv_cache: Optional[List[Dict]] = None,       # per-layer cache for inference
-        covariates: Optional[torch.Tensor] = None,   # (B, T, C) covariate features
-        delta_t: Optional[torch.Tensor] = None,      # (B, T) weeks since last purchase
+        week: torch.Tensor,                                  # (B, T) integer week indices
+        trans: torch.Tensor,                                 # (B, T) integer transaction counts
+        padding_mask: Optional[torch.Tensor] = None,         # (B, T): 1=real, 0=padding
+        kv_cache: Optional[List[Dict]] = None,               # per-layer cache for inference
+        static_covariates: Optional[torch.Tensor] = None,    # (B, S) static per-customer
+        dynamic_covariates: Optional[torch.Tensor] = None,   # (B, T, D) time-varying
+        delta_t: Optional[torch.Tensor] = None,              # (B, T) weeks since last purchase
     ):
         """
         Sequence-to-sequence with causal attention.
 
         Training (kv_cache=None): full causal self-attention via is_causal=True.
         Inference (kv_cache provided): single-token query over accumulated K,V cache.
+
+        Covariate shapes (Extension 3 — Dunnhumby only):
+            static_covariates:  (B, S) — per-customer constant features (income, hh_size).
+                                Projected to d_model and broadcast across all T positions.
+            dynamic_covariates: (B, T, D) or (B, 1, D) — per-step time-varying features
+                                (coupon redemptions, campaign flag). Projected to d_model
+                                and added at each corresponding time step.
 
         delta_t: per-step elapsed time since the most recent purchase. Fed into
         Time2Vec so the model sees a BTYD-style inter-transaction-time signal
@@ -314,7 +357,7 @@ class TransformerModel(nn.Module):
         e_trans = self.embed_trans(trans.clamp(0, self.max_trans))
         x = torch.cat([e_week, e_trans], dim=-1)   # (B, T, emb_dim)
 
-        h = self.input_proj(x)                     # (B, T, d_model)
+        h = self.input_proj(x) * math.sqrt(self.d_model)  # (B, T, d_model)
 
         # Time2Vec on elapsed time (BTYD-aligned). Sequential ordering is still
         # provided by the sinusoidal positional encoding below; week-of-year
@@ -324,9 +367,14 @@ class TransformerModel(nn.Module):
         h = h + t2v
         h = self.pos_enc(h, week)
 
-        # Optional covariate injection (additive, per time step)
-        if self.covariate_proj is not None and covariates is not None:
-            h = h + self.covariate_proj(covariates)  # (B, T, d_model)
+        # Static covariate injection: project (B, S) → (B, d_model), broadcast across T
+        if self.static_proj is not None and static_covariates is not None:
+            s = self.static_proj(static_covariates)          # (B, d_model)
+            h = h + s.unsqueeze(1).expand(-1, T, -1)        # (B, T, d_model)
+
+        # Dynamic covariate injection: project (B, T, D) → (B, T, d_model), add per step
+        if self.dynamic_proj is not None and dynamic_covariates is not None:
+            h = h + self.dynamic_proj(dynamic_covariates)   # (B, T, d_model)
 
         # Run encoder layers, collecting updated cache per layer.
         # kv_cache=None  → training (no cache, is_causal=True inside each layer).
@@ -340,7 +388,7 @@ class TransformerModel(nn.Module):
                 layer_cache = kv_cache[i]  # step: existing per-layer cache
             else:
                 layer_cache = {}            # warmup: signal inference mode, fresh start
-            h, updated_cache = layer(h, kv_cache=layer_cache)
+            h, updated_cache = layer(h, kv_cache=layer_cache, padding_mask=padding_mask)
             new_caches.append(updated_cache)
 
         freq_logits = self.freq_head(h)   # (B, T, n_classes)

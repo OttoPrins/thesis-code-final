@@ -118,7 +118,9 @@ class BasePipeline(ABC):
           frequency     = sum(weekly_freq) - 1  (repeat transactions, excluding first)
           recency       = last_active_week - first_active_week
           T             = (calib_weeks - 1) - first_active_week
-          monetary_value = total_spend / total_transactions  (average spend per txn)
+          monetary_value = average spend per repeat transaction (Fader et al. 2005b).
+                           The first active week (the acquisition event at weekly
+                           granularity) is excluded from both numerator and denominator.
           litt           = log(recency / frequency) if frequency > 0 else 0.0
                            (approximation of mean log inter-transaction time for BTYD.plus)
         """
@@ -132,11 +134,37 @@ class BasePipeline(ABC):
         agg["frequency"] = (agg["total_freq"] - 1).clip(lower=0).astype(int)
         agg["recency"] = agg["last_week"] - agg["first_week"]
         agg["T"] = (calib_weeks - 1) - agg["first_week"]
+
+        # Gamma-Gamma requires monetary_value to be the average spend on REPEAT
+        # transactions only (Fader, Hardie & Lee 2005b). At weekly granularity,
+        # the first active week is the acquisition event — exclude its spend and
+        # transaction count entirely.
+        df_active = calib_df[calib_df["weekly_freq"] > 0]
+        first_week_per_cust = (
+            df_active.groupby("customer_id")["week"].min().rename("first_active_week")
+        )
+        first_week_df = (
+            df_active.merge(first_week_per_cust, on="customer_id")
+            .query("week == first_active_week")
+            .groupby("customer_id")
+            .agg(
+                first_week_freq=("weekly_freq", "sum"),
+                first_week_spend=("weekly_spend", "sum"),
+            )
+            .reset_index()
+        )
+        agg = agg.merge(first_week_df, on="customer_id", how="left")
+        agg[["first_week_freq", "first_week_spend"]] = (
+            agg[["first_week_freq", "first_week_spend"]].fillna(0.0)
+        )
+        repeat_freq = (agg["total_freq"] - agg["first_week_freq"]).clip(lower=0)
+        repeat_spend = (agg["total_spend"] - agg["first_week_spend"]).clip(lower=0.0)
         agg["monetary_value"] = np.where(
-            agg["total_freq"] > 0,
-            agg["total_spend"] / agg["total_freq"],
+            repeat_freq > 0,
+            repeat_spend / repeat_freq,
             0.0,
         )
+        agg = agg.drop(columns=["first_week_freq", "first_week_spend"])
         # litt: log of mean inter-transaction time; approximated from aggregate data.
         # For customers with >= 2 purchases: litt = log(recency / frequency).
         # For one-timers (frequency == 0): litt = 0.0 (no inter-transaction times).

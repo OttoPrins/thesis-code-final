@@ -296,8 +296,17 @@ class SequenceBuilder:
         y_freq = full_trans[:, 1:]            # (N, T-1)
         y_spend = full_spend[:, 1:]           # (N, T-1)
 
-        # Mask: all ones for fixed calibration period (every week is a valid observation)
-        mask = np.ones((N, T - 1), dtype=np.float32)
+        # Mask = 1 only for target steps strictly after the customer's first active week.
+        # This matches BTYD's T₀ conditioning: a customer does not exist in the cohort
+        # until their first purchase, so loss is not computed on the unborn period.
+        first_week_series = (
+            df_valid[df_valid["weekly_freq"] > 0]
+            .groupby("customer_id")["week"]
+            .min()
+        )
+        first_week_idx = first_week_series.reindex(customers).values.astype(np.int32)  # (N,)
+        target_steps = np.arange(1, T, dtype=np.int32)  # (T-1,)
+        mask = (target_steps[None, :] > first_week_idx[:, None]).astype(np.float32)
 
         customer_ids = np.array(customers, dtype=np.int64)
 

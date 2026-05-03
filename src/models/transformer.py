@@ -77,6 +77,7 @@ class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int = 512, dropout: float = 0.1):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
+        self.max_len = max_len
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
@@ -84,12 +85,18 @@ class SinusoidalPositionalEncoding(nn.Module):
         )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0))  # (1, max_len, d_model)
+        self.register_buffer("pe", pe)  # (max_len, d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, T, d_model)"""
-        x = x + self.pe[:, :x.size(1), :]
-        return self.dropout(x)
+    def forward(self, x: torch.Tensor, week_idx: torch.Tensor) -> torch.Tensor:
+        """
+        x:        (B, T, d_model)
+        week_idx: (B, T) absolute integer week. Indexed directly into PE so that
+                  autoregressive single-step inference receives the correct PE
+                  for the absolute holdout week, not position 0.
+        """
+        idx = week_idx.clamp(0, self.max_len - 1).long()
+        pe_extracted = self.pe[idx]  # (B, T, d_model) via advanced indexing
+        return self.dropout(x + pe_extracted)
 
 
 class CachedTransformerEncoderLayer(nn.Module):
@@ -315,7 +322,7 @@ class TransformerModel(nn.Module):
         time_signal = delta_t.float() if delta_t is not None else week.float()
         t2v = self.time_proj(self.time2vec(time_signal))
         h = h + t2v
-        h = self.pos_enc(h)
+        h = self.pos_enc(h, week)
 
         # Optional covariate injection (additive, per time step)
         if self.covariate_proj is not None and covariates is not None:

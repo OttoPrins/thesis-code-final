@@ -65,6 +65,10 @@ class DunnhumbyPipeline(BasePipeline):
         min_active = dataset_cfg.get("min_active_weeks", 5)
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
         include_covariates = dataset_cfg.get("include_covariates", False)
+        covariate_mode = dataset_cfg.get(
+            "covariate_mode",
+            "full" if include_covariates else "none",
+        )
         seed = config.get("training", {}).get("seed", 42)
 
         df = self.load_raw(raw_dir)
@@ -87,10 +91,15 @@ class DunnhumbyPipeline(BasePipeline):
         )
         data = builder.build(calib)
 
-        # Build covariates if requested (Extension 3)
+        if covariate_mode not in {"none", "static", "dynamic", "full"}:
+            raise ValueError(
+                "dataset.covariate_mode must be one of: none, static, dynamic, full"
+            )
+
+        # Build covariates if requested (Extension 3 ablations)
         static_cov = None
         dynamic_cov = None
-        if include_covariates:
+        if covariate_mode != "none":
             static_cov, dynamic_cov = self.build_covariates(
                 raw_dir, data["customer_ids"], calib_weeks, holdout_weeks
             )
@@ -105,13 +114,18 @@ class DunnhumbyPipeline(BasePipeline):
         train_data = _subset_data(data, train_idx)
         val_data = _subset_data(data, val_idx)
 
-        # Attach separated static and dynamic covariates
-        if static_cov is not None:
+        # Attach ablated covariate views. Static and dynamic are intentionally
+        # separate so Extension 3 can quantify their marginal contributions.
+        if static_cov is not None and covariate_mode in {"static", "full"}:
             for dset, idx in [(train_data, train_idx), (val_data, val_idx), (data, slice(None))]:
                 dset["static_covariates"] = static_cov[idx]
-                dset["dynamic_covariates"] = dynamic_cov[idx]
             for d in (train_data, val_data, data):
                 d["static_feature_names"] = ["income", "household_size"]
+
+        if dynamic_cov is not None and covariate_mode in {"dynamic", "full"}:
+            for dset, idx in [(train_data, train_idx), (val_data, val_idx), (data, slice(None))]:
+                dset["dynamic_covariates"] = dynamic_cov[idx]
+            for d in (train_data, val_data, data):
                 d["dynamic_feature_names"] = ["coupon_redemptions_week", "campaign_active_flag"]
 
         train_ds = CustomerDataset(train_data, include_seed=False)

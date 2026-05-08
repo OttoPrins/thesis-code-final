@@ -29,9 +29,12 @@ Primary aggregate: full holdout-period revenue per customer (sum over H weeks).
 """
 
 from __future__ import annotations
-from typing import Optional
+import json
+from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
+from scipy import stats
 
 
 def freq_rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -123,6 +126,81 @@ def compute_smearing_factor(
     return float(np.mean(np.exp(residuals)))
 
 
+def per_customer_clv(
+    raw_spend_per_week: np.ndarray,
+    weekly_discount_rate: float = 0.0,
+) -> np.ndarray:
+    """
+    Net present value of per-customer weekly revenue over the holdout horizon.
+
+    CLV_i = Σ_h  raw_spend_per_week[i, h] / (1 + r)^h
+
+    Args:
+        raw_spend_per_week: (N, H) raw-currency spend per customer per week
+                            (should already have activity weighting applied so
+                            inactive weeks contribute zero).
+        weekly_discount_rate: r ≈ 0.0018 for 10% annual (CDNOW/UCI/Dunnhumby);
+                              0.0 for short Ta-Feng / Extension 3 holdouts.
+
+    Returns:
+        (N,) float32 discounted CLV per customer.
+    """
+    raw = np.asarray(raw_spend_per_week, dtype=np.float64)
+    N, H = raw.shape
+    discount = (1.0 / (1.0 + weekly_discount_rate)) ** np.arange(H, dtype=np.float64)
+    return (raw * discount[np.newaxis, :]).sum(axis=1).astype(np.float32)
+
+
+def clv_spearman(true_clv: np.ndarray, pred_clv: np.ndarray) -> float:
+    """Spearman rank correlation between predicted and actual per-customer CLV."""
+    r, _ = stats.spearmanr(true_clv, pred_clv)
+    return float(r)
+
+
+def clv_decile_lift(true_clv: np.ndarray, pred_clv: np.ndarray) -> float:
+    """
+    McCarthy & Fader (2018) decile-lift metric.
+
+    Identifies the top-decile of customers by *predicted* CLV, then computes
+    their mean *actual* CLV as a multiple of the population mean actual CLV.
+    A lift > 1 means the model successfully rank-orders high-value customers.
+    """
+    true_clv = np.asarray(true_clv, dtype=np.float64)
+    pred_clv = np.asarray(pred_clv, dtype=np.float64)
+    n = len(pred_clv)
+    top_n = max(1, int(np.ceil(n * 0.1)))
+    top_idx = np.argsort(pred_clv)[-top_n:]
+    mean_all = true_clv.mean()
+    if mean_all == 0:
+        return float("nan")
+    return float(true_clv[top_idx].mean() / mean_all)
+
+
+def _spend_per_week_raw_matrix(
+    per_week_scaled_log: np.ndarray,
+    scaler,
+    activity_weights: Optional[np.ndarray] = None,
+    smearing_factor: Optional[float] = None,
+) -> np.ndarray:
+    """
+    Convert per-week scaled log-spend to raw-currency (N, H) matrix.
+
+    This is the building block used by both aggregate_spend_to_raw_total (which
+    sums to produce (N,) totals) and per_customer_clv (which applies discounting
+    before summing).  Keeping it separate avoids duplicated inverse-transform
+    logic when both the sum and the matrix are needed.
+    """
+    N, H = per_week_scaled_log.shape
+    raw = scaler.inverse_transform_spend(per_week_scaled_log.reshape(-1))
+    raw = raw.reshape(N, H)
+    raw = np.clip(raw, 0.0, None)
+    if smearing_factor is not None and smearing_factor != 1.0:
+        raw = raw * float(smearing_factor)
+    if activity_weights is not None:
+        raw = raw * np.asarray(activity_weights, dtype=raw.dtype)
+    return raw
+
+
 def aggregate_spend_to_raw_total(
     per_week_scaled_log: np.ndarray,
     scaler,
@@ -153,15 +231,11 @@ def aggregate_spend_to_raw_total(
     Returns:
         (N,) raw-currency holdout totals
     """
-    N, H = per_week_scaled_log.shape
-    raw = scaler.inverse_transform_spend(per_week_scaled_log.reshape(-1))
-    raw = raw.reshape(N, H)
-    # Floor any small negatives that numerical error in expm1 may introduce
-    raw = np.clip(raw, 0.0, None)
-    if smearing_factor is not None and smearing_factor != 1.0:
-        raw = raw * float(smearing_factor)
-    if activity_weights is not None:
-        raw = raw * np.asarray(activity_weights, dtype=raw.dtype)
+    raw = _spend_per_week_raw_matrix(
+        per_week_scaled_log, scaler,
+        activity_weights=activity_weights,
+        smearing_factor=smearing_factor,
+    )
     return raw.sum(axis=1).astype(np.float32)
 
 
@@ -177,6 +251,7 @@ def compute_all_metrics(
     pred_activity_per_week: Optional[np.ndarray] = None,
     true_activity_per_week: Optional[np.ndarray] = None,
     smearing_factor: Optional[float] = None,
+    weekly_discount_rate: float = 0.0,
 ) -> dict:
     """
     Compute all evaluation metrics and return as a flat dict.
@@ -215,6 +290,10 @@ def compute_all_metrics(
     true_raw_total: Optional[np.ndarray] = None
     pred_raw_total: Optional[np.ndarray] = None
 
+    # Per-week raw matrices (needed for CLV; computed once when per-week data available)
+    true_raw_matrix: Optional[np.ndarray] = None
+    pred_raw_matrix: Optional[np.ndarray] = None
+
     if y_spend_true_raw_total is not None and y_spend_pred_raw_total is not None:
         true_raw_total = np.asarray(y_spend_true_raw_total, dtype=np.float32)
         pred_raw_total = np.asarray(y_spend_pred_raw_total, dtype=np.float32)
@@ -228,16 +307,17 @@ def compute_all_metrics(
             true_activity_per_week.astype(np.float32)
             if true_activity_per_week is not None else None
         )
-        # Ground truth: no smearing correction (we're inverting observed values)
-        true_raw_total = aggregate_spend_to_raw_total(
+        # Build raw per-week matrices for both truth and prediction
+        true_raw_matrix = _spend_per_week_raw_matrix(
             y_spend_true_per_week, scaler, activity_weights=true_weights,
         )
-        # Predictions: apply Duan's smearing factor to correct Jensen's Inequality bias
-        pred_raw_total = aggregate_spend_to_raw_total(
+        pred_raw_matrix = _spend_per_week_raw_matrix(
             y_spend_pred_per_week, scaler,
             activity_weights=pred_activity_per_week,
             smearing_factor=smearing_factor,
         )
+        true_raw_total = true_raw_matrix.sum(axis=1).astype(np.float32)
+        pred_raw_total = pred_raw_matrix.sum(axis=1).astype(np.float32)
 
     if true_raw_total is not None and pred_raw_total is not None:
         if smearing_factor is not None:
@@ -257,4 +337,106 @@ def compute_all_metrics(
         total_pred = float(pred_raw_total.sum())
         metrics["spend_bias_pct"] = bias_pct(total_true, total_pred)
 
+    # Per-customer CLV: only computable when we have per-week matrices
+    # (joint deep models only; base LSTM and BTYD benchmarks produce scalar totals).
+    if true_raw_matrix is not None and pred_raw_matrix is not None:
+        true_clv = per_customer_clv(true_raw_matrix, weekly_discount_rate)
+        pred_clv = per_customer_clv(pred_raw_matrix, weekly_discount_rate)
+        metrics["clv_mae"] = float(np.mean(np.abs(true_clv - pred_clv)))
+        metrics["clv_rmse"] = float(np.sqrt(np.mean((true_clv - pred_clv) ** 2)))
+        metrics["clv_spearman"] = clv_spearman(true_clv, pred_clv)
+        metrics["clv_decile_lift"] = clv_decile_lift(true_clv, pred_clv)
+        metrics["clv_total_true"] = float(true_clv.sum())
+        metrics["clv_total_pred"] = float(pred_clv.sum())
+        # Save per-customer arrays for paired bootstrap significance testing.
+        # Stored as lists so they survive json.dump without extra serialisation.
+        metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
+        metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
+        metrics["_per_customer_spend_ae"] = np.abs(true_raw_total - pred_raw_total).tolist()
+        metrics["_per_customer_clv_ae"] = np.abs(true_clv - pred_clv).tolist()
+    elif true_raw_total is not None and pred_raw_total is not None:
+        # Benchmark models: save per-customer arrays for freq/spend bootstrap
+        # (CLV is skipped — no per-week decomposition available).
+        metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
+        metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
+        metrics["_per_customer_spend_ae"] = np.abs(true_raw_total - pred_raw_total).tolist()
+    elif true_raw_total is None:
+        # Frequency-only models (Base LSTM, Pareto/NBD, Pareto/GGG, GPPM)
+        metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
+        metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
+
     return metrics
+
+
+def split_metric_artifacts(metrics: dict[str, Any]) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
+    """
+    Split a metrics dict into scalar JSON fields and array artifacts.
+
+    Final thesis comparison tables should read scalar metrics only. Per-customer
+    arrays used for paired bootstrap tests are written separately to `.npz` so
+    JSON files remain clean, small, and table-safe.
+    """
+    scalar_metrics: dict[str, Any] = {}
+    array_artifacts: dict[str, np.ndarray] = {}
+
+    for key, value in metrics.items():
+        if isinstance(value, np.generic):
+            scalar_metrics[key] = value.item()
+            continue
+
+        if isinstance(value, np.ndarray) or key.startswith("_") or isinstance(value, (list, tuple)):
+            arr = np.asarray(value)
+            if arr.dtype.kind in {"b", "i", "u", "f", "c"} and arr.ndim >= 1:
+                artifact_key = key.lstrip("_")
+                array_artifacts[artifact_key] = arr
+                continue
+
+        if value is None or isinstance(value, (str, bool, int, float)):
+            scalar_metrics[key] = value
+            continue
+
+        # Last-resort scalar conversion for rare numpy/pandas scalar-like objects.
+        try:
+            if np.isscalar(value):
+                scalar_metrics[key] = value.item() if hasattr(value, "item") else value
+                continue
+        except Exception:
+            pass
+
+        raise TypeError(
+            f"Metric {key!r} is not JSON-scalar and is not a numeric array artifact: "
+            f"{type(value).__name__}"
+        )
+
+    return scalar_metrics, array_artifacts
+
+
+def metrics_arrays_path(metrics_path: str | Path) -> Path:
+    """Return the sidecar `.npz` path for a `*_metrics.json` file."""
+    path = Path(metrics_path)
+    if path.name.endswith("_metrics.json"):
+        return path.with_name(path.name.replace("_metrics.json", "_arrays.npz"))
+    return path.with_suffix(".npz")
+
+
+def save_metrics_with_artifacts(metrics: dict[str, Any], metrics_path: str | Path) -> tuple[Path, Optional[Path]]:
+    """
+    Save scalar metrics to JSON and numeric arrays to a sidecar `.npz`.
+
+    Returns:
+        (metrics_path, arrays_path_or_none)
+    """
+    metrics_path = Path(metrics_path)
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    scalar_metrics, array_artifacts = split_metric_artifacts(metrics)
+
+    arrays_path: Optional[Path] = None
+    if array_artifacts:
+        arrays_path = metrics_arrays_path(metrics_path)
+        np.savez_compressed(arrays_path, **array_artifacts)
+        scalar_metrics["arrays_file"] = arrays_path.name
+
+    with open(metrics_path, "w") as f:
+        json.dump(scalar_metrics, f, indent=2)
+
+    return metrics_path, arrays_path

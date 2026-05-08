@@ -108,10 +108,13 @@ class WeeklyAggregator:
     Week numbering: starts at 0 from the first transaction in the dataset.
     """
 
-    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
+    def fit_transform(self, df: pd.DataFrame, origin_date: str | None = None) -> pd.DataFrame:
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"])
-        min_date = df["date"].min()
+        if origin_date is not None:
+            min_date = pd.to_datetime(origin_date)
+        else:
+            min_date = df["date"].min()
         df["week"] = ((df["date"] - min_date).dt.days // 7).astype(int)
 
         agg = (
@@ -232,7 +235,8 @@ class SequenceBuilder:
             df: DataFrame with columns [customer_id, week, weekly_freq, log_spend]
 
         Returns dict with keys:
-            week_input    : (N, T-1) int32   — week indices for input steps
+            week_input    : (N, T-1) int32   — calendar week-of-year indices 0..51
+            position_input: (N, T-1) int32   — absolute sequence positions 0..T-2
             trans_input   : (N, T-1) int32   — transaction counts (teacher forcing)
             spend_input   : (N, T-1) float32 — log-spend at each input step
             delta_t_input : (N, T-1) float32 — weeks since last purchase at each input step
@@ -240,7 +244,8 @@ class SequenceBuilder:
             y_spend       : (N, T-1) float32 — target log-spend, shifted +1
             customer_ids  : (N,)     int64   — customer identifiers
             mask          : (N, T-1) float32 — 1=real, 0=padding
-            seed_week     : (N, T)   int32   — full calibration weeks (inference)
+            seed_week     : (N, T)   int32   — full calibration week-of-year sequence
+            seed_position : (N, T)   int32   — full calibration positions
             seed_trans    : (N, T)   int32   — full calibration trans (inference)
             seed_spend    : (N, T)   float32 — full calibration spend (inference)
             seed_delta_t  : (N, T)   float32 — full calibration delta_t (inference seed)
@@ -269,7 +274,8 @@ class SequenceBuilder:
         N = len(customers)
 
         # Pre-allocate arrays (dense grid: every customer gets T weeks, default 0)
-        full_weeks = np.tile(np.arange(T, dtype=np.int32), (N, 1))  # (N, T)
+        full_positions = np.tile(np.arange(T, dtype=np.int32), (N, 1))  # (N, T)
+        full_weeks = (full_positions % 52).astype(np.int32)  # calendar week-of-year
         full_trans = np.zeros((N, T), dtype=np.int32)
         full_spend = np.zeros((N, T), dtype=np.float32)
 
@@ -289,12 +295,13 @@ class SequenceBuilder:
         full_delta_t = compute_delta_t(full_trans)  # (N, T) float32
 
         # Teacher-forcing shift: input = [0..T-2], target = [1..T-1]
-        week_input = full_weeks[:, :-1]       # (N, T-1)
-        trans_input = full_trans[:, :-1]      # (N, T-1)
-        spend_input = full_spend[:, :-1]      # (N, T-1)
-        delta_t_input = full_delta_t[:, :-1]  # (N, T-1)
-        y_freq = full_trans[:, 1:]            # (N, T-1)
-        y_spend = full_spend[:, 1:]           # (N, T-1)
+        week_input = full_weeks[:, :-1]              # (N, T-1)
+        position_input = full_positions[:, :-1]      # (N, T-1)
+        trans_input = full_trans[:, :-1]             # (N, T-1)
+        spend_input = full_spend[:, :-1]             # (N, T-1)
+        delta_t_input = full_delta_t[:, :-1]         # (N, T-1)
+        y_freq = full_trans[:, 1:]                   # (N, T-1)
+        y_spend = full_spend[:, 1:]                  # (N, T-1)
 
         # Mask = 1 only for target steps strictly after the customer's first active week.
         # This matches BTYD's T₀ conditioning: a customer does not exist in the cohort
@@ -312,6 +319,7 @@ class SequenceBuilder:
 
         return {
             "week_input": week_input,
+            "position_input": position_input,
             "trans_input": trans_input,
             "spend_input": spend_input,
             "delta_t_input": delta_t_input,
@@ -320,6 +328,7 @@ class SequenceBuilder:
             "customer_ids": customer_ids,
             "mask": mask,
             "seed_week": full_weeks,
+            "seed_position": full_positions,
             "seed_trans": full_trans,
             "seed_spend": full_spend,
             "seed_delta_t": full_delta_t,

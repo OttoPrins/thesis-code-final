@@ -1,0 +1,51 @@
+Config: experiments/configs/lstm_base_cdnow.yaml
+Run: lstm_base_cdnow_final_seed42_sample
+Device: mps
+Loading dataset: cdnow ...
+[pipeline] freq_bins from config: [0, 1, 2, 3]
+  Train customers: 2115, Val: 234, Inference: 2349
+Model: lstm — 89,132 parameters
+
+Training for up to 3 epochs ...
+Epoch   1/3 — train_loss: 1.2666  val_loss: 1.0567
+Epoch   2/3 — train_loss: 0.5678  val_loss: 0.1985
+Epoch   3/3 — train_loss: 0.2162  val_loss: 0.1962
+
+Checkpoint saved: results/checkpoints/lstm_base_cdnow_final_seed42_sample.pt
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 2
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.0041
+  Mean actual freq/week:       0.0196
+  Over-prediction ratio:       0.208x
+  Customers predicted as zero total:  0.901
+  Customers actually zero total:      0.781
+  Non-zero rate (pred, avg > 0.05):  0.004
+  Non-zero rate (true):               0.018
+
+Metrics saved: results/tables/lstm_base_cdnow_final_seed42_sample_metrics.json
+Array artifacts saved: results/tables/lstm_base_cdnow_final_seed42_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  freq_rmse: 1.5439
+  freq_mae: 0.5900
+  freq_mape: 79.1806
+  bias_pct: -79.1806
+  final_manifest_version: 2026-05-05-final
+  final_manifest_run_name: lstm_base_cdnow_final_seed42_sample
+  final_manifest_config: experiments/configs/lstm_base_cdnow.yaml
+  final_manifest_config_hash: 6f9f3ffa6756
+  final_manifest_actual_config_hash: eb777aa0891e
+  final_manifest_seed: 42
+  final_manifest_epochs: 3
+  final_manifest_inference_mode: sample
+  final_manifest_n_scenarios: 2
+History saved: results/tables/lstm_base_cdnow_final_seed42_sample_history.json
+Sweep: 1 runs (1 configs × 1 seeds × 1 modes)
+
+[1/1  t=0.0min]  lstm_base_cdnow seed=42 mode=sample
+  [rerun] results/tables/lstm_base_cdnow_final_seed42_sample_metrics.json exists but is not final-valid: config hash does not match frozen manifest
+
+=== Sweep complete in 0.4 min ===

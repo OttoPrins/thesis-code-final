@@ -1,0 +1,8 @@
+{
+  "freq_rmse": 20.92128562927246,
+  "freq_mae": 11.817667007446289,
+  "freq_mape": 4.43432458725987,
+  "bias_pct": 4.43432458725987,
+  "model": "gppm",
+  "dataset": "dunnhumby"
+}

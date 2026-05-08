@@ -6,10 +6,10 @@ Supports both base (frequency only) and joint (frequency + spend) models.
 Supports optional covariate features (Extension 3 — Dunnhumby only).
 
 Architecture:
-    - LSTMModel.forward(week, trans, hidden=None,
+    - LSTMModel.forward(week, trans, hidden=None, spend=None,
                         static_covariates=None, dynamic_covariates=None)
       → (freq_logits, hidden) or (freq_logits, log_spend, hidden) when joint=True
-    - TransformerModel.forward(week, trans, padding_mask=None,
+    - TransformerModel.forward(week, trans, spend=None, padding_mask=None,
                                static_covariates=None, dynamic_covariates=None)
       → freq_logits or (freq_logits, log_spend) when joint=True
 
@@ -67,7 +67,13 @@ class Trainer:
             log_spend:   (B, T) or None
         """
         week = batch["week"].to(self.device)
+        position = batch.get("position")
+        if position is not None:
+            position = position.to(self.device)
         trans = batch["trans"].to(self.device)
+        spend = batch.get("spend")
+        if spend is not None:
+            spend = spend.to(self.device)
         mask = batch["mask"].to(self.device)
 
         # Covariates are optional (Extension 3 — Dunnhumby only)
@@ -82,6 +88,7 @@ class Trainer:
             if self.joint:
                 freq_logits, log_spend, _ = self.model(
                     week, trans,
+                    spend=spend,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
@@ -100,6 +107,8 @@ class Trainer:
                 delta_t = delta_t.to(self.device)
             out = self.model(
                 week, trans,
+                spend=spend,
+                position=position,
                 padding_mask=mask,
                 static_covariates=static_cov,
                 dynamic_covariates=dynamic_cov,
@@ -264,7 +273,9 @@ class Trainer:
             if early_stopping is not None:
                 if early_stopping(val_loss, self.model):
                     print(f"Early stopping triggered at epoch {epoch + 1}.")
-                    early_stopping.load_best(self.model)
                     break
+
+        if early_stopping is not None:
+            early_stopping.load_best(self.model)
 
         return history

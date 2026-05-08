@@ -1,0 +1,86 @@
+# Frozen final-analysis manifest.
+# Comparison tables should include only run names generated from these configs
+# unless a command explicitly requests exploratory runs.
+
+version: 2026-05-05-final
+results_status: exploratory_outputs_archived
+archive_dir: results/archive/pre_final_20260505
+
+methodology:
+  min_active_weeks: 1
+  inference_primary: sample
+  seeds: [42, 7, 123]
+  splits:
+    cdnow: {calibration_weeks: 52, holdout_weeks: 26}
+    uci: {calibration_weeks: 78, holdout_weeks: 26, required_file: online_retail_II.xlsx}
+    tafeng: {calibration_weeks: 12, holdout_weeks: 5}
+    dunnhumby: {calibration_weeks: 80, holdout_weeks: 22}
+    extension3_dunnhumby: {calibration_weeks: 80, holdout_weeks: 4}
+
+runtime_expectations:
+  deep_learning:
+    epochs: 100
+    inference_mode: sample
+    n_scenarios: 30
+
+deep_learning_configs:
+  - experiments/configs/lstm_base_cdnow.yaml
+  - experiments/configs/lstm_joint_cdnow.yaml
+  - experiments/configs/transformer_joint_cdnow.yaml
+  - experiments/configs/lstm_base_uci.yaml
+  - experiments/configs/lstm_joint_uci.yaml
+  - experiments/configs/transformer_joint_uci.yaml
+  - experiments/configs/lstm_base_tafeng.yaml
+  - experiments/configs/lstm_joint_tafeng.yaml
+  - experiments/configs/transformer_joint_tafeng.yaml
+  - experiments/configs/lstm_base_dunnhumby.yaml
+  - experiments/configs/lstm_joint_dunnhumby.yaml
+  - experiments/configs/transformer_joint_dunnhumby.yaml
+  - experiments/configs/extension3_lstm_none_dunnhumby.yaml
+  - experiments/configs/extension3_lstm_static_dunnhumby.yaml
+  - experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml
+  - experiments/configs/extension3_lstm_full_dunnhumby.yaml
+  - experiments/configs/extension3_transformer_none_dunnhumby.yaml
+  - experiments/configs/extension3_transformer_static_dunnhumby.yaml
+  - experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml
+  - experiments/configs/extension3_transformer_full_dunnhumby.yaml
+
+deep_learning_config_hashes:
+  experiments/configs/lstm_base_cdnow.yaml: b875aa811328
+  experiments/configs/lstm_joint_cdnow.yaml: 8edfdc226ec0
+  experiments/configs/transformer_joint_cdnow.yaml: 9f195f0222a1
+  experiments/configs/lstm_base_uci.yaml: 29e661e931c2
+  experiments/configs/lstm_joint_uci.yaml: fb21bd09d925
+  experiments/configs/transformer_joint_uci.yaml: 5a0f999e1739
+  experiments/configs/lstm_base_tafeng.yaml: 9a1c33016529
+  experiments/configs/lstm_joint_tafeng.yaml: b145607af989
+  experiments/configs/transformer_joint_tafeng.yaml: c29b54663a8c
+  experiments/configs/lstm_base_dunnhumby.yaml: 79c1874ce833
+  experiments/configs/lstm_joint_dunnhumby.yaml: c5fc5390dc23
+  experiments/configs/transformer_joint_dunnhumby.yaml: 796764fa4018
+  experiments/configs/extension3_lstm_none_dunnhumby.yaml: ce5fcfe59fc6
+  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 59fafe5f48ce
+  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: 2eccc84ee92a
+  experiments/configs/extension3_lstm_full_dunnhumby.yaml: 3fd344f4dfec
+  experiments/configs/extension3_transformer_none_dunnhumby.yaml: c037e439d7f1
+  experiments/configs/extension3_transformer_static_dunnhumby.yaml: b4e7143b64e6
+  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 9177059b7d59
+  experiments/configs/extension3_transformer_full_dunnhumby.yaml: 7de1275af376
+
+benchmark_run_names:
+  - pareto_nbd_cdnow
+  - bgnbd_gg_cdnow
+  - pareto_ggg_cdnow
+  - gppm_cdnow
+  - pareto_nbd_uci
+  - bgnbd_gg_uci
+  - pareto_nbd_tafeng
+  - bgnbd_gg_tafeng
+  - pareto_nbd_dunnhumby
+  - bgnbd_gg_dunnhumby
+
+diagnostic_run_names:
+  - gamma_poisson_cdnow
+  - gamma_poisson_uci
+  - gamma_poisson_tafeng
+  - gamma_poisson_dunnhumby

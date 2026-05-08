@@ -28,8 +28,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+
+from src.utils.final_manifest import load_final_manifest, result_matches_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 _DATASETS = ("cdnow", "uci", "tafeng", "dunnhumby")
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
-_VERSION_RE = re.compile(r"_v\d+$")
+_VERSION_RE = re.compile(r"_(v\d+|final)$")
 
 # Canonical model order for table rows
 _MODEL_ORDER = [
@@ -51,6 +51,7 @@ _MODEL_ORDER = [
     "bgnbd_gg",
     "pareto_ggg",
     "gppm",
+    "gamma_poisson",
     "lstm_base",
     "lstm_joint",
     "transformer_joint",
@@ -58,7 +59,20 @@ _MODEL_ORDER = [
     "extension3_transformer",
 ]
 
-_PRIMARY_METRICS = ["freq_mape", "bias_pct", "spend_mae_raw"]
+_PRIMARY_METRICS = ["freq_mape", "bias_pct", "spend_mae_raw", "clv_mae", "clv_spearman", "clv_decile_lift"]
+_META_KEYS = {
+    "arrays_file",
+    "final_manifest_version",
+    "final_manifest_config_hash",
+    "final_manifest_actual_config_hash",
+    "final_manifest_run_name",
+    "final_manifest_benchmark_name",
+    "final_manifest_config",
+    "final_manifest_seed",
+    "final_manifest_epochs",
+    "final_manifest_inference_mode",
+    "final_manifest_n_scenarios",
+}
 
 
 def _sort_key(model_name: str) -> int:
@@ -105,7 +119,57 @@ def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], O
     return canonical_model, dataset, version, seed, mode
 
 
-def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
+def _metric_stem(path: str | Path) -> str:
+    return Path(path).stem.removesuffix("_metrics")
+
+
+def _filter_metric_files(
+    metrics_files: List[str],
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+) -> List[str]:
+    if not final_only:
+        return metrics_files
+
+    manifest = load_final_manifest()
+    if manifest is None:
+        logger.warning("Final manifest not found; no final-only results will be included.")
+        return []
+
+    out: List[str] = []
+    for fpath in metrics_files:
+        stem = _metric_stem(fpath)
+        try:
+            with open(fpath) as f:
+                metrics = json.load(f)
+        except Exception:
+            continue
+        ok, reason = result_matches_manifest(
+            stem,
+            metrics,
+            manifest,
+            include_expected=include_expected,
+            include_unseeded=True,
+        )
+        if not ok:
+            logger.info(
+                "Skipping %s: %s.",
+                Path(fpath).name,
+                reason,
+            )
+            continue
+        out.append(fpath)
+    return out
+
+
+def build_comparison_table(
+    results_dir: str,
+    dataset: str,
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+) -> pd.DataFrame:
     """
     Read all *_{dataset}*_metrics.json files and assemble a comparison DataFrame.
     Saves to results/tables/comparison_{dataset}.csv.
@@ -117,7 +181,7 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
     Returns:
         DataFrame with columns:
             model, dataset, freq_rmse, freq_mae, freq_mape, bias_pct,
-            spend_mae, spend_rmse, spend_r2, spend_mae_raw, spend_rmse_raw
+            spend_mae_log, spend_rmse_log, spend_r2_log, spend_mae_raw, spend_rmse_raw
     """
     results_dir = Path(results_dir)
     tables_dir = results_dir / "tables"
@@ -130,6 +194,11 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
     pattern = str(tables_dir / f"*{dataset}*metrics.json")
     metrics_files = sorted(_glob.glob(pattern))
     metrics_files = [f for f in metrics_files if not Path(f).name.startswith("comparison_")]
+    metrics_files = _filter_metric_files(
+        metrics_files,
+        final_only=final_only,
+        include_expected=include_expected,
+    )
 
     if not metrics_files:
         logger.warning(f"No metrics files found for dataset {dataset!r} in {tables_dir}")
@@ -146,20 +215,24 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
             model_name = metrics["model"]
         else:
             stem = Path(metrics_file).stem.removesuffix("_metrics")
-            model_name = stem.replace(f"_{dataset}_", "_").rstrip(f"_{dataset}")
+            model_name, _, _, _, _ = parse_run_name(stem)
 
         row = {
             "model": model_name,
             "dataset": dataset,
-            "freq_rmse":      metrics.get("freq_rmse", np.nan),
-            "freq_mae":       metrics.get("freq_mae", np.nan),
-            "freq_mape":      metrics.get("freq_mape", np.nan),
-            "bias_pct":       metrics.get("bias_pct", np.nan),
-            "spend_mae":      metrics.get("spend_mae", np.nan),
-            "spend_rmse":     metrics.get("spend_rmse", np.nan),
-            "spend_r2":       metrics.get("spend_r2", np.nan),
-            "spend_mae_raw":  metrics.get("spend_mae_raw", np.nan),
-            "spend_rmse_raw": metrics.get("spend_rmse_raw", np.nan),
+            "freq_rmse":       metrics.get("freq_rmse", np.nan),
+            "freq_mae":        metrics.get("freq_mae", np.nan),
+            "freq_mape":       metrics.get("freq_mape", np.nan),
+            "bias_pct":        metrics.get("bias_pct", np.nan),
+            "spend_mae_log":   metrics.get("spend_mae_log", np.nan),
+            "spend_rmse_log":  metrics.get("spend_rmse_log", np.nan),
+            "spend_r2_log":    metrics.get("spend_r2_log", np.nan),
+            "spend_mae_raw":   metrics.get("spend_mae_raw", np.nan),
+            "spend_rmse_raw":  metrics.get("spend_rmse_raw", np.nan),
+            "clv_mae":         metrics.get("clv_mae", np.nan),
+            "clv_rmse":        metrics.get("clv_rmse", np.nan),
+            "clv_spearman":    metrics.get("clv_spearman", np.nan),
+            "clv_decile_lift": metrics.get("clv_decile_lift", np.nan),
         }
         rows.append(row)
 
@@ -173,7 +246,13 @@ def build_comparison_table(results_dir: str, dataset: str) -> pd.DataFrame:
     return df
 
 
-def build_all_comparison_tables(results_dir: str, datasets: Optional[List[str]] = None) -> Dict[str, pd.DataFrame]:
+def build_all_comparison_tables(
+    results_dir: str,
+    datasets: Optional[List[str]] = None,
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+) -> Dict[str, pd.DataFrame]:
     """Build comparison tables for all datasets (or specified subset)."""
     if datasets is None:
         datasets = ["cdnow", "uci", "tafeng", "dunnhumby"]
@@ -181,13 +260,23 @@ def build_all_comparison_tables(results_dir: str, datasets: Optional[List[str]] 
     tables = {}
     for dataset in datasets:
         logger.info(f"Building comparison table for {dataset} ...")
-        df = build_comparison_table(results_dir, dataset)
+        df = build_comparison_table(
+            results_dir,
+            dataset,
+            final_only=final_only,
+            include_expected=include_expected,
+        )
         if not df.empty:
             tables[dataset] = df
     return tables
 
 
-def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
+def aggregate_all_results(
+    results_dir: str = "results/",
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+) -> pd.DataFrame:
     """
     Scan results/tables/ for all *_metrics.json files and compile into one DataFrame.
 
@@ -207,6 +296,11 @@ def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
     import glob as _glob
     all_files = sorted(_glob.glob(str(tables_dir / "*_metrics.json")))
     all_files = [f for f in all_files if not Path(f).name.startswith("comparison_")]
+    all_files = _filter_metric_files(
+        all_files,
+        final_only=final_only,
+        include_expected=include_expected,
+    )
 
     if not all_files:
         logger.warning(f"No *_metrics.json files found in {tables_dir}")
@@ -232,7 +326,10 @@ def aggregate_all_results(results_dir: str = "results/") -> pd.DataFrame:
             "seed": seed,
             "mode": mode,
         }
-        row.update({k: v for k, v in metrics.items() if k not in ("model", "dataset")})
+        row.update({
+            k: v for k, v in metrics.items()
+            if k not in ("model", "dataset") and k not in _META_KEYS
+        })
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -310,7 +407,8 @@ def export_latex_table(
     cols_order = [
         "model", "dataset",
         "freq_rmse", "freq_mape", "bias_pct",
-        "spend_mae", "spend_mae_raw", "spend_r2",
+        "spend_mae_log", "spend_mae_raw", "spend_r2_log",
+        "clv_mae", "clv_spearman", "clv_decile_lift",
     ]
     rename_map = {
         "model": "Model",
@@ -318,9 +416,12 @@ def export_latex_table(
         "freq_rmse": "Freq RMSE",
         "freq_mape": "Freq MAPE \\%",
         "bias_pct": "Bias \\%",
-        "spend_mae": "Spend MAE (log)",
+        "spend_mae_log": "Spend MAE (log)",
         "spend_mae_raw": "Spend MAE (\\$)",
-        "spend_r2": "Spend $R^2$",
+        "spend_r2_log": "Spend $R^2$ (log)",
+        "clv_mae": "CLV MAE (\\$)",
+        "clv_spearman": "CLV Spearman",
+        "clv_decile_lift": "CLV Decile Lift",
     }
 
     # Keep only available columns
@@ -356,6 +457,11 @@ def plot_model_comparison_bars(
     Grouped bar chart of primary metrics across models, coloured by dataset.
     Saves one figure per metric to experiments/insights/.
     """
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
     if metrics is None:
         metrics = _PRIMARY_METRICS
 
@@ -373,9 +479,9 @@ def plot_model_comparison_bars(
 
         fig, ax = plt.subplots(figsize=(10, 5))
         datasets = sorted(plot_df["dataset"].unique())
-        models = list(dict.fromkeys(  # preserve _MODEL_ORDER where possible
-            m for m in _MODEL_ORDER if m in plot_df["model"].values
-        ) | {m for m in plot_df["model"].unique() if m not in _MODEL_ORDER})
+        ordered = [m for m in _MODEL_ORDER if m in plot_df["model"].values]
+        extra = [m for m in plot_df["model"].unique() if m not in _MODEL_ORDER]
+        models = list(dict.fromkeys(ordered + extra))
 
         x = np.arange(len(models))
         width = 0.8 / max(len(datasets), 1)
@@ -411,6 +517,9 @@ def plot_kendall_weight_evolution(
     One line per joint model run found in results/tables/*_history.json.
     """
     import glob as _glob
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
 
     if history_files is None:
         tables_dir = Path(results_dir) / "tables"
@@ -455,13 +564,21 @@ if __name__ == "__main__":
                         help="Generate Kendall weight evolution plots")
     parser.add_argument("--seeds", action="store_true",
                         help="Aggregate seeded runs (mean ± std) into comparison_seeds.csv")
+    parser.add_argument("--include_exploratory", action="store_true",
+                        help="Include non-manifest or pre-final metrics files")
+    parser.add_argument("--include_expected", action="store_true",
+                        help="Include expected-mode diagnostic runs")
     parser.add_argument("--all", action="store_true", help="Run all output types")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
     do_all = args.all
-    df = aggregate_all_results(args.results_dir)
+    df = aggregate_all_results(
+        args.results_dir,
+        final_only=not args.include_exploratory,
+        include_expected=args.include_expected,
+    )
 
     if df.empty:
         print("No results found. Run train.py experiments first.")

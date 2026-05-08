@@ -9,6 +9,7 @@ This is a PyTorch re-implementation matching that architecture exactly.
 
 KEY FACTS from the repo (non-negotiable):
     - Inputs: week (int, 0-51) and transaction_count (int) — both EMBEDDED, not raw floats
+    - Joint extensions also receive log-spend as a continuous input feature
     - Embedding size heuristic: int(max_val ** 0.5) + 1
     - memory_units = 128 (SINGLE LSTM layer — verified, NOT 2 stacked)
     - dense_units = 128 (Dense layer after LSTM, before softmax)
@@ -89,6 +90,12 @@ class LSTMModel(nn.Module):
 
         lstm_input_dim = week_emb_dim + trans_emb_dim
 
+        # Joint extensions condition both heads on prior log-spend history.
+        self.spend_proj: Optional[nn.Linear] = None
+        if joint:
+            self.spend_proj = nn.Linear(1, cov_emb_dim)
+            lstm_input_dim += cov_emb_dim
+
         # Static covariate projection (Extension 3): constant per customer, broadcast across T
         self.static_proj: Optional[nn.Linear] = None
         if static_cov_dim > 0:
@@ -126,6 +133,7 @@ class LSTMModel(nn.Module):
         week: torch.Tensor,                              # (B, T) integer week indices
         trans: torch.Tensor,                             # (B, T) integer transaction counts
         hidden: Optional[Tuple] = None,                  # (h_0, c_0) for stateful inference
+        spend: Optional[torch.Tensor] = None,            # (B, T) scaled log-spend history
         static_covariates: Optional[torch.Tensor] = None,   # (B, S) static per-customer
         dynamic_covariates: Optional[torch.Tensor] = None,  # (B, T, D) time-varying
     ):
@@ -145,6 +153,7 @@ class LSTMModel(nn.Module):
         Covariate shapes:
             static_covariates:  (B, S) — projected and broadcast across all T positions
             dynamic_covariates: (B, T, D) — projected and concatenated per time step
+            spend:             (B, T) — projected continuous log-spend input for joint models
 
         Returns:
             freq_logits: (B, T, n_classes)
@@ -157,6 +166,13 @@ class LSTMModel(nn.Module):
         e_trans = self.embed_trans(trans.clamp(0, self.max_trans))
 
         x = torch.cat([e_week, e_trans], dim=-1)  # (B, T, week_emb + trans_emb)
+
+        # Joint spend input: previous/current log-spend history is part of the shared encoder.
+        if self.spend_proj is not None:
+            if spend is None:
+                spend = torch.zeros((B, T), dtype=e_week.dtype, device=week.device)
+            spend_emb = self.spend_proj(spend.to(dtype=e_week.dtype).unsqueeze(-1))
+            x = torch.cat([x, spend_emb], dim=-1)
 
         # Static covariates: project (B, S) → (B, cov_emb_dim), expand across T
         if self.static_proj is not None and static_covariates is not None:

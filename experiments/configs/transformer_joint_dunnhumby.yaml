@@ -3,8 +3,8 @@
 dataset:
   name: dunnhumby
   raw_dir: "data/raw/Dunnhumby datasets"
-  calibration_weeks: 78
-  holdout_weeks: 24
+  calibration_weeks: 80   # final public-data protocol; raw file ends at week 101
+  holdout_weeks: 22       # 80/24 would require weeks not present in this extract
   min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-pct cap from calibration
@@ -12,7 +12,7 @@ dataset:
 
 model:
   type: transformer
-  max_week: 78
+  max_week: 51
   max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   d_model: 64
   n_heads: 4
@@ -36,7 +36,7 @@ loss:
   warmup_epochs: 5
 
 output:
-  run_name: transformer_joint_dunnhumby_v2
+  run_name: transformer_joint_dunnhumby_final
   results_dir: results
   save_checkpoint: true
 
@@ -44,3 +44,6 @@ inference:
   n_scenarios: 30
   mode: sample
   use_kv_cache: true
+
+evaluation:
+  weekly_discount_rate: 0.0018  # ~10% annual, compounded weekly

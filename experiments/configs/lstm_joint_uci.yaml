@@ -2,15 +2,16 @@
 dataset:
   name: uci
   raw_dir: data/raw
-  calibration_weeks: 39
-  holdout_weeks: 13
+  calibration_weeks: 78
+  holdout_weeks: 26
+  require_online_retail_ii: true
   min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-percentile cap from calibration data
 
 model:
   type: lstm
-  max_week: 39
+  max_week: 51
   max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
@@ -31,10 +32,13 @@ loss:
   warmup_epochs: 5
 
 output:
-  run_name: lstm_joint_uci_v2
+  run_name: lstm_joint_uci_final
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
   mode: sample
+
+evaluation:
+  weekly_discount_rate: 0.0018  # ~10% annual, compounded weekly

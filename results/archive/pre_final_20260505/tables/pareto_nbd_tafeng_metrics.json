@@ -1,0 +1,8 @@
+{
+  "freq_rmse": 1.2928977012634277,
+  "freq_mae": 0.9239565134048462,
+  "freq_mape": 14.802479399707902,
+  "bias_pct": 14.802479399707902,
+  "model": "pareto_nbd",
+  "dataset": "tafeng"
+}

@@ -2,13 +2,23 @@
 CDNOW dataset pipeline.
 
 Dataset: CDNOW music retail transactions, 1997-1998.
-         2,357 customers, ~69,659 transactions.
-         Standard split: calibration=52 weeks, holdout=52 weeks.
+         Canonical academic sample: 2,357 customers, 6,919 transactions.
+         Master file: 23,570 customers, 69,659 transactions.
+         Standard final split: calibration=52 weeks, holdout=26 weeks.
 
 Source: BTYD R package or Fader's Wharton page.
-Expected raw file: data/raw/CDNOW_master.txt (whitespace-separated, no header)
+Expected raw file: data/raw/CDNOW_sample.txt (whitespace-separated, no header)
+Fallback raw file: data/raw/CDNOW_master.txt
 
-Format:
+Formats:
+    Canonical sample (5 columns):
+    Column 1: master_customer_id (integer)
+    Column 2: customer_id        (canonical sample id, 1..2357)
+    Column 3: date               (YYYYMMDD)
+    Column 4: num_cds            (count)
+    Column 5: amount             (USD float)
+
+    Master file (4 columns):
     Column 1: customer_id (integer)
     Column 2: date (YYYYMMDD)
     Column 3: num_cds (count)
@@ -54,11 +64,32 @@ class CDNOWPipeline(BasePipeline):
         seed = config.get("training", {}).get("seed", 42)
 
         # Stage 1: Load and clean
+        self._current_dataset_cfg = dataset_cfg
         df = self.load_raw(raw_dir)
         df = self.clean(df)
 
+        # Q1-1997 cohort restriction (Fader & Hardie canonical split)
+        cohort_end = dataset_cfg.get("cohort_end_date")
+        if cohort_end is not None:
+            cohort_end = pd.to_datetime(cohort_end)
+            first_purchase = df.groupby("customer_id")["date"].min()
+            cohort_ids = first_purchase[first_purchase <= cohort_end].index
+            df = df[df["customer_id"].isin(cohort_ids)].copy()
+            print(f"  Cohort filter <= {cohort_end.date()}: {len(cohort_ids)} customers")
+
+        # Optional reproducible sub-sample (matches Fader & Hardie 10% academic sample)
+        sample_n = dataset_cfg.get("sample_n")
+        if sample_n is not None:
+            all_custs = np.sort(df["customer_id"].unique())
+            if len(all_custs) > sample_n:
+                rng_samp = np.random.RandomState(dataset_cfg.get("sample_seed", 0))
+                sampled = rng_samp.choice(all_custs, size=sample_n, replace=False)
+                df = df[df["customer_id"].isin(sampled)].copy()
+                print(f"  Sub-sample {sample_n}/{len(all_custs)} customers (seed={dataset_cfg.get('sample_seed', 0)})")
+
         # Stage 2: Aggregate to weekly level
-        agg = WeeklyAggregator().fit_transform(df)
+        origin_date = dataset_cfg.get("origin_date")
+        agg = WeeklyAggregator().fit_transform(df, origin_date=origin_date)
 
         # Stage 3: Temporal split
         splitter = TemporalSplitter(calib_weeks, holdout_weeks)
@@ -105,11 +136,11 @@ class CDNOWPipeline(BasePipeline):
         return train_ds, val_ds, inference_ds, holdout_ground_truth, scaler
 
     def load_raw(self, raw_dir: str) -> pd.DataFrame:
-        """Load CDNOW raw file. Searches common filenames in raw_dir."""
+        """Load CDNOW raw file, supporting both sample and master formats."""
         candidates = [
-            "CDNOW_master.txt",
             "CDNOW_sample.txt",
             "CDNOW_sample.csv",
+            "CDNOW_master.txt",
             "cdnow.csv",
             "cdnow.txt",
         ]
@@ -127,8 +158,32 @@ class CDNOWPipeline(BasePipeline):
                 f"Download from BTYD R package or Fader's Wharton page."
             )
 
-        df = pd.read_csv(path, sep=r"\s+", header=None,
-                         names=["customer_id", "date", "num_cds", "amount"])
+        df = pd.read_csv(path, sep=r"\s+", header=None)
+        if df.shape[1] == 5:
+            df.columns = [
+                "master_customer_id",
+                "customer_id",
+                "date",
+                "num_cds",
+                "amount",
+            ]
+        elif df.shape[1] == 4:
+            df.columns = ["customer_id", "date", "num_cds", "amount"]
+            cfg = getattr(self, "_current_dataset_cfg", {})
+            if cfg.get("prefer_sample_file", False):
+                sample_path = os.path.join(raw_dir, "CDNOW_sample.txt")
+                raise ValueError(
+                    "Final CDNOW config requires the canonical 2,357-customer "
+                    f"sample, but loaded a 4-column master file at {path}. "
+                    f"Place CDNOW_sample.txt in {raw_dir} (expected {sample_path}) "
+                    "or set prefer_sample_file: false for an explicit diagnostic run."
+                )
+        else:
+            raise ValueError(
+                f"Unsupported CDNOW file format at {path}: expected 4 or 5 "
+                f"whitespace-separated columns, got {df.shape[1]}."
+            )
+        df.attrs["source_path"] = path
         return df
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:

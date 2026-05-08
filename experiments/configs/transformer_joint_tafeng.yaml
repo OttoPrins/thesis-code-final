@@ -12,7 +12,7 @@ dataset:
 
 model:
   type: transformer
-  max_week: 12
+  max_week: 51
   max_trans: 3             # placeholder; pipeline overrides from freq_cap=auto
   d_model: 64
   n_heads: 4
@@ -36,7 +36,7 @@ loss:
   warmup_epochs: 5
 
 output:
-  run_name: transformer_joint_tafeng_v2
+  run_name: transformer_joint_tafeng_final
   results_dir: results
   save_checkpoint: true
 
@@ -44,3 +44,6 @@ inference:
   n_scenarios: 30
   mode: sample
   use_kv_cache: true
+
+evaluation:
+  weekly_discount_rate: 0.0  # short holdout — discounting negligible

@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -23,9 +22,11 @@ from src.data.datasets import (
     TaFengPipeline,
     UCIRetailPipeline,
 )
+from src.data.transforms import TemporalSplitter, WeeklyAggregator
 from src.evaluation.benchmarks import get_benchmark_model
-from src.evaluation.metrics import compute_all_metrics
+from src.evaluation.metrics import compute_all_metrics, save_metrics_with_artifacts
 from src.utils.config import load_config
+from src.utils.final_manifest import attach_manifest_metadata
 from src.utils.seed import set_seed
 
 logging.basicConfig(
@@ -42,6 +43,41 @@ PIPELINES = {
 }
 
 
+def _calibration_weekly_counts_for_gppm(pipeline, config: dict):
+    """Rebuild weekly calibration counts for the Stan-backed CDNOW GPPM."""
+    import pandas as pd
+
+    dataset_cfg = config["dataset"]
+    pipeline._current_dataset_cfg = dataset_cfg
+    raw_dir = dataset_cfg.get("raw_dir", "data/raw")
+    clean_df = pipeline.clean(pipeline.load_raw(raw_dir))
+
+    cohort_end = dataset_cfg.get("cohort_end_date")
+    if cohort_end is not None:
+        cohort_end = pd.to_datetime(cohort_end)
+        first_purchase = clean_df.groupby("customer_id")["date"].min()
+        cohort_ids = first_purchase[first_purchase <= cohort_end].index
+        clean_df = clean_df[clean_df["customer_id"].isin(cohort_ids)].copy()
+
+    sample_n = dataset_cfg.get("sample_n")
+    if sample_n is not None:
+        all_custs = np.sort(clean_df["customer_id"].unique())
+        if len(all_custs) > sample_n:
+            rng_samp = np.random.RandomState(dataset_cfg.get("sample_seed", 0))
+            sampled = rng_samp.choice(all_custs, size=sample_n, replace=False)
+            clean_df = clean_df[clean_df["customer_id"].isin(sampled)].copy()
+
+    agg = WeeklyAggregator().fit_transform(
+        clean_df,
+        origin_date=dataset_cfg.get("origin_date"),
+    )
+    calib, _ = TemporalSplitter(
+        dataset_cfg["calibration_weeks"],
+        dataset_cfg["holdout_weeks"],
+    ).split(agg)
+    return calib
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fit and evaluate probabilistic benchmarks on CLV datasets."
@@ -51,7 +87,10 @@ def main():
         "--models",
         nargs="+",
         default=["pareto_nbd", "bgnbd_gg"],
-        help="List of benchmark models to fit (pareto_nbd, bgnbd_gg, pareto_ggg, gppm).",
+        help=(
+            "List of benchmark models to fit "
+            "(pareto_nbd, bgnbd_gg, pareto_ggg, gppm, gamma_poisson)."
+        ),
     )
     args = parser.parse_args()
 
@@ -100,7 +139,22 @@ def main():
         print(f"\n--- {model_name.upper()} ---")
         try:
             model = get_benchmark_model(model_name)
-            model.fit(rfm_calib)
+            if model_name == "gppm":
+                if dataset_name != "cdnow":
+                    raise ValueError(
+                        "True GPPM is restricted to CDNOW replication in the final "
+                        "thesis protocol. Use `gamma_poisson` for an explicit "
+                        "non-thesis diagnostic on other datasets."
+                    )
+                calib_weekly = _calibration_weekly_counts_for_gppm(pipeline, config)
+                model.fit_weekly_counts(
+                    calib_weekly_df=calib_weekly,
+                    customer_ids=customer_ids,
+                    calibration_weeks=dataset_cfg["calibration_weeks"],
+                    holdout_weeks=holdout_weeks,
+                )
+            else:
+                model.fit(rfm_calib)
 
             # Predict frequency
             pred_freq = model.predict_freq(rfm_calib, holdout_weeks)
@@ -128,18 +182,32 @@ def main():
             # Add model name and dataset
             metrics["model"] = model_name
             metrics["dataset"] = dataset_name
+            benchmark_run_name = f"{model_name}_{dataset_name}"
+            attach_manifest_metadata(
+                metrics,
+                config_path=args.config,
+                config=config,
+                run_name=benchmark_run_name,
+                benchmark_name=benchmark_run_name,
+            )
 
             # Save metrics
-            metrics_path = tables_dir / f"{model_name}_{dataset_name}_metrics.json"
-            with open(metrics_path, "w") as f:
-                json.dump(metrics, f, indent=2)
+            metrics_path = tables_dir / f"{benchmark_run_name}_metrics.json"
+            _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
             logger.info(f"Saved metrics: {metrics_path}")
+            if arrays_path is not None:
+                logger.info(f"Saved array artifacts: {arrays_path}")
 
             # Print metrics
             print(f"Metrics for {model_name}:")
             for k, v in metrics.items():
-                if k not in ("model", "dataset"):
-                    print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+                if (
+                    k in ("model", "dataset")
+                    or k.startswith("_")
+                    or k.startswith("final_manifest_")
+                ):
+                    continue
+                print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
 
             results_list.append(metrics)
 

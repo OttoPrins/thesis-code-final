@@ -6,6 +6,7 @@ plus continuous spend, and sequence-level targets at every time step.
 
 Matches the input format expected by LSTMModel and TransformerModel:
     - week:  (B, T) integer week indices → nn.Embedding
+    - position: (B, T) absolute sequence positions → Transformer sinusoidal PE
     - trans: (B, T) integer transaction counts → nn.Embedding
 
 Optional covariate support (Extension 3 — Dunnhumby only):
@@ -30,6 +31,7 @@ class CustomerDataset(Dataset):
 
     Tensor shapes per sample (training, include_seed=False):
         week        : (T-1,)  int   — week indices for input steps
+        position    : (T-1,)  int   — absolute sequence positions for PE
         trans       : (T-1,)  int   — transaction counts (teacher forcing input)
         spend       : (T-1,)  float — log-spend at each input step
         delta_t     : (T-1,)  float — weeks since last purchase at each step
@@ -45,6 +47,7 @@ class CustomerDataset(Dataset):
 
     Optional (for autoregressive inference, include_seed=True):
         seed_week    : (T,)    int   — full calibration week sequence
+        seed_position: (T,)    int   — full calibration position sequence
         seed_trans   : (T,)    int   — full calibration transaction sequence
         seed_spend   : (T,)    float — full calibration spend sequence
         seed_delta_t : (T,)    float — full calibration elapsed-time sequence
@@ -61,6 +64,10 @@ class CustomerDataset(Dataset):
             include_seed: if True, also store seed sequences (for inference)
         """
         self.week = torch.tensor(data["week_input"], dtype=torch.long)    # (N, T-1)
+        if "position_input" in data:
+            self.position = torch.tensor(data["position_input"], dtype=torch.long)
+        else:
+            self.position = torch.arange(self.week.shape[1]).repeat(self.week.shape[0], 1)
         self.trans = torch.tensor(data["trans_input"], dtype=torch.long)
         self.spend = torch.tensor(data["spend_input"], dtype=torch.float32)
         # delta_t (elapsed weeks since last purchase) is a recent addition; older
@@ -83,6 +90,10 @@ class CustomerDataset(Dataset):
         # Seed sequences (for autoregressive inference)
         if include_seed and "seed_week" in data:
             self.seed_week = torch.tensor(data["seed_week"], dtype=torch.long)
+            if "seed_position" in data:
+                self.seed_position = torch.tensor(data["seed_position"], dtype=torch.long)
+            else:
+                self.seed_position = torch.arange(self.seed_week.shape[1]).repeat(self.seed_week.shape[0], 1)
             self.seed_trans = torch.tensor(data["seed_trans"], dtype=torch.long)
             self.seed_spend = torch.tensor(data["seed_spend"], dtype=torch.float32)
             if "seed_delta_t" in data:
@@ -91,6 +102,7 @@ class CustomerDataset(Dataset):
                 self.seed_delta_t = torch.zeros_like(self.seed_spend)
         else:
             self.seed_week = None
+            self.seed_position = None
             self.seed_delta_t = None
 
         # Static covariates: (N, S) — constant per customer, no time dimension
@@ -123,6 +135,7 @@ class CustomerDataset(Dataset):
     def __getitem__(self, idx):
         item = {
             "week": self.week[idx],
+            "position": self.position[idx],
             "trans": self.trans[idx],
             "spend": self.spend[idx],
             "delta_t": self.delta_t[idx],
@@ -133,6 +146,8 @@ class CustomerDataset(Dataset):
         }
         if self.seed_week is not None:
             item["seed_week"] = self.seed_week[idx]
+            if self.seed_position is not None:
+                item["seed_position"] = self.seed_position[idx]
             item["seed_trans"] = self.seed_trans[idx]
             item["seed_spend"] = self.seed_spend[idx]
             if self.seed_delta_t is not None:

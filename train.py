@@ -26,7 +26,11 @@ from src.data.datasets import (
     TaFengPipeline,
     UCIRetailPipeline,
 )
-from src.evaluation.metrics import compute_all_metrics
+from src.evaluation.metrics import (
+    compute_all_metrics,
+    compute_smearing_factor,
+    save_metrics_with_artifacts,
+)
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
 from src.training.inference import (
@@ -35,6 +39,7 @@ from src.training.inference import (
 )
 from src.training.trainer import Trainer
 from src.utils.config import load_config
+from src.utils.final_manifest import attach_manifest_metadata
 from src.utils.seed import set_seed
 
 PIPELINES = {
@@ -43,6 +48,87 @@ PIPELINES = {
     "tafeng": TaFengPipeline,
     "dunnhumby": DunnhumbyPipeline,
 }
+
+
+@torch.no_grad()
+def _compute_val_smearing(model, val_loader, device, joint, scaler):
+    """
+    Forward pass on validation set in teacher-forcing mode to estimate
+    Duan's smearing factor from held-out residuals.
+
+    Only meaningful for joint models with a spend head. Returns None otherwise.
+    Smearing corrects the Jensen's-Inequality bias that arises from exponentiating
+    predicted log-spend: E[exp(Z)] > exp(E[Z]).
+    """
+    if not joint or scaler is None:
+        return None
+
+    model.eval()
+    from src.models.lstm import LSTMModel
+    from src.models.transformer import TransformerModel
+
+    true_log_all = []
+    pred_log_all = []
+    mask_all = []
+
+    for batch in val_loader:
+        week = batch["week"].to(device)
+        position = batch.get("position")
+        if position is not None:
+            position = position.to(device)
+        trans = batch["trans"].to(device)
+        spend = batch.get("spend")
+        if spend is not None:
+            spend = spend.to(device)
+        mask = batch["mask"].to(device)
+        y_spend = batch.get("y_spend")
+        y_freq = batch.get("y_freq")
+        if y_spend is None:
+            continue
+        y_spend = y_spend.to(device)
+        y_freq = y_freq.to(device) if y_freq is not None else None
+
+        static_cov = None
+        dynamic_cov = None
+        if "static_covariates" in batch and batch["static_covariates"] is not None:
+            static_cov = batch["static_covariates"].to(device)
+        if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
+            dynamic_cov = batch["dynamic_covariates"].to(device)
+
+        if isinstance(model, LSTMModel):
+            _, log_spend, _ = model(week, trans,
+                                    spend=spend,
+                                    static_covariates=static_cov,
+                                    dynamic_covariates=dynamic_cov)
+        elif isinstance(model, TransformerModel):
+            delta_t = batch.get("delta_t")
+            if delta_t is not None:
+                delta_t = delta_t.to(device)
+            _, log_spend = model(week, trans, position=position, padding_mask=mask,
+                                 spend=spend,
+                                 static_covariates=static_cov,
+                                 dynamic_covariates=dynamic_cov,
+                                 delta_t=delta_t)
+        else:
+            return None
+
+        # Activity mask: only active weeks contribute to smearing estimate
+        if y_freq is not None:
+            activity = (y_freq > 0).float() * mask
+        else:
+            activity = mask
+
+        true_log_all.append(y_spend.cpu().numpy())
+        pred_log_all.append(log_spend.cpu().numpy())
+        mask_all.append(activity.cpu().numpy())
+
+    if not true_log_all:
+        return None
+
+    true_log = np.concatenate([x.ravel() for x in true_log_all])
+    pred_log = np.concatenate([x.ravel() for x in pred_log_all])
+    mask_flat = np.concatenate([x.ravel() for x in mask_all]).astype(bool)
+    return compute_smearing_factor(true_log, pred_log, mask=mask_flat)
 
 
 def build_model(config: dict) -> torch.nn.Module:
@@ -95,6 +181,14 @@ def main():
         "--inference_mode", choices=["sample", "expected"], default=None,
         help="Override inference.mode from YAML. Appends _<mode> to run_name."
     )
+    parser.add_argument(
+        "--max_epochs", type=int, default=None,
+        help="Override training.epochs (smoke/CI use)."
+    )
+    parser.add_argument(
+        "--n_scenarios", type=int, default=None,
+        help="Override inference.n_scenarios (smoke/CI use)."
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -109,6 +203,10 @@ def main():
     if args.inference_mode is not None:
         config.setdefault("inference", {})["mode"] = args.inference_mode
         output_cfg["run_name"] = f"{output_cfg['run_name']}_{args.inference_mode}"
+    if args.max_epochs is not None:
+        training_cfg["epochs"] = args.max_epochs
+    if args.n_scenarios is not None:
+        config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
 
     print(f"Config: {args.config}")
     print(f"Run: {output_cfg['run_name']}")
@@ -198,6 +296,11 @@ def main():
         torch.save(model.state_dict(), ckpt_path)
         print(f"\nCheckpoint saved: {ckpt_path}")
 
+    # Compute smearing factor from validation residuals (joint models only)
+    smearing_factor = _compute_val_smearing(model, val_loader, device, joint, scaler if joint else None)
+    if smearing_factor is not None:
+        print(f"\nDuan's smearing factor (val): {smearing_factor:.4f}")
+
     # Autoregressive inference on holdout
     print("\nRunning autoregressive inference on holdout period ...")
     inference_cfg = config.get("inference", {})
@@ -255,19 +358,34 @@ def main():
         true_activity = (holdout_gt["raw_freq"] > 0).astype(np.float32)
         spend_kwargs["true_activity_per_week"] = true_activity
 
+    # Pass smearing factor so predictions are corrected for Jensen's Inequality bias.
+    if joint and smearing_factor is not None:
+        spend_kwargs["smearing_factor"] = smearing_factor
+
+    weekly_discount_rate = config.get("evaluation", {}).get("weekly_discount_rate", 0.0)
+
     metrics = compute_all_metrics(
         y_freq_true=true_total_freq,
         y_freq_pred=pred_total_freq,
         customer_ids=true_ids,
         scaler=scaler if joint else None,
+        weekly_discount_rate=weekly_discount_rate,
         **spend_kwargs,
+    )
+    attach_manifest_metadata(
+        metrics,
+        config_path=args.config,
+        config=config,
+        run_name=output_cfg["run_name"],
     )
 
     # Prediction diagnostics — helps identify exposure bias / class distribution issues.
     # pred_per_week values are Monte Carlo averages (floats), so we compare means and
     # distributions rather than exact class counts.
-    pred_per_week = results["pred_freq"]   # (N, H) float averages over n_scenarios
+    pred_per_week = np.asarray(results["pred_freq"])   # (N, H) float averages over n_scenarios
     true_per_week = holdout_gt.get("raw_freq")  # (N, H) integers or None
+    if true_per_week is not None:
+        true_per_week = np.asarray(true_per_week)
     print("\n=== Prediction Diagnostics ===")
     print(f"  Mean predicted freq/week:    {pred_per_week.mean():.4f}")
     if true_per_week is not None:
@@ -282,17 +400,23 @@ def main():
         print(f"  Non-zero rate (pred, avg > 0.05):  {(pred_per_week > 0.05).mean():.3f}")
         print(f"  Non-zero rate (true):               {(true_per_week > 0).mean():.3f}")
 
-    print("\n=== Holdout Evaluation ===")
-    for k, v in metrics.items():
-        print(f"  {k}: {v:.4f}")
-
-    # Save metrics
+    # Save metrics first so a crash in the print block doesn't lose results.
     tables_dir = results_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = tables_dir / f"{output_cfg['run_name']}_metrics.json"
-    with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
+    _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
     print(f"\nMetrics saved: {metrics_path}")
+    if arrays_path is not None:
+        print(f"Array artifacts saved: {arrays_path}")
+
+    print("\n=== Holdout Evaluation ===")
+    for k, v in metrics.items():
+        if k.startswith("_"):
+            continue  # skip internal arrays (per-customer error lists)
+        if isinstance(v, float):
+            print(f"  {k}: {v:.4f}")
+        else:
+            print(f"  {k}: {v}")
 
     # Save training history
     history_path = tables_dir / f"{output_cfg['run_name']}_history.json"

@@ -6,12 +6,12 @@ Dataset: UK e-commerce transactions, 2009-2011.
 
 Source: UCI Machine Learning Repository
         https://archive.ics.uci.edu/ml/datasets/Online+Retail+II
-Expected raw file: data/raw/Online Retail.csv
+Expected final raw file: data/raw/online_retail_II.xlsx (or equivalent CSV export)
 
 Cleaning rules:
-    - Drop rows where Customer ID is NaN
-    - Drop cancelled invoices (Invoice starts with 'C')
-    - Drop rows with Quantity <= 0 or Price <= 0
+    - Drop rows where Customer ID / CustomerID is NaN
+    - Drop cancelled invoices (Invoice / InvoiceNo starts with 'C')
+    - Drop rows with Quantity <= 0 or Price / UnitPrice <= 0
     - transaction_amount = Quantity * Price
 
 See CLAUDE.md Section 5 for full dataset description.
@@ -53,8 +53,10 @@ class UCIRetailPipeline(BasePipeline):
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
         seed = config.get("training", {}).get("seed", 42)
 
+        self._current_dataset_cfg = dataset_cfg
         df = self.load_raw(raw_dir)
         df = self.clean(df)
+        self.validate_clean_transactions(df, raw_dir)
 
         agg = WeeklyAggregator().fit_transform(df)
         splitter = TemporalSplitter(calib_weeks, holdout_weeks)
@@ -97,8 +99,16 @@ class UCIRetailPipeline(BasePipeline):
         return train_ds, val_ds, inference_ds, holdout_ground_truth, scaler
 
     def load_raw(self, raw_dir: str) -> pd.DataFrame:
-        """Load UCI Online Retail II from CSV."""
+        """Load UCI Online Retail II from Excel or CSV."""
         candidates = [
+            "online_retail_II.xlsx",
+            "Online Retail II.xlsx",
+            "online_retail_ii.xlsx",
+            "Online_Retail_II.xlsx",
+            "online_retail_II.csv",
+            "Online Retail II.csv",
+            "online_retail_ii.csv",
+            "Online_Retail_II.csv",
             "Online Retail.csv",
             "Online_Retail.csv",
             "online_retail.csv",
@@ -116,29 +126,107 @@ class UCIRetailPipeline(BasePipeline):
                 f"Tried: {candidates}. "
                 f"Download from: https://archive.ics.uci.edu/ml/datasets/Online+Retail+II"
             )
-        # File uses semicolon separator; UnitPrice uses comma as decimal
-        return pd.read_csv(path, sep=";", encoding="utf-8-sig")
+        return self._read_raw_file(path)
+
+    @staticmethod
+    def _read_raw_file(path: str) -> pd.DataFrame:
+        ext = os.path.splitext(path)[1].lower()
+        if ext in {".xls", ".xlsx"}:
+            sheets = pd.read_excel(path, sheet_name=None)
+            df = pd.concat(sheets.values(), ignore_index=True)
+        else:
+            # Online Retail II CSV exports are commonly comma-separated, while the
+            # one-year Online Retail CSV in this repo is semicolon-separated with
+            # European decimals. `sep=None` lets pandas sniff both safely.
+            df = pd.read_csv(path, sep=None, engine="python", encoding="utf-8-sig")
+        df.attrs["source_path"] = path
+        return df
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df = df.dropna(subset=["CustomerID"])
-        df = df[~df["InvoiceNo"].astype(str).str.startswith("C")]
-        # UnitPrice stored as European decimal (e.g. "2,55") — normalize to float
-        df["UnitPrice"] = (
-            df["UnitPrice"].astype(str).str.replace(",", ".", regex=False).astype(float)
-        )
-        df = df[(df["Quantity"] > 0) & (df["UnitPrice"] > 0)]
-        df["transaction_amount"] = df["Quantity"].astype(float) * df["UnitPrice"]
-        df["customer_id"] = df["CustomerID"].astype(int)
-        df["date"] = pd.to_datetime(df["InvoiceDate"], dayfirst=True, errors="coerce")
+        source_path = df.attrs.get("source_path")
+        df = self._normalise_columns(df)
+        df = df.dropna(subset=["customer_id_raw"])
+        df = df[~df["invoice"].astype(str).str.startswith("C")]
+        df["price"] = self._to_float(df["price"])
+        df["quantity"] = self._to_float(df["quantity"])
+        df = df[(df["quantity"] > 0) & (df["price"] > 0)]
+        df["transaction_amount"] = df["quantity"].astype(float) * df["price"]
+        df["customer_id"] = df["customer_id_raw"].astype(float).astype(int)
+        df["date"] = pd.to_datetime(df["invoice_date"], dayfirst=True, errors="coerce")
         df = df.dropna(subset=["date"])
         # Aggregate to invoice level so weekly_freq counts shopping trips, not line items
         df = (
-            df.groupby(["customer_id", "InvoiceNo", "date"])
+            df.groupby(["customer_id", "invoice", "date"])
             .agg(transaction_amount=("transaction_amount", "sum"))
             .reset_index()
         )
-        return df[["customer_id", "date", "transaction_amount"]]
+        out = df[["customer_id", "date", "transaction_amount"]]
+        out.attrs["source_path"] = source_path
+        return out
+
+    @staticmethod
+    def _to_float(series: pd.Series) -> pd.Series:
+        return pd.to_numeric(
+            series.astype(str).str.replace(",", ".", regex=False),
+            errors="coerce",
+        )
+
+    @staticmethod
+    def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+        rename = {}
+        for col in df.columns:
+            key = str(col).strip().lower().replace(" ", "").replace("_", "")
+            if key in {"invoice", "invoiceno"}:
+                rename[col] = "invoice"
+            elif key == "invoicedate":
+                rename[col] = "invoice_date"
+            elif key in {"customerid", "customer"}:
+                rename[col] = "customer_id_raw"
+            elif key in {"price", "unitprice"}:
+                rename[col] = "price"
+            elif key == "quantity":
+                rename[col] = "quantity"
+        out = df.rename(columns=rename)
+        required = {"invoice", "invoice_date", "customer_id_raw", "quantity", "price"}
+        missing = sorted(required - set(out.columns))
+        if missing:
+            raise ValueError(
+                "UCI Online Retail II file is missing required columns after "
+                f"normalisation: {missing}. Expected either UCI II columns "
+                "(Invoice, InvoiceDate, Customer ID, Quantity, Price) or the "
+                "one-year Online Retail aliases (InvoiceNo, UnitPrice, CustomerID)."
+            )
+        return out
+
+    def _validate_online_retail_ii_identity(self, clean_df: pd.DataFrame, raw_dir: str) -> None:
+        cfg = getattr(self, "_current_dataset_cfg", {})
+        if not cfg.get("require_online_retail_ii", False):
+            return
+        if clean_df.empty:
+            raise ValueError("UCI Online Retail II validation failed: cleaned file is empty.")
+
+        min_date = clean_df["date"].min()
+        max_date = clean_df["date"].max()
+        span_days = int((max_date - min_date).days)
+        looks_like_ii = (
+            min_date.year <= 2009
+            and max_date.year >= 2011
+            and span_days >= 700
+        )
+        if not looks_like_ii:
+            source = getattr(clean_df, "attrs", {}).get("source_path", "unknown source")
+            raise ValueError(
+                "Final UCI runs require the two-year UCI Online Retail II data "
+                "(2009-12 to 2011-12). The loaded file appears to cover "
+                f"{min_date.date()} to {max_date.date()} ({span_days} days), "
+                f"from {source}. The one-year 'Online Retail.csv' file is rejected "
+                f"for final thesis runs. Place Online Retail II in {raw_dir} or "
+                "set require_online_retail_ii: false for an explicit diagnostic run."
+            )
+
+    def validate_clean_transactions(self, clean_df: pd.DataFrame, raw_dir: str) -> None:
+        self._validate_online_retail_ii_identity(clean_df, raw_dir)
 
     @staticmethod
     def _build_holdout_ground_truth(

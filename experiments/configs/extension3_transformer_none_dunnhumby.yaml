@@ -1,0 +1,49 @@
+# Extension 3 ablation — Transformer, no covariates (Dunnhumby 80/4)
+dataset:
+  name: dunnhumby
+  raw_dir: "data/raw/Dunnhumby datasets"
+  calibration_weeks: 80
+  holdout_weeks: 4
+  min_active_weeks: 1
+  val_fraction: 0.1
+  freq_cap: auto
+  include_covariates: false
+  covariate_mode: none
+
+model:
+  type: transformer
+  max_week: 51
+  max_trans: 3
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
+  joint: true
+
+training:
+  epochs: 100
+  batch_size: 128
+  lr: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 5
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+  warmup_epochs: 5
+
+output:
+  run_name: extension3_transformer_none_dunnhumby_final
+  results_dir: results
+  save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  mode: sample
+  use_kv_cache: true
+
+evaluation:
+  weekly_discount_rate: 0.0

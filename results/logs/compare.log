@@ -1,0 +1,8 @@
+INFO:__main__:Skipping lstm_base_cdnow_final_metrics.json: config hash does not match frozen manifest.
+INFO:__main__:Skipping lstm_base_cdnow_final_seed42_sample_metrics.json: config hash does not match frozen manifest.
+INFO:__main__:Skipping transformer_joint_dunnhumby_final_seed123_sample_metrics.json: config hash does not match frozen manifest.
+INFO:__main__:Skipping transformer_joint_dunnhumby_final_seed7_sample_metrics.json: config hash does not match frozen manifest.
+Aggregated 3 model results.
+LaTeX table saved: results/tables/comparison_all.tex
+Saved: results/tables/comparison_seeds.csv
+Saved: results/tables/comparison_all.csv

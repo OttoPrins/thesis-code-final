@@ -3,6 +3,7 @@ Transformer model for customer transaction sequence modelling (Extension 2).
 
 Architecture per CLAUDE.md and the proposal:
     - Same categorical embedding inputs as the LSTM (week + transaction_count via nn.Embedding)
+    - Joint extensions add log-spend as a continuous input into the shared encoder
     - Time2Vec temporal embedding (learnable) added on top — Kazemi et al. (2019)
     - Sinusoidal positional encoding (fixed) added on top — Vaswani et al. (2017)
     - N encoder blocks: multi-head self-attention + FFN + LayerNorm + residual
@@ -18,10 +19,10 @@ ELAPSED-TIME INPUT (delta_t):
     elapsed time, not absolute calendar position. The Transformer is fed an
     explicit `delta_t` tensor (weeks since the most recent purchase) and Time2Vec
     operates on this elapsed-time signal rather than the absolute week index.
-    Sequential ordering is still injected through the sinusoidal positional
-    encoding; week-of-year periodicity is captured by the categorical week
-    embedding. If `delta_t` is omitted (e.g. for ablation), the model falls back
-    to the absolute week index for backwards-compatibility.
+Sequential ordering is injected through a separate absolute `position` tensor;
+week-of-year periodicity is captured by the categorical week embedding. If
+`delta_t` is omitted (e.g. for ablation), the model falls back to the absolute
+position tensor for backwards-compatibility.
 
 KV CACHE (for efficient autoregressive inference):
     - CachedTransformerEncoderLayer implements per-layer key/value caching.
@@ -87,14 +88,14 @@ class SinusoidalPositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer("pe", pe)  # (max_len, d_model)
 
-    def forward(self, x: torch.Tensor, week_idx: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, position_idx: torch.Tensor) -> torch.Tensor:
         """
         x:        (B, T, d_model)
-        week_idx: (B, T) absolute integer week. Indexed directly into PE so that
-                  autoregressive single-step inference receives the correct PE
-                  for the absolute holdout week, not position 0.
+        position_idx: (B, T) absolute sequence positions. Indexed directly into
+                      PE so autoregressive single-step inference receives the
+                      correct PE for the holdout position, not position 0.
         """
-        idx = week_idx.clamp(0, self.max_len - 1).long()
+        idx = position_idx.clamp(0, self.max_len - 1).long()
         pe_extracted = self.pe[idx]  # (B, T, d_model) via advanced indexing
         return self.dropout(x + pe_extracted)
 
@@ -288,6 +289,7 @@ class TransformerModel(nn.Module):
 
         # Project combined embedding to d_model
         self.input_proj = nn.Linear(week_emb_dim + trans_emb_dim, d_model)
+        self.spend_proj: Optional[nn.Linear] = nn.Linear(1, d_model) if joint else None
 
         # Time2Vec + sinusoidal PE
         self.time2vec = Time2Vec(time2vec_dim)
@@ -319,6 +321,8 @@ class TransformerModel(nn.Module):
         self,
         week: torch.Tensor,                                  # (B, T) integer week indices
         trans: torch.Tensor,                                 # (B, T) integer transaction counts
+        spend: Optional[torch.Tensor] = None,                # (B, T) scaled log-spend history
+        position: Optional[torch.Tensor] = None,             # (B, T) absolute sequence positions
         padding_mask: Optional[torch.Tensor] = None,         # (B, T): 1=real, 0=padding
         kv_cache: Optional[List[Dict]] = None,               # per-layer cache for inference
         static_covariates: Optional[torch.Tensor] = None,    # (B, S) static per-customer
@@ -338,10 +342,12 @@ class TransformerModel(nn.Module):
                                 (coupon redemptions, campaign flag). Projected to d_model
                                 and added at each corresponding time step.
 
+        position: absolute sequence position, used only by sinusoidal PE.
         delta_t: per-step elapsed time since the most recent purchase. Fed into
         Time2Vec so the model sees a BTYD-style inter-transaction-time signal
         rather than an absolute calendar index. If None (legacy callers),
-        falls back to the absolute week index.
+        falls back to the absolute position index.
+        spend: per-step scaled log-spend history, projected into d_model for joint models.
 
         Returns:
             Without kv_cache:
@@ -351,6 +357,8 @@ class TransformerModel(nn.Module):
                 freq_logits, [log_spend], new_cache_list
         """
         B, T = week.shape
+        if position is None:
+            position = torch.arange(T, device=week.device).unsqueeze(0).expand(B, -1)
 
         # Categorical embeddings
         e_week = self.embed_week(week.clamp(0, self.embed_week.num_embeddings - 1))
@@ -358,14 +366,18 @@ class TransformerModel(nn.Module):
         x = torch.cat([e_week, e_trans], dim=-1)   # (B, T, emb_dim)
 
         h = self.input_proj(x) * math.sqrt(self.d_model)  # (B, T, d_model)
+        if self.spend_proj is not None:
+            if spend is None:
+                spend = torch.zeros((B, T), dtype=h.dtype, device=week.device)
+            h = h + self.spend_proj(spend.to(dtype=h.dtype).unsqueeze(-1))
 
         # Time2Vec on elapsed time (BTYD-aligned). Sequential ordering is still
         # provided by the sinusoidal positional encoding below; week-of-year
         # periodicity is captured by the categorical week embedding above.
-        time_signal = delta_t.float() if delta_t is not None else week.float()
+        time_signal = delta_t.float() if delta_t is not None else position.float()
         t2v = self.time_proj(self.time2vec(time_signal))
         h = h + t2v
-        h = self.pos_enc(h, week)
+        h = self.pos_enc(h, position)
 
         # Static covariate injection: project (B, S) → (B, d_model), broadcast across T
         if self.static_proj is not None and static_covariates is not None:

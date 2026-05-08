@@ -1,0 +1,17 @@
+
+============================================================
+  CDNOW  (experiments/configs/lstm_base_cdnow.yaml)
+============================================================
+[pipeline] freq_bins from config: [0, 1, 2, 3]
+  Customers — train: 2115, val: 234, inference: 2349
+  Sequence length (T-1): 51  (expected 51)
+  week: torch.Size([51]), y_freq: torch.Size([51]), y_spend: torch.Size([51])
+  spend_input range (first 100 customers): [0.000, 8.017]
+  Holdout GT — customers: 2349, weeks: 26 (expected 26)
+  Holdout total_freq — mean: 0.51, max: 26
+  [OK] All checks passed.
+
+============================================================
+  SUMMARY
+============================================================
+  [OK  ]  cdnow

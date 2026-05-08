@@ -2,16 +2,17 @@
 dataset:
   name: cdnow
   raw_dir: data/raw
-  calibration_weeks: 52
-  holdout_weeks: 26   # dataset ends at week 77; only 26 real holdout weeks available
-  lookback_weeks: 52
-  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
+  calibration_weeks: 52   # final thesis protocol: Jan-Dec 1997 calibration
+  holdout_weeks: 26       # final thesis protocol: Jan-Jun 1998 holdout
+  origin_date: "1997-01-01"       # week-0 anchor for CDNOW weekly aggregation
+  min_active_weeks: 1     # final estimand keeps one-time / infrequent buyers
+  prefer_sample_file: true # use canonical CDNOW_sample.txt when present
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]   # CDNOW: 99.68% of active weeks <=3 trans; keep paper-faithful
 
 model:
   type: lstm
-  max_week: 52
+  max_week: 51
   max_trans: 3            # = freq_bins[-1]; gives 4 output classes {0,1,2,3+}
   hidden_size: 128
   num_layers: 1           # single LSTM layer (confirmed from Valendin et al. repo)
@@ -30,10 +31,13 @@ loss:
   type: cross_entropy     # frequency only
 
 output:
-  run_name: lstm_base_cdnow_v3
+  run_name: lstm_base_cdnow_final
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
   mode: sample             # 'sample' (Valendin MC) or 'expected' (deterministic E[k]=sum k*p(k))
+
+evaluation:
+  weekly_discount_rate: 0.0018  # ~10% annual, compounded weekly

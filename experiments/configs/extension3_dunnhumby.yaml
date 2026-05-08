@@ -11,6 +11,7 @@ dataset:
   val_fraction: 0.1
   freq_cap: auto           # 99th-pct cap from calibration
   include_covariates: true   # triggers DunnhumbyPipeline.build_covariates()
+  covariate_mode: full
 
 covariates:
   demographics:
@@ -22,7 +23,7 @@ covariates:
 
 model:
   type: lstm             # run both LSTM and Transformer; keep LSTM as primary
-  max_week: 80
+  max_week: 51
   max_trans: 3           # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
@@ -51,7 +52,7 @@ ablation:
   explanation_samples: 200
 
 output:
-  run_name: extension3_dunnhumby_v2
+  run_name: extension3_lstm_full_dunnhumby_final
   results_dir: results
   save_checkpoint: true
 
@@ -59,3 +60,6 @@ inference:
   n_scenarios: 30
   mode: sample
   use_kv_cache: true
+
+evaluation:
+  weekly_discount_rate: 0.0  # short holdout — discounting negligible

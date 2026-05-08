@@ -43,7 +43,7 @@ class _CovariateShapWrapper(nn.Module):
     """
     Differentiable wrapper that exposes only the covariate tensors as SHAP inputs.
 
-    Fixes week, trans, and delta_t as buffers. Forward takes
+    Fixes week, trans, spend, and delta_t as buffers. Forward takes
     (static_cov, dynamic_cov) and returns a scalar prediction per sample
     (expected frequency or log-spend at the last calibration step).
 
@@ -56,6 +56,7 @@ class _CovariateShapWrapper(nn.Module):
         model: nn.Module,
         seed_week: torch.Tensor,   # (1, T_calib) — representative customer
         seed_trans: torch.Tensor,  # (1, T_calib)
+        seed_spend: torch.Tensor,  # (1, T_calib)
         seed_delta_t: Optional[torch.Tensor],  # (1, T_calib) or None
         head: str,
     ):
@@ -63,6 +64,7 @@ class _CovariateShapWrapper(nn.Module):
         self.model = model
         self.register_buffer("seed_week", seed_week)
         self.register_buffer("seed_trans", seed_trans)
+        self.register_buffer("seed_spend", seed_spend)
         if seed_delta_t is not None:
             self.register_buffer("seed_delta_t", seed_delta_t)
         else:
@@ -77,6 +79,7 @@ class _CovariateShapWrapper(nn.Module):
         B = static_cov.shape[0]
         week = self.seed_week.expand(B, -1)
         trans = self.seed_trans.expand(B, -1)
+        spend = self.seed_spend.expand(B, -1)
         delta_t = (
             self.seed_delta_t.expand(B, -1)
             if self.seed_delta_t is not None else None
@@ -87,6 +90,7 @@ class _CovariateShapWrapper(nn.Module):
             if joint:
                 logits, log_spend, _ = self.model(
                     week, trans,
+                    spend=spend,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
@@ -102,6 +106,7 @@ class _CovariateShapWrapper(nn.Module):
             if joint:
                 logits, log_spend = self.model(
                     week, trans,
+                    spend=spend,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                     delta_t=delta_t,
@@ -141,7 +146,14 @@ def _load_model(config: dict, checkpoint_path: str, device: torch.device):
 def _collect_covariate_tensors(
     inference_ds,
     calibration_weeks: int,
-) -> Tuple[np.ndarray, np.ndarray, List[torch.Tensor], List[torch.Tensor], List[Optional[torch.Tensor]]]:
+) -> Tuple[
+    np.ndarray,
+    np.ndarray,
+    List[torch.Tensor],
+    List[torch.Tensor],
+    List[torch.Tensor],
+    List[Optional[torch.Tensor]],
+]:
     """
     Pull per-customer static and dynamic calibration covariates and seed tensors.
 
@@ -150,12 +162,14 @@ def _collect_covariate_tensors(
         dynamic_calib: (N, T_calib, D) float32 — dynamic calibration trajectories
         seed_weeks:   list of (T_calib,) tensors
         seed_trans:   list of (T_calib,) tensors
+        seed_spend:   list of (T_calib,) tensors
         seed_delta_t: list of (T_calib,) tensors or None
     """
     all_static: List[np.ndarray] = []
     all_dynamic: List[np.ndarray] = []
     all_seed_week: List[torch.Tensor] = []
     all_seed_trans: List[torch.Tensor] = []
+    all_seed_spend: List[torch.Tensor] = []
     all_seed_delta_t: List[Optional[torch.Tensor]] = []
 
     for i in range(len(inference_ds)):
@@ -169,6 +183,7 @@ def _collect_covariate_tensors(
         all_dynamic.append(item["dynamic_covariates"][:calibration_weeks, :].numpy())
         all_seed_week.append(item["seed_week"])
         all_seed_trans.append(item["seed_trans"])
+        all_seed_spend.append(item.get("seed_spend", torch.zeros_like(item["seed_week"], dtype=torch.float32)))
         all_seed_delta_t.append(item.get("seed_delta_t"))
 
     return (
@@ -176,6 +191,7 @@ def _collect_covariate_tensors(
         np.stack(all_dynamic, axis=0),  # (N, T_calib, D)
         all_seed_week,
         all_seed_trans,
+        all_seed_spend,
         all_seed_delta_t,
     )
 
@@ -207,7 +223,7 @@ def run_shap(
     calib_weeks = config["dataset"]["calibration_weeks"]
 
     print("Collecting covariate tensors ...")
-    static_vals, dynamic_calib, seed_weeks, seed_trans_list, seed_delta_t_list = (
+    static_vals, dynamic_calib, seed_weeks, seed_trans_list, seed_spend_list, seed_delta_t_list = (
         _collect_covariate_tensors(inference_ds, calib_weeks)
     )
     N = static_vals.shape[0]
@@ -229,6 +245,7 @@ def run_shap(
     median_idx = int(N // 2)
     seed_week_t = seed_weeks[median_idx].unsqueeze(0).to(device)    # (1, T)
     seed_trans_t = seed_trans_list[median_idx].unsqueeze(0).to(device)  # (1, T)
+    seed_spend_t = seed_spend_list[median_idx].unsqueeze(0).to(device)  # (1, T)
     delta_t_seed = (
         seed_delta_t_list[median_idx].unsqueeze(0).to(device)
         if seed_delta_t_list[median_idx] is not None else None
@@ -248,6 +265,7 @@ def run_shap(
         heads.append("spend")
 
     summary: dict = {}
+    summary_rows: list[dict] = []
 
     for head in heads:
         print(f"\n=== GradientExplainer attribution for '{head}' head ===")
@@ -256,6 +274,7 @@ def run_shap(
             model=model,
             seed_week=seed_week_t,
             seed_trans=seed_trans_t,
+            seed_spend=seed_spend_t,
             seed_delta_t=delta_t_seed,
             head=head,
         ).to(device)
@@ -322,9 +341,31 @@ def run_shap(
             "static_features": dict(zip(static_names, static_mean_abs.tolist())),
             "dynamic_features": dict(zip(dynamic_names, dynamic_mean_abs.tolist())),
         }
+        for name, value in zip(static_names, static_mean_abs.tolist()):
+            summary_rows.append({
+                "run_name": config["output"]["run_name"],
+                "head": head,
+                "feature_type": "static",
+                "feature": name,
+                "mean_abs_shap": float(value),
+            })
+        for name, value in zip(dynamic_names, dynamic_mean_abs.tolist()):
+            summary_rows.append({
+                "run_name": config["output"]["run_name"],
+                "head": head,
+                "feature_type": "dynamic",
+                "feature": name,
+                "mean_abs_shap": float(value),
+            })
 
     with open(out_path / "shap_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
+    if summary_rows:
+        import pandas as pd
+
+        csv_path = out_path / f"shap_{config['output']['run_name']}.csv"
+        pd.DataFrame(summary_rows).to_csv(csv_path, index=False)
+        print(f"  Saved: {csv_path}")
 
     print("\nSHAP analysis complete.")
     return summary

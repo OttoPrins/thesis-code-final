@@ -19,15 +19,19 @@ LSTM inference procedure:
     1. Feed full calibration seed through LSTM to warm up hidden state (h, c).
     2. Take the first prediction from the last calibration-step softmax.
     3. For each subsequent holdout week: feed (prev_trans, week_idx) as a single
-       time step, carry (h, c) forward, take new prediction.
+       time step, carry (h, c) forward, take new prediction. Joint models also
+       feed the previous predicted log-spend as the continuous spend input.
 
 Transformer inference procedure (with KV caching):
     1. Full forward pass over calibration seed → collect per-layer KV cache.
     2. Take prediction from the last position of the warmup output.
     3. For each holdout week: forward single new token using cached K,V (O(1) per step).
+       Joint models append the previous predicted log-spend to the autoregressive
+       context exactly as they append the previous frequency prediction.
 
-Holdout week indices cycle through 0..(calibration_weeks-1) using modulo so the model
-sees the same week-of-year embeddings it was trained on (Valendin et al. week-of-year 0-51).
+Holdout week indices cycle through 0..51 so the model sees calendar
+week-of-year embeddings. Transformer sinusoidal PE receives a separate absolute
+position tensor so sequence order is not confused with week-of-year.
 
 Spend prediction:
     The model also outputs per-step log-spend, which the caller post-processes
@@ -147,7 +151,15 @@ def autoregressive_inference_lstm(
 
     for batch in inference_loader:
         seed_week = batch["seed_week"].to(device)    # (B, T_calib)
+        seed_position = batch.get("seed_position")
+        if seed_position is not None:
+            seed_position = seed_position.to(device)
         seed_trans = batch["seed_trans"].to(device)  # (B, T_calib)
+        seed_spend = batch.get("seed_spend")
+        if seed_spend is not None:
+            seed_spend = seed_spend.to(device)
+        elif joint:
+            seed_spend = torch.zeros_like(seed_week, dtype=torch.float32, device=device)
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
@@ -171,6 +183,7 @@ def autoregressive_inference_lstm(
             if joint:
                 freq_logits, log_spend, hidden = model(
                     seed_week, seed_trans,
+                    spend=seed_spend,
                     static_covariates=static_cov,
                     dynamic_covariates=dyn_warmup,
                 )
@@ -191,30 +204,35 @@ def autoregressive_inference_lstm(
             activity[:, 0] = p_active.cpu().numpy()
 
             spend_preds = np.zeros((B, H), dtype=np.float32) if joint else None
+            prev_spend = None
             if joint:
                 spend_preds[:, 0] = log_spend[:, -1].cpu().numpy()
+                prev_spend = log_spend[:, -1].clamp_min(0.0)
 
             for h in range(1, H):
                 # Feed the week-of-year for the *previous* holdout step (h-1), since
                 # that is the "current" context from which we predict step h.
-                week_idx = (h - 1) % calibration_weeks
+                week_idx = (calibration_weeks + h - 1) % 52
                 week_input = torch.full((B, 1), week_idx, dtype=torch.long, device=device)
                 trans_input = prev_trans.unsqueeze(1)
+                spend_input = prev_spend.unsqueeze(1) if prev_spend is not None else None
 
                 # Dynamic covariate slice for this holdout step: (B, 1, D)
                 dyn_step = None
                 if dynamic_cov is not None:
-                    step_idx = calibration_weeks + h
+                    step_idx = calibration_weeks + h - 1
                     if step_idx < dynamic_cov.size(1):
                         dyn_step = dynamic_cov[:, step_idx: step_idx + 1, :]
 
                 if joint:
                     freq_logits_step, log_spend_step, hidden = model(
                         week_input, trans_input, hidden,
+                        spend=spend_input,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_step,
                     )
                     spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
+                    prev_spend = log_spend_step[:, 0].clamp_min(0.0)
                 else:
                     freq_logits_step, hidden = model(
                         week_input, trans_input, hidden,
@@ -313,7 +331,15 @@ def autoregressive_inference_transformer(
 
     for batch in inference_loader:
         seed_week = batch["seed_week"].to(device)    # (B, T_calib)
+        seed_position = batch.get("seed_position")
+        if seed_position is not None:
+            seed_position = seed_position.to(device)
         seed_trans = batch["seed_trans"].to(device)  # (B, T_calib)
+        seed_spend = batch.get("seed_spend")
+        if seed_spend is not None:
+            seed_spend = seed_spend.to(device)
+        elif joint:
+            seed_spend = torch.zeros_like(seed_week, dtype=torch.float32, device=device)
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
@@ -346,6 +372,7 @@ def autoregressive_inference_transformer(
             cur_delta_t: Optional[torch.Tensor] = None
             if seed_delta_t is not None:
                 cur_delta_t = seed_delta_t[:, -1].clone()  # (B,)
+            prev_spend: Optional[torch.Tensor] = None
 
             if use_kv_cache:
                 # --- KV-cached path ---
@@ -353,7 +380,7 @@ def autoregressive_inference_transformer(
                     dynamic_cov[:, :calibration_weeks, :] if dynamic_cov is not None else None
                 )
                 warmup_out = model(
-                    seed_week, seed_trans, kv_cache=[],
+                    seed_week, seed_trans, spend=seed_spend, position=seed_position, kv_cache=[],
                     static_covariates=static_cov,
                     dynamic_covariates=dyn_warmup,
                     delta_t=seed_delta_t,
@@ -371,11 +398,17 @@ def autoregressive_inference_transformer(
                 activity[:, 0] = p_active.cpu().numpy()
                 if joint:
                     spend_preds[:, 0] = log_spend[:, -1].cpu().numpy()
+                    prev_spend = log_spend[:, -1].clamp_min(0.0)
 
                 for h in range(1, H):
-                    week_idx = (h - 1) % calibration_weeks
+                    week_idx = (calibration_weeks + h - 1) % 52
                     week_input = torch.full((B, 1), week_idx, dtype=torch.long, device=device)
+                    position_input = torch.full(
+                        (B, 1), calibration_weeks + h - 1,
+                        dtype=torch.long, device=device,
+                    )
                     trans_input = prev_trans.unsqueeze(1)
+                    spend_input = prev_spend.unsqueeze(1) if prev_spend is not None else None
 
                     # Update elapsed-time state from the just-sampled prev_trans.
                     delta_t_step: Optional[torch.Tensor] = None
@@ -387,12 +420,13 @@ def autoregressive_inference_transformer(
                     # Dynamic covariate slice for this step: (B, 1, D)
                     dyn_step = None
                     if dynamic_cov is not None:
-                        step_idx = calibration_weeks + h
+                        step_idx = calibration_weeks + h - 1
                         if step_idx < dynamic_cov.size(1):
                             dyn_step = dynamic_cov[:, step_idx: step_idx + 1, :]
 
                     step_out = model(
-                        week_input, trans_input, kv_cache=kv_cache,
+                        week_input, trans_input, spend=spend_input,
+                        position=position_input, kv_cache=kv_cache,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_step,
                         delta_t=delta_t_step,
@@ -400,6 +434,7 @@ def autoregressive_inference_transformer(
                     if joint:
                         freq_logits_step, log_spend_step, kv_cache = step_out
                         spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
+                        prev_spend = log_spend_step[:, 0].clamp_min(0.0)
                     else:
                         freq_logits_step, kv_cache = step_out
 
@@ -412,7 +447,13 @@ def autoregressive_inference_transformer(
             else:
                 # --- Non-cached path (for correctness verification) ---
                 ctx_week = seed_week.clone()
+                ctx_position = (
+                    seed_position.clone()
+                    if seed_position is not None
+                    else torch.arange(seed_week.shape[1], device=device).unsqueeze(0).expand(B, -1)
+                )
                 ctx_trans = seed_trans.clone()
+                ctx_spend = seed_spend.clone() if seed_spend is not None else None
                 ctx_delta_t = (
                     seed_delta_t.clone() if seed_delta_t is not None else None
                 )
@@ -423,6 +464,8 @@ def autoregressive_inference_transformer(
                     )
                     out = model(
                         ctx_week, ctx_trans,
+                        spend=ctx_spend,
+                        position=ctx_position,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_ctx,
                         delta_t=ctx_delta_t,
@@ -430,8 +473,10 @@ def autoregressive_inference_transformer(
                     if joint:
                         freq_logits, log_spend = out
                         spend_preds[:, h] = log_spend[:, -1].cpu().numpy()
+                        next_spend = log_spend[:, -1].clamp_min(0.0).unsqueeze(1)
                     else:
                         freq_logits = out
+                        next_spend = None
 
                     last_logits = freq_logits[:, -1, :]
                     next_class, pred_val, p_active = _step_from_logits(
@@ -441,10 +486,16 @@ def autoregressive_inference_transformer(
                     activity[:, h] = p_active.cpu().numpy()
 
                     next_week = torch.full(
-                        (B, 1), h % calibration_weeks, dtype=torch.long, device=device
+                        (B, 1), (calibration_weeks + h) % 52, dtype=torch.long, device=device
+                    )
+                    next_position = torch.full(
+                        (B, 1), calibration_weeks + h, dtype=torch.long, device=device
                     )
                     ctx_week = torch.cat([ctx_week, next_week], dim=1)
+                    ctx_position = torch.cat([ctx_position, next_position], dim=1)
                     ctx_trans = torch.cat([ctx_trans, next_class.unsqueeze(1)], dim=1)
+                    if ctx_spend is not None and next_spend is not None:
+                        ctx_spend = torch.cat([ctx_spend, next_spend], dim=1)
                     if ctx_delta_t is not None:
                         purchased = (next_class > 0).to(ctx_delta_t.dtype)
                         next_delta_t = (1.0 - purchased) * (ctx_delta_t[:, -1] + 1.0)

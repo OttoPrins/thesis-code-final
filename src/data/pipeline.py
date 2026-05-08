@@ -63,6 +63,10 @@ class BasePipeline(ABC):
         """
         return None
 
+    def validate_clean_transactions(self, clean_df: pd.DataFrame, raw_dir: str) -> None:
+        """Optional dataset-specific identity checks after cleaning."""
+        return None
+
     def get_rfm_summary(self, config: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Produce RFM summary for probabilistic benchmarks.
@@ -79,13 +83,36 @@ class BasePipeline(ABC):
         Customers in calibration who do not appear in holdout get actual_freq=0,
         actual_spend=0.0. This preserves the N-customer alignment.
         """
-        raw_dir = config["dataset"].get("raw_dir", "data/raw")
+        dataset_cfg = config["dataset"]
+        self._current_dataset_cfg = dataset_cfg
+        raw_dir = dataset_cfg.get("raw_dir", "data/raw")
         raw_df = self.load_raw(raw_dir)
         clean_df = self.clean(raw_df)
+        self.validate_clean_transactions(clean_df, raw_dir)
+
+        # Optional cohort filter (e.g. CDNOW Q1-1997 acquisition cohort)
+        cohort_end = dataset_cfg.get("cohort_end_date")
+        if cohort_end is not None:
+            cohort_end = pd.to_datetime(cohort_end)
+            first_purchase = clean_df.groupby("customer_id")["date"].min()
+            cohort_ids = first_purchase[first_purchase <= cohort_end].index
+            clean_df = clean_df[clean_df["customer_id"].isin(cohort_ids)].copy()
+            print(f"  [rfm] Cohort filter <= {cohort_end.date()}: {len(cohort_ids)} customers")
+
+        # Optional reproducible sub-sample (e.g. CDNOW 10% academic sample)
+        sample_n = dataset_cfg.get("sample_n")
+        if sample_n is not None:
+            all_custs = np.sort(clean_df["customer_id"].unique())
+            if len(all_custs) > sample_n:
+                rng_samp = np.random.RandomState(dataset_cfg.get("sample_seed", 0))
+                sampled = rng_samp.choice(all_custs, size=sample_n, replace=False)
+                clean_df = clean_df[clean_df["customer_id"].isin(sampled)].copy()
+                print(f"  [rfm] Sub-sample {sample_n}/{len(all_custs)} customers (seed={dataset_cfg.get('sample_seed', 0)})")
 
         # Weekly aggregation
+        origin_date = dataset_cfg.get("origin_date")
         agg = WeeklyAggregator()
-        agg_df = agg.fit_transform(clean_df)
+        agg_df = agg.fit_transform(clean_df, origin_date=origin_date)
 
         # Temporal split
         calib_weeks = config["dataset"]["calibration_weeks"]
@@ -122,7 +149,7 @@ class BasePipeline(ABC):
                            The first active week (the acquisition event at weekly
                            granularity) is excluded from both numerator and denominator.
           litt           = log(recency / frequency) if frequency > 0 else 0.0
-                           (approximation of mean log inter-transaction time for BTYD.plus)
+                           (approximation of mean log inter-transaction time for BTYDplus)
         """
         agg = calib_df.groupby("customer_id").agg(
             first_week=("week", "min"),
@@ -168,7 +195,7 @@ class BasePipeline(ABC):
         # litt: log of mean inter-transaction time; approximated from aggregate data.
         # For customers with >= 2 purchases: litt = log(recency / frequency).
         # For one-timers (frequency == 0): litt = 0.0 (no inter-transaction times).
-        # This matches the approximation used in BTYD.plus documentation examples.
+        # This matches the approximation used in BTYDplus documentation examples.
         agg["litt"] = np.where(
             agg["frequency"] > 0,
             np.log(np.where(agg["recency"] > 0, agg["recency"], 1.0) / agg["frequency"].clip(lower=1)),

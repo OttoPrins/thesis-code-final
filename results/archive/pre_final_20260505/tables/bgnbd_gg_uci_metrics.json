@@ -1,0 +1,14 @@
+{
+  "freq_rmse": 1.9445929527282715,
+  "freq_mae": 1.0193806886672974,
+  "freq_mape": 20.858314138735405,
+  "bias_pct": -20.858314138735405,
+  "spend_mae_raw": 538.302978515625,
+  "spend_rmse_raw": 2710.087646484375,
+  "spend_mae_log": 2.183328628540039,
+  "spend_rmse_log": 3.392350912094116,
+  "spend_r2_log": -0.06882202625274658,
+  "spend_bias_pct": -38.67329312743996,
+  "model": "bgnbd_gg",
+  "dataset": "uci"
+}

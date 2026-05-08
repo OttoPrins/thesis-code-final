@@ -11,7 +11,7 @@ dataset:
 
 model:
   type: lstm
-  max_week: 12
+  max_week: 51
   max_trans: 5             # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
@@ -30,10 +30,13 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_tafeng_v2
+  run_name: lstm_base_tafeng_final
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 30
   mode: sample
+
+evaluation:
+  weekly_discount_rate: 0.0  # short holdout — discounting negligible

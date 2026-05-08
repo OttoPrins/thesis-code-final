@@ -1,0 +1,14 @@
+{
+  "freq_rmse": 1.2972151041030884,
+  "freq_mae": 0.9309380054473877,
+  "freq_mape": 16.100279649483852,
+  "bias_pct": 16.100279649483852,
+  "spend_mae_raw": 951.3761596679688,
+  "spend_rmse_raw": 3444.205322265625,
+  "spend_mae_log": 2.5144925117492676,
+  "spend_rmse_log": 3.9721243381500244,
+  "spend_r2_log": -0.26582932472229004,
+  "spend_bias_pct": 21.2961884779863,
+  "model": "bgnbd_gg",
+  "dataset": "tafeng"
+}

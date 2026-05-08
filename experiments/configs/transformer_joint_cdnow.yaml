@@ -3,14 +3,16 @@ dataset:
   name: cdnow
   raw_dir: data/raw
   calibration_weeks: 52
-  holdout_weeks: 26   # dataset ends at week 77; only 26 real holdout weeks available
-  min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
+  holdout_weeks: 26
+  origin_date: "1997-01-01"       # week-0 anchor for CDNOW weekly aggregation
+  min_active_weeks: 1
+  prefer_sample_file: true
   val_fraction: 0.1
   freq_bins: [0, 1, 2, 3]
 
 model:
   type: transformer
-  max_week: 52
+  max_week: 51
   max_trans: 3
   d_model: 64
   n_heads: 4
@@ -34,7 +36,7 @@ loss:
   warmup_epochs: 5
 
 output:
-  run_name: transformer_joint_cdnow_v2
+  run_name: transformer_joint_cdnow_final
   results_dir: results
   save_checkpoint: true
 
@@ -42,3 +44,6 @@ inference:
   n_scenarios: 30
   mode: sample             # 'sample' or 'expected'
   use_kv_cache: true
+
+evaluation:
+  weekly_discount_rate: 0.0018  # ~10% annual, compounded weekly

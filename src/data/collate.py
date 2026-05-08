@@ -17,6 +17,7 @@ def collate_fn(batch):
 
     Returns dict with tensors:
         week        : (B, T-1)  long
+        position    : (B, T-1)  long
         trans       : (B, T-1)  long
         spend       : (B, T-1)  float
         delta_t     : (B, T-1)  float
@@ -30,12 +31,14 @@ def collate_fn(batch):
                              for inference trajectories
     Optional (inference seed):
         seed_week    : (B, T)    long
+        seed_position: (B, T)    long
         seed_trans   : (B, T)    long
         seed_spend   : (B, T)    float
         seed_delta_t : (B, T)    float
     """
     result = {
         "week": torch.stack([item["week"] for item in batch]),
+        "position": torch.stack([item["position"] for item in batch]),
         "trans": torch.stack([item["trans"] for item in batch]),
         "spend": torch.stack([item["spend"] for item in batch]),
         "y_freq": torch.stack([item["y_freq"] for item in batch]),
@@ -49,6 +52,10 @@ def collate_fn(batch):
 
     if "seed_week" in batch[0]:
         result["seed_week"] = torch.stack([item["seed_week"] for item in batch])
+        if "seed_position" in batch[0]:
+            result["seed_position"] = torch.stack(
+                [item["seed_position"] for item in batch]
+            )
         result["seed_trans"] = torch.stack([item["seed_trans"] for item in batch])
         result["seed_spend"] = torch.stack([item["seed_spend"] for item in batch])
         if "seed_delta_t" in batch[0]:

@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from src.data.datasets import (
 from src.evaluation.metrics import (
     compute_all_metrics,
     compute_smearing_factor,
+    mase_scale,
     save_metrics_with_artifacts,
 )
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
@@ -104,7 +106,10 @@ def _compute_val_smearing(model, val_loader, device, joint, scaler):
             delta_t = batch.get("delta_t")
             if delta_t is not None:
                 delta_t = delta_t.to(device)
-            _, log_spend = model(week, trans, position=position, padding_mask=mask,
+            padding_mask = batch.get("padding_mask")
+            if padding_mask is not None:
+                padding_mask = padding_mask.to(device)
+            _, log_spend = model(week, trans, position=position, padding_mask=padding_mask,
                                  spend=spend,
                                  static_covariates=static_cov,
                                  dynamic_covariates=dynamic_cov,
@@ -170,6 +175,89 @@ def build_model(config: dict) -> torch.nn.Module:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
 
 
+def _add_result_validity_checks(
+    metrics: dict,
+    *,
+    results: dict,
+    true_per_week: np.ndarray | None,
+    evaluation_cfg: dict,
+    joint: bool,
+) -> None:
+    """
+    Mark mechanically invalid runs before they enter comparison tables.
+
+    These gates target implementation failures, not ordinary model weakness:
+    NaNs, all-zero forecasts on nonzero holdouts, and implausible aggregate
+    explosions. A weak but finite model remains valid and should be reported.
+    """
+    invalid_reasons: list[str] = []
+    warnings: list[str] = []
+
+    pred_per_week = np.asarray(results["pred_freq"], dtype=np.float64)
+    if not np.isfinite(pred_per_week).all():
+        invalid_reasons.append("non-finite frequency predictions")
+
+    pred_activity = results.get("pred_activity")
+    if pred_activity is not None and not np.isfinite(np.asarray(pred_activity)).all():
+        invalid_reasons.append("non-finite activity predictions")
+
+    if joint and "pred_spend" in results:
+        if not np.isfinite(np.asarray(results["pred_spend"])).all():
+            invalid_reasons.append("non-finite spend predictions")
+
+    if true_per_week is not None:
+        true_total = float(np.asarray(true_per_week, dtype=np.float64).sum())
+        pred_total = float(pred_per_week.sum())
+        if true_total > 0:
+            if pred_total <= 0:
+                invalid_reasons.append("all-zero frequency forecast for nonzero holdout")
+            else:
+                freq_ratio = pred_total / true_total
+                max_freq_ratio = float(evaluation_cfg.get("validity_max_freq_total_ratio", 10.0))
+                if freq_ratio > max_freq_ratio:
+                    invalid_reasons.append(
+                        f"frequency total ratio {freq_ratio:.2f} exceeds {max_freq_ratio:.2f}"
+                    )
+                if abs(float(metrics.get("bias_pct", 0.0))) > float(
+                    evaluation_cfg.get("warning_abs_bias_pct", 100.0)
+                ):
+                    warnings.append(f"large frequency bias ({metrics.get('bias_pct'):.1f}%)")
+
+    if joint and "spend_weekly_total_true" in metrics and "spend_weekly_total_pred" in metrics:
+        true_spend = float(metrics["spend_weekly_total_true"])
+        pred_spend = float(metrics["spend_weekly_total_pred"])
+        if true_spend > 0:
+            if not np.isfinite(pred_spend):
+                invalid_reasons.append("non-finite aggregate spend forecast")
+            elif pred_spend <= 0:
+                invalid_reasons.append("all-zero spend forecast for nonzero holdout")
+            else:
+                spend_ratio = pred_spend / true_spend
+                max_spend_ratio = float(evaluation_cfg.get("validity_max_spend_total_ratio", 10.0))
+                if spend_ratio > max_spend_ratio:
+                    invalid_reasons.append(
+                        f"spend total ratio {spend_ratio:.2f} exceeds {max_spend_ratio:.2f}"
+                    )
+                spend_bias = metrics.get("spend_bias_pct")
+                if isinstance(spend_bias, (int, float)) and np.isfinite(spend_bias):
+                    if abs(float(spend_bias)) > float(
+                        evaluation_cfg.get("warning_abs_spend_bias_pct", 100.0)
+                    ):
+                        warnings.append(f"large spend bias ({spend_bias:.1f}%)")
+
+    primary_keys = ["freq_rmse", "freq_mae", "freq_mape", "bias_pct"]
+    if joint:
+        primary_keys.extend(["spend_mae_raw", "spend_rmse_raw", "spend_bias_pct"])
+    for key in primary_keys:
+        value = metrics.get(key)
+        if isinstance(value, (int, float)) and not np.isfinite(value):
+            invalid_reasons.append(f"non-finite metric {key}")
+
+    metrics["run_valid"] = len(invalid_reasons) == 0
+    metrics["run_invalid_reason"] = "; ".join(invalid_reasons) if invalid_reasons else ""
+    metrics["run_warning"] = "; ".join(warnings)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train a CLV deep learning model.")
     parser.add_argument("--config", required=True, help="Path to YAML config file.")
@@ -189,9 +277,39 @@ def main():
         "--n_scenarios", type=int, default=None,
         help="Override inference.n_scenarios (smoke/CI use)."
     )
+    parser.add_argument(
+        "--kaggle", action="store_true",
+        help=(
+            "Enable Kaggle path overrides: raw_dir → /kaggle/input/<dataset_name>/, "
+            "results_dir → /kaggle/working/results. "
+            "Equivalent to setting KAGGLE_ENV=1 in the environment. "
+            "Use --kaggle-data-root to override the /kaggle/input parent if your "
+            "Kaggle dataset slugs differ from the dataset.name values in the YAML configs."
+        ),
+    )
+    parser.add_argument(
+        "--kaggle-data-root", dest="kaggle_data_root", default=None,
+        metavar="DIR",
+        help=(
+            "Override the Kaggle input root directory. "
+            "Defaults to the KAGGLE_DATA_ROOT env var, or /kaggle/input if unset. "
+            "Example: --kaggle-data-root /kaggle/input/my-combined-dataset"
+        ),
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
+
+    # ── Kaggle environment overrides ──────────────────────────────────────────
+    # Activated by --kaggle flag OR KAGGLE_ENV=1 env var (the env var form lets
+    # run_seeds.py propagate the override to all its subprocess train.py calls
+    # without any changes to run_seeds.py itself).
+    if args.kaggle or os.environ.get("KAGGLE_ENV", "0") == "1":
+        from src.utils.config import apply_kaggle_overrides
+        apply_kaggle_overrides(config, args.kaggle_data_root)
+        print(f"[Kaggle] raw_dir  → {config['dataset']['raw_dir']}")
+        print(f"[Kaggle] results  → {config['output']['results_dir']}")
+    # ─────────────────────────────────────────────────────────────────────────
     training_cfg = config["training"]
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
@@ -343,11 +461,24 @@ def main():
     # Evaluate: compare total predicted freq vs actual total freq per customer
     pred_total_freq = results["pred_total_freq"]   # (N,)
     true_total_freq = holdout_gt["total_freq"].astype(np.float32)  # (N,)
+    pred_per_week = np.asarray(results["pred_freq"], dtype=np.float32)  # (N, H)
+    true_per_week = holdout_gt.get("raw_freq")  # (N, H) integers or None
+    if true_per_week is not None:
+        true_per_week = np.asarray(true_per_week, dtype=np.float32)
+
+    freq_week_kwargs = {}
+    if true_per_week is not None:
+        freq_week_kwargs["y_freq_true_per_week"] = true_per_week
+        freq_week_kwargs["y_freq_pred_per_week"] = pred_per_week
+        if getattr(inference_ds, "seed_trans", None) is not None:
+            freq_week_kwargs["freq_mase_scale"] = mase_scale(
+                inference_ds.seed_trans.cpu().numpy()
+            )
 
     # For spend (joint models): pass per-week scaled log arrays; compute_all_metrics
     # inverse-transforms per week and sums to raw currency (the only correct way).
     # Activity weights gate spend so that weeks the model predicts as inactive
-    # contribute zero raw revenue (matches the masked spend training regime).
+    # contribute zero raw revenue under sample/expected autoregressive inference.
     spend_kwargs = {}
     if joint and "pred_spend" in results:
         spend_kwargs["y_spend_true_per_week"] = holdout_gt["spend"].astype(np.float32)
@@ -357,12 +488,18 @@ def main():
         # the inverse log1p(0)≈0 doesn't leak any "active" mass into the totals.
         true_activity = (holdout_gt["raw_freq"] > 0).astype(np.float32)
         spend_kwargs["true_activity_per_week"] = true_activity
+        if getattr(inference_ds, "seed_spend", None) is not None:
+            calib_spend_raw = scaler.inverse_transform_spend(
+                inference_ds.seed_spend.cpu().numpy()
+            )
+            spend_kwargs["spend_mase_scale"] = mase_scale(calib_spend_raw)
 
     # Pass smearing factor so predictions are corrected for Jensen's Inequality bias.
     if joint and smearing_factor is not None:
         spend_kwargs["smearing_factor"] = smearing_factor
 
-    weekly_discount_rate = config.get("evaluation", {}).get("weekly_discount_rate", 0.0)
+    evaluation_cfg = config.get("evaluation", {})
+    weekly_discount_rate = evaluation_cfg.get("weekly_discount_rate", 0.0)
 
     metrics = compute_all_metrics(
         y_freq_true=true_total_freq,
@@ -370,6 +507,7 @@ def main():
         customer_ids=true_ids,
         scaler=scaler if joint else None,
         weekly_discount_rate=weekly_discount_rate,
+        **freq_week_kwargs,
         **spend_kwargs,
     )
     attach_manifest_metadata(
@@ -378,14 +516,17 @@ def main():
         config=config,
         run_name=output_cfg["run_name"],
     )
+    _add_result_validity_checks(
+        metrics,
+        results=results,
+        true_per_week=true_per_week,
+        evaluation_cfg=evaluation_cfg,
+        joint=joint,
+    )
 
     # Prediction diagnostics — helps identify exposure bias / class distribution issues.
     # pred_per_week values are Monte Carlo averages (floats), so we compare means and
     # distributions rather than exact class counts.
-    pred_per_week = np.asarray(results["pred_freq"])   # (N, H) float averages over n_scenarios
-    true_per_week = holdout_gt.get("raw_freq")  # (N, H) integers or None
-    if true_per_week is not None:
-        true_per_week = np.asarray(true_per_week)
     print("\n=== Prediction Diagnostics ===")
     print(f"  Mean predicted freq/week:    {pred_per_week.mean():.4f}")
     if true_per_week is not None:
@@ -423,6 +564,10 @@ def main():
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"History saved: {history_path}")
+
+    if not metrics["run_valid"] and evaluation_cfg.get("fail_on_invalid", True):
+        print(f"Invalid run: {metrics['run_invalid_reason']}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

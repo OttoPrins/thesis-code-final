@@ -178,6 +178,9 @@ def main():
                 customer_ids=customer_ids,
                 **spend_kwargs,
             )
+            diagnostics = getattr(model, "diagnostics", None)
+            if diagnostics:
+                metrics.update(diagnostics)
 
             # Add model name and dataset
             metrics["model"] = model_name

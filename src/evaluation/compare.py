@@ -74,6 +74,8 @@ _META_KEYS = {
     "final_manifest_n_scenarios",
 }
 
+_BENCHMARK_MODELS = {"pareto_nbd", "bgnbd_gg", "pareto_ggg", "gppm", "gamma_poisson"}
+
 
 def _sort_key(model_name: str) -> int:
     try:
@@ -129,8 +131,47 @@ def _filter_metric_files(
     final_only: bool = True,
     include_expected: bool = False,
 ) -> List[str]:
+    def diagnostics_valid(fpath: str) -> bool:
+        try:
+            with open(fpath) as f:
+                metrics = json.load(f)
+        except Exception:
+            return False
+        if metrics.get("benchmark_valid") is False:
+            logger.info(
+                "Skipping %s: benchmark diagnostics marked this run invalid.",
+                Path(fpath).name,
+            )
+            return False
+        stem = _metric_stem(fpath)
+        is_gppm = metrics.get("model") == "gppm" or stem.startswith("gppm_")
+        if is_gppm and metrics.get("benchmark_valid") is not True:
+            logger.info(
+                "Skipping %s: GPPM result lacks passing Stan diagnostics; regenerate after repairs.",
+                Path(fpath).name,
+            )
+            return False
+        is_benchmark = (
+            "final_manifest_benchmark_name" in metrics
+            or metrics.get("model") in _BENCHMARK_MODELS
+        )
+        if metrics.get("run_valid") is False:
+            logger.info(
+                "Skipping %s: run validity checks failed (%s).",
+                Path(fpath).name,
+                metrics.get("run_invalid_reason", "no reason recorded"),
+            )
+            return False
+        if not is_benchmark and metrics.get("run_valid") is not True:
+            logger.info(
+                "Skipping %s: deep-learning result lacks run_valid=True; regenerate after repairs.",
+                Path(fpath).name,
+            )
+            return False
+        return True
+
     if not final_only:
-        return metrics_files
+        return [fpath for fpath in metrics_files if diagnostics_valid(fpath)]
 
     manifest = load_final_manifest()
     if manifest is None:
@@ -140,6 +181,8 @@ def _filter_metric_files(
     out: List[str] = []
     for fpath in metrics_files:
         stem = _metric_stem(fpath)
+        if not diagnostics_valid(fpath):
+            continue
         try:
             with open(fpath) as f:
                 metrics = json.load(f)
@@ -224,15 +267,24 @@ def build_comparison_table(
             "freq_mae":        metrics.get("freq_mae", np.nan),
             "freq_mape":       metrics.get("freq_mape", np.nan),
             "bias_pct":        metrics.get("bias_pct", np.nan),
+            "freq_weekly_mape": metrics.get("freq_weekly_mape", np.nan),
+            "freq_weekly_bias_pct": metrics.get("freq_weekly_bias_pct", np.nan),
+            "freq_mase":       metrics.get("freq_mase", np.nan),
+            "freq_normalized_gini": metrics.get("freq_normalized_gini", np.nan),
             "spend_mae_log":   metrics.get("spend_mae_log", np.nan),
             "spend_rmse_log":  metrics.get("spend_rmse_log", np.nan),
             "spend_r2_log":    metrics.get("spend_r2_log", np.nan),
             "spend_mae_raw":   metrics.get("spend_mae_raw", np.nan),
             "spend_rmse_raw":  metrics.get("spend_rmse_raw", np.nan),
+            "spend_weekly_mape": metrics.get("spend_weekly_mape", np.nan),
+            "spend_weekly_bias_pct": metrics.get("spend_weekly_bias_pct", np.nan),
+            "spend_mase":      metrics.get("spend_mase", np.nan),
+            "spend_normalized_gini": metrics.get("spend_normalized_gini", np.nan),
             "clv_mae":         metrics.get("clv_mae", np.nan),
             "clv_rmse":        metrics.get("clv_rmse", np.nan),
             "clv_spearman":    metrics.get("clv_spearman", np.nan),
             "clv_decile_lift": metrics.get("clv_decile_lift", np.nan),
+            "clv_normalized_gini": metrics.get("clv_normalized_gini", np.nan),
         }
         rows.append(row)
 

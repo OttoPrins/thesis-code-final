@@ -156,8 +156,10 @@ class CachedTransformerEncoderLayer(nn.Module):
         Args:
             x:            Input tensor — full sequence during training, single token during inference.
             kv_cache:     Dict {"k": (B, T_past, D), "v": (B, T_past, D)} or None.
-            padding_mask: (B, T_kv) bool/float, 1=real token, 0=padding. Combined with
-                          the causal mask so padded positions never contribute to attention.
+            padding_mask: (B, T_kv) bool/float, 1=real token, 0=padding. This must be
+                          true sequence padding, not the training loss mask. Combined
+                          with the causal mask so padded positions never contribute
+                          to attention.
 
         Returns:
             output:    (B, T_new, d_model)
@@ -196,18 +198,24 @@ class CachedTransformerEncoderLayer(nn.Module):
 
         if padding_mask is not None:
             # Build explicit additive mask: -inf where masked, 0 elsewhere.
-            # Shape: (B, 1, T_q, T_kv) for broadcasting over heads.
+            # Shape: (B, 1, T_q, T_kv) for broadcasting over heads. Some left-padded
+            # sequences have no valid key for early padded queries under causal
+            # masking; give those masked query rows a harmless fallback key so
+            # softmax never sees all -inf.
             B, T_kv = k.shape[0], k.shape[1]
             T_q = q.shape[1]
-            # padding_mask: (B, T_kv) — True means real token
-            pad = padding_mask.bool()[:, None, None, :]  # (B, 1, 1, T_kv)
-            # Expand to (B, 1, T_q, T_kv) to suppress masked key positions
+            allowed = padding_mask.bool()[:, None, None, :].expand(B, 1, T_q, T_kv)
+            allowed = allowed.clone()
+            fallback = torch.zeros_like(allowed)
+            fallback[..., 0] = True
             attn_mask = torch.zeros(B, 1, T_q, T_kv, dtype=q.dtype, device=q.device)
-            attn_mask = attn_mask.masked_fill(~pad, float("-inf"))
             if is_full_sequence:
-                # OR in upper-triangular causal mask (mask future positions too)
+                # Combine padding and upper-triangular causal masks.
                 causal = torch.ones(T_q, T_kv, dtype=torch.bool, device=q.device).triu(1)
-                attn_mask = attn_mask.masked_fill(causal[None, None], float("-inf"))
+                allowed = allowed & ~causal[None, None]
+            empty_rows = ~allowed.any(dim=-1, keepdim=True)
+            allowed = torch.where(empty_rows, fallback, allowed)
+            attn_mask = attn_mask.masked_fill(~allowed, float("-inf"))
             attn_out = F.scaled_dot_product_attention(
                 q_h, k_h, v_h, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=False
             )
@@ -219,9 +227,7 @@ class CachedTransformerEncoderLayer(nn.Module):
         # (B, H, T_q, head_dim)
 
         attn_out = self._merge_heads(attn_out)         # (B, T_q, D)
-        # Padding queries that have only padding keys (common with causal + begin-padding)
-        # produce NaN attention output because softmax(all -inf) = NaN. Replace with
-        # zeros to prevent propagation through residual connections to real positions.
+        # Defensive guard against backend-specific attention NaNs.
         attn_out = torch.nan_to_num(attn_out, nan=0.0)
         x = x + self.dropout(self.out_proj(attn_out))
 

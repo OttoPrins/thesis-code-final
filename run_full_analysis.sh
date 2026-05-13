@@ -7,7 +7,7 @@
 #   bash run_full_analysis.sh --smoke                                 # 8-min CDNOW sanity sweep
 #
 # Estimated wall clock: 8–14 hours on Apple Silicon MPS (full mode).
-# Outputs land in results/tables/ and results/plots/.
+# Outputs land in results/tables/, results/plots/ (notebook), and experiments/insights/.
 #
 # Environment: activate your venv before running, e.g.:
 #   source .venv/bin/activate && nohup bash run_full_analysis.sh > run.log 2>&1 &
@@ -203,7 +203,7 @@ echo "$(ts) [Step 1] Done."
 
 # ---------------------------------------------------------------------------
 # Step 2 — Multi-seed deep-learning sweep (sample mode — thesis default)
-#   13 configs × 3 seeds = 39 invocations (full mode).
+#   20 configs × 3 seeds = 60 invocations (full mode).
 #   Smoke: 1 config × 1 seed × 3 epochs = 1 invocation.
 # ---------------------------------------------------------------------------
 echo ""
@@ -292,7 +292,7 @@ if [[ "$SMOKE" == "1" ]]; then
     "$PYTHON_BIN" -m src.evaluation.compare --seeds --latex \
         2>&1 | tee "$LOG_DIR/compare.log"
 else
-    "$PYTHON_BIN" -m src.evaluation.compare --seeds --latex --plots \
+    "$PYTHON_BIN" -m src.evaluation.compare --seeds --latex --plots --weights \
         2>&1 | tee "$LOG_DIR/compare.log"
 fi
 echo "$(ts) [Step 5] Done."
@@ -307,16 +307,18 @@ if [[ "$SMOKE" != "1" ]]; then
     "$PYTHON_BIN" -m src.evaluation.significance \
         --metrics_dir results/tables \
         --pairs \
-            lstm_joint_cdnow:lstm_base_cdnow \
-            transformer_joint_cdnow:lstm_joint_cdnow \
-            lstm_joint_cdnow:pareto_nbd_cdnow \
-            lstm_joint_cdnow:bgnbd_gg_cdnow \
-            lstm_joint_tafeng:lstm_base_tafeng \
-            transformer_joint_tafeng:lstm_joint_tafeng \
-            lstm_joint_uci:lstm_base_uci \
-            lstm_joint_dunnhumby:lstm_base_dunnhumby \
+            lstm_joint_cdnow_final_seed42_sample:lstm_base_cdnow_final_seed42_sample \
+            transformer_joint_cdnow_final_seed42_sample:lstm_joint_cdnow_final_seed42_sample \
+            lstm_joint_cdnow_final_seed42_sample:pareto_nbd_cdnow \
+            lstm_joint_cdnow_final_seed42_sample:bgnbd_gg_cdnow \
+            lstm_joint_tafeng_final_seed42_sample:lstm_base_tafeng_final_seed42_sample \
+            transformer_joint_tafeng_final_seed42_sample:lstm_joint_tafeng_final_seed42_sample \
+            lstm_joint_uci_final_seed42_sample:lstm_base_uci_final_seed42_sample \
+            lstm_joint_dunnhumby_final_seed42_sample:lstm_base_dunnhumby_final_seed42_sample \
         --metrics freq_rmse spend_mae clv_mae \
         --n_resamples 10000 \
+        --seed_filter 42 \
+        --mode_filter sample \
         --out results/tables/significance_tests.csv \
         2>&1 | tee "$LOG_DIR/significance.log"
     echo "$(ts) [Step 6] Done."
@@ -337,7 +339,8 @@ echo "  results/tables/comparison_all.tex    — LaTeX comparison table"
 if [[ "$SMOKE" != "1" ]]; then
     echo "  results/tables/significance_tests.csv — bootstrap significance tests"
 fi
-echo "  results/plots/                        — all figures"
+echo "  experiments/insights/                 — compare.py figures and Kendall weight plots"
+echo "  results/plots/                        — notebook-generated thesis figures"
 echo "  results/logs/                         — per-step logs"
 echo ""
 

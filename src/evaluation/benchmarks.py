@@ -17,8 +17,68 @@ import os
 import pandas as pd
 import platform
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _count_stan_divergences(diagnose_text: str) -> int:
+    """Parse CmdStan diagnose text for divergent transition counts."""
+    text = diagnose_text or ""
+    if re.search(r"\bno divergent transitions\b", text, flags=re.IGNORECASE):
+        return 0
+    counts = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(\d+)\s+of\s+\d+\s+(?:\([^)]+\)\s+)?transitions ended with a divergence",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ]
+    counts.extend(
+        int(match.group(1))
+        for match in re.finditer(r"(\d+)\s+divergent transitions", text, flags=re.IGNORECASE)
+    )
+    return int(sum(counts)) if counts else 0
+
+
+def stan_sampler_diagnostics(fit_result, max_rhat_allowed: float = 1.05) -> dict:
+    """
+    Extract minimal validity diagnostics from a CmdStan fit.
+
+    The thesis comparison should only include GPPM when Stan reports no
+    divergent transitions and R-hat is within a conventional tolerance.
+    """
+    diagnose_text = ""
+    diagnose_available = False
+    try:
+        diagnose_text = fit_result.diagnose()
+        diagnose_available = True
+    except Exception as exc:
+        logger.warning("CmdStan diagnose() failed: %s", exc)
+
+    divergent_transitions = _count_stan_divergences(diagnose_text)
+    max_rhat = float("nan")
+    try:
+        summary = fit_result.summary()
+        if "R_hat" in summary.columns:
+            rhats = pd.to_numeric(summary["R_hat"], errors="coerce")
+            rhats = rhats.replace([np.inf, -np.inf], np.nan).dropna()
+            if not rhats.empty:
+                max_rhat = float(rhats.max())
+    except Exception as exc:
+        logger.warning("CmdStan summary() failed: %s", exc)
+
+    rhat_ok = (not np.isfinite(max_rhat)) or (max_rhat <= max_rhat_allowed)
+    diagnostics_ok = bool(diagnose_available and divergent_transitions == 0 and rhat_ok)
+    return {
+        "benchmark_valid": diagnostics_ok,
+        "stan_diagnostics_ok": diagnostics_ok,
+        "stan_diagnostics_text_available": diagnose_available,
+        "stan_divergent_transitions": divergent_transitions,
+        "stan_max_rhat": max_rhat,
+        "stan_max_rhat_allowed": float(max_rhat_allowed),
+    }
 
 
 def _ensure_macos_libcxx_headers() -> None:
@@ -487,6 +547,10 @@ class GPPMModel(BenchmarkModel):
         self.fit_result = None
         self.prediction_customer_ids: np.ndarray | None = None
         self.pred_freq: np.ndarray | None = None
+        self.diagnostics: dict = {
+            "benchmark_valid": False,
+            "stan_diagnostics_ok": False,
+        }
 
     def fit(self, rfm_calib: pd.DataFrame) -> None:
         raise RuntimeError(
@@ -554,6 +618,14 @@ class GPPMModel(BenchmarkModel):
             max_treedepth=self.max_treedepth,
             show_progress=True,
         )
+        self.diagnostics = stan_sampler_diagnostics(self.fit_result)
+        if not self.diagnostics["stan_diagnostics_ok"]:
+            logger.warning(
+                "GPPM Stan diagnostics failed; metrics will be marked invalid "
+                "(divergences=%s, max_rhat=%s).",
+                self.diagnostics["stan_divergent_transitions"],
+                self.diagnostics["stan_max_rhat"],
+            )
         draws = self.fit_result.stan_variable("pred_freq_expected")
         self.pred_freq = draws.mean(axis=0).astype(np.float32)
         self.prediction_customer_ids = customer_ids.copy()

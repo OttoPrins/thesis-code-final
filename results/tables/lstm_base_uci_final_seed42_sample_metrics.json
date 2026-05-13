@@ -1,0 +1,16 @@
+{
+  "freq_rmse": 3.0323855876922607,
+  "freq_mae": 1.3031980991363525,
+  "freq_mape": 15.318751950106977,
+  "bias_pct": -15.318751950106977,
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "lstm_base_uci_final_seed42_sample",
+  "final_manifest_config": "experiments/configs/lstm_base_uci.yaml",
+  "final_manifest_config_hash": "c7294d3ebf31",
+  "final_manifest_actual_config_hash": "73da47c7e103",
+  "final_manifest_seed": 42,
+  "final_manifest_epochs": 100,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 30,
+  "arrays_file": "lstm_base_uci_final_seed42_sample_arrays.npz"
+}

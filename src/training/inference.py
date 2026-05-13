@@ -35,8 +35,7 @@ position tensor so sequence order is not confused with week-of-year.
 
 Spend prediction:
     The model also outputs per-step log-spend, which the caller post-processes
-    with aggregate_spend_to_raw_total() in evaluation.metrics. To match the
-    masked-spend training (loss only on weeks where freq>0), the inference loop
+    with aggregate_spend_to_raw_total() in evaluation.metrics. The inference loop
     also returns a per-week activity weight:
         sample mode:   1 if sampled freq>0, else 0
         expected mode: P(freq>0) = 1 - softmax(logits)[:, 0]
@@ -68,7 +67,7 @@ def _step_from_logits(
     max_trans: int,
 ) -> tuple:
     """
-    Convert per-step softmax logits to (next_input_class, prediction_value, P(active)).
+    Convert per-step softmax logits to feedback class, prediction, and activity.
 
     Args:
         logits:    (B, n_classes) raw logits at one time step
@@ -78,13 +77,15 @@ def _step_from_logits(
     Returns:
         next_class: (B,) long — what to feed back into the next step's embedding
         pred:       (B,) float — prediction added to the holdout running total
-        p_active:   (B,) float — P(freq>0) for spend gating
+        p_active:   (B,) float — sample mode: binary sampled activity;
+                    expected mode: P(freq>0) for spend gating
     """
     probs = torch.softmax(logits, dim=-1)
     p_active = 1.0 - probs[:, 0]
     if mode == "sample":
         sampled = torch.multinomial(probs, 1).squeeze(-1)
-        return sampled, sampled.float(), p_active
+        sampled_active = (sampled > 0).to(probs.dtype)
+        return sampled, sampled.float(), sampled_active
     if mode == "expected":
         n_classes = probs.size(-1)
         class_vals = torch.arange(n_classes, dtype=probs.dtype, device=probs.device)
@@ -92,6 +93,24 @@ def _step_from_logits(
         next_class = ev.round().long().clamp(0, max_trans)
         return next_class, ev, p_active
     raise ValueError(f"Unknown inference mode: {mode!r} — expected 'sample' or 'expected'.")
+
+
+def _zero_inactive_spend_feedback(
+    log_spend: torch.Tensor,
+    next_class: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Feed zero spend into the next step whenever the generated frequency is zero.
+
+    Joint models condition the next token on the previous generated frequency and
+    spend. A no-purchase week must therefore carry zero spend, otherwise sample
+    paths can keep a positive spend state alive after activity has stopped.
+    """
+    return torch.where(
+        next_class > 0,
+        log_spend.clamp_min(0.0),
+        torch.zeros_like(log_spend),
+    )
 
 
 @torch.no_grad()
@@ -207,7 +226,7 @@ def autoregressive_inference_lstm(
             prev_spend = None
             if joint:
                 spend_preds[:, 0] = log_spend[:, -1].cpu().numpy()
-                prev_spend = log_spend[:, -1].clamp_min(0.0)
+                prev_spend = _zero_inactive_spend_feedback(log_spend[:, -1], prev_trans)
 
             for h in range(1, H):
                 # Feed the week-of-year for the *previous* holdout step (h-1), since
@@ -232,7 +251,6 @@ def autoregressive_inference_lstm(
                         dynamic_covariates=dyn_step,
                     )
                     spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
-                    prev_spend = log_spend_step[:, 0].clamp_min(0.0)
                 else:
                     freq_logits_step, hidden = model(
                         week_input, trans_input, hidden,
@@ -245,6 +263,10 @@ def autoregressive_inference_lstm(
                 )
                 preds[:, h] = pred_val.cpu().numpy()
                 activity[:, h] = p_active.cpu().numpy()
+                if joint:
+                    prev_spend = _zero_inactive_spend_feedback(
+                        log_spend_step[:, 0], prev_trans
+                    )
 
             scenario_freq += preds
             scenario_activity += activity
@@ -398,7 +420,7 @@ def autoregressive_inference_transformer(
                 activity[:, 0] = p_active.cpu().numpy()
                 if joint:
                     spend_preds[:, 0] = log_spend[:, -1].cpu().numpy()
-                    prev_spend = log_spend[:, -1].clamp_min(0.0)
+                    prev_spend = _zero_inactive_spend_feedback(log_spend[:, -1], prev_trans)
 
                 for h in range(1, H):
                     week_idx = (calibration_weeks + h - 1) % 52
@@ -434,7 +456,6 @@ def autoregressive_inference_transformer(
                     if joint:
                         freq_logits_step, log_spend_step, kv_cache = step_out
                         spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
-                        prev_spend = log_spend_step[:, 0].clamp_min(0.0)
                     else:
                         freq_logits_step, kv_cache = step_out
 
@@ -443,6 +464,10 @@ def autoregressive_inference_transformer(
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()
+                    if joint:
+                        prev_spend = _zero_inactive_spend_feedback(
+                            log_spend_step[:, 0], prev_trans
+                        )
 
             else:
                 # --- Non-cached path (for correctness verification) ---
@@ -473,10 +498,9 @@ def autoregressive_inference_transformer(
                     if joint:
                         freq_logits, log_spend = out
                         spend_preds[:, h] = log_spend[:, -1].cpu().numpy()
-                        next_spend = log_spend[:, -1].clamp_min(0.0).unsqueeze(1)
                     else:
                         freq_logits = out
-                        next_spend = None
+                    next_spend = None
 
                     last_logits = freq_logits[:, -1, :]
                     next_class, pred_val, p_active = _step_from_logits(
@@ -484,6 +508,10 @@ def autoregressive_inference_transformer(
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()
+                    if joint:
+                        next_spend = _zero_inactive_spend_feedback(
+                            log_spend[:, -1], next_class
+                        ).unsqueeze(1)
 
                     next_week = torch.full(
                         (B, 1), (calibration_weeks + h) % 52, dtype=torch.long, device=device

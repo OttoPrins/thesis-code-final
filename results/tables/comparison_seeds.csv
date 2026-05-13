@@ -1,0 +1,4 @@
+model,dataset,mode,version,n_seeds,freq_rmse_mean,freq_rmse_std,freq_mae_mean,freq_mae_std,freq_mape_mean,freq_mape_std,bias_pct_mean,bias_pct_std,spend_mae_raw_mean,spend_mae_raw_std,spend_rmse_raw_mean,spend_rmse_raw_std,spend_mae_log_mean,spend_mae_log_std,spend_rmse_log_mean,spend_rmse_log_std,spend_r2_log_mean,spend_r2_log_std,spend_bias_pct_mean,spend_bias_pct_std
+pareto_nbd,cdnow,,,0,1.1631473302841187,0.0,0.5381752252578735,0.0,8.347710957096572,0.0,8.347710957096572,0.0,,,,,,,,,,,,
+bgnbd_gg,cdnow,,,0,1.1944692134857178,0.0,0.5568879842758179,0.0,11.762923939172241,0.0,11.762923939172241,0.0,19.1146183013916,0.0,50.25170135498047,0.0,0.9904071092605591,0.0,1.7063077688217163,0.0,-0.004400491714477539,0.0,2.396143724035931,0.0
+pareto_ggg,cdnow,,,0,1.272739291191101,0.0,0.5484376549720764,0.0,14.518395873615175,0.0,14.518395873615175,0.0,,,,,,,,,,,,

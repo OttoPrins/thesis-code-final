@@ -1,0 +1,15 @@
+{
+  "freq_rmse": 3.4405646324157715,
+  "freq_mae": 1.1898757219314575,
+  "freq_mape": 11.297190267294663,
+  "bias_pct": -11.297190267294663,
+  "model": "pareto_nbd",
+  "dataset": "uci",
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "pareto_nbd_uci",
+  "final_manifest_benchmark_name": "pareto_nbd_uci",
+  "final_manifest_config": "experiments/configs/lstm_base_uci.yaml",
+  "final_manifest_config_hash": "29e661e931c2",
+  "final_manifest_actual_config_hash": "ae002f92897e",
+  "arrays_file": "pareto_nbd_uci_arrays.npz"
+}

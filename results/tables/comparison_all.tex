@@ -1,0 +1,13 @@
+\begin{table}
+\caption{Model comparison across datasets}
+\label{tab:model_comparison}
+\begin{tabular}{llrrrrrr}
+\toprule
+Model & Dataset & Freq RMSE & Freq MAPE \% & Bias \% & Spend MAE (log) & Spend MAE (\$) & Spend $R^2$ (log) \\
+\midrule
+pareto_nbd & cdnow & 1.163 & 8.348 & 8.348 & — & — & — \\
+bgnbd_gg & cdnow & 1.194 & 11.763 & 11.763 & 0.990 & 19.115 & -0.004 \\
+pareto_ggg & cdnow & 1.273 & 14.518 & 14.518 & — & — & — \\
+\bottomrule
+\end{tabular}
+\end{table}

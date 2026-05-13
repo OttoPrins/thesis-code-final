@@ -59,6 +59,180 @@ def bias_pct(y_true_agg: float, y_pred_agg: float) -> float:
     return float((y_pred_agg - y_true_agg) / abs(y_true_agg) * 100)
 
 
+def per_week_aggregate_metrics(
+    y_true_per_week: np.ndarray,
+    y_pred_per_week: np.ndarray,
+    prefix: str,
+) -> dict[str, float]:
+    """
+    Aggregate all customers by week and score the resulting cohort time series.
+
+    This complements full-horizon cohort MAPE/bias: a model can have acceptable
+    total holdout bias while missing the timing of purchases within the horizon.
+    Weeks with zero actual aggregate are skipped for percentage metrics.
+    """
+    true = np.asarray(y_true_per_week, dtype=np.float64)
+    pred = np.asarray(y_pred_per_week, dtype=np.float64)
+    if true.shape != pred.shape:
+        raise ValueError(
+            f"Per-week true/pred arrays must have the same shape, got {true.shape} and {pred.shape}"
+        )
+    if true.ndim != 2:
+        raise ValueError(f"Per-week arrays must be 2D (N, H), got ndim={true.ndim}")
+
+    true_agg = true.sum(axis=0)
+    pred_agg = pred.sum(axis=0)
+    abs_err = np.abs(pred_agg - true_agg)
+    valid = np.abs(true_agg) > 1e-12
+
+    out = {
+        f"{prefix}_weekly_mae": float(abs_err.mean()),
+        f"{prefix}_weekly_total_true": float(true_agg.sum()),
+        f"{prefix}_weekly_total_pred": float(pred_agg.sum()),
+    }
+    if valid.any():
+        pct_err = (pred_agg[valid] - true_agg[valid]) / np.abs(true_agg[valid])
+        out[f"{prefix}_weekly_mape"] = float(np.mean(np.abs(pct_err)) * 100)
+        out[f"{prefix}_weekly_bias_pct"] = float(np.mean(pct_err) * 100)
+    else:
+        out[f"{prefix}_weekly_mape"] = float("nan")
+        out[f"{prefix}_weekly_bias_pct"] = float("nan")
+    return out
+
+
+def mase(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    scale: Optional[float] = None,
+    seasonal_period: int = 1,
+) -> float:
+    """
+    Mean absolute scaled error.
+
+    If `scale` is omitted, the denominator is the mean absolute one-step naive
+    change within `y_true` along its last axis. For holdout-only matrices this is
+    a diagnostic scaled MAE; final rolling-origin claims should pass a calibration
+    denominator explicitly.
+    """
+    true = np.asarray(y_true, dtype=np.float64)
+    pred = np.asarray(y_pred, dtype=np.float64)
+    if true.shape != pred.shape:
+        raise ValueError(f"MASE true/pred shape mismatch: {true.shape} vs {pred.shape}")
+    if seasonal_period < 1:
+        raise ValueError("seasonal_period must be >= 1")
+
+    mae = np.mean(np.abs(true - pred))
+    if scale is None:
+        scale = mase_scale(true, seasonal_period=seasonal_period)
+    if scale is None or not np.isfinite(scale) or scale <= 0:
+        return float("nan")
+    return float(mae / scale)
+
+
+def mase_scale(y_train: np.ndarray, seasonal_period: int = 1) -> float:
+    """
+    In-sample naive MAE denominator for MASE.
+
+    Hyndman & Koehler define the denominator on the training period, not the
+    holdout. Callers should pass this value into `mase(..., scale=...)` whenever
+    calibration trajectories are available.
+    """
+    train = np.asarray(y_train, dtype=np.float64)
+    if seasonal_period < 1:
+        raise ValueError("seasonal_period must be >= 1")
+    if train.shape[-1] <= seasonal_period:
+        return float("nan")
+    diffs = np.abs(train[..., seasonal_period:] - train[..., :-seasonal_period])
+    scale = float(np.mean(diffs))
+    return scale if np.isfinite(scale) and scale > 0 else float("nan")
+
+
+def _gini(actual: np.ndarray, score: np.ndarray) -> float:
+    actual = np.asarray(actual, dtype=np.float64).reshape(-1)
+    score = np.asarray(score, dtype=np.float64).reshape(-1)
+    if actual.shape != score.shape:
+        raise ValueError(f"Gini actual/score shape mismatch: {actual.shape} vs {score.shape}")
+    finite = np.isfinite(actual) & np.isfinite(score)
+    actual = actual[finite]
+    score = score[finite]
+    n = actual.size
+    if n == 0 or np.sum(actual) <= 0:
+        return float("nan")
+    order = np.lexsort((np.arange(n), score))
+    actual_sorted = actual[order]
+    cumulative = np.cumsum(actual_sorted)
+    return float((n + 1 - 2 * cumulative.sum() / cumulative[-1]) / n)
+
+
+def normalized_gini(actual: np.ndarray, score: np.ndarray) -> float:
+    """Gini(score) divided by the perfect-model Gini(actual)."""
+    denom = _gini(actual, actual)
+    if not np.isfinite(denom) or abs(denom) < 1e-12:
+        return float("nan")
+    return float(_gini(actual, score) / denom)
+
+
+def decile_calibration_arrays(
+    actual: np.ndarray,
+    score: np.ndarray,
+    prefix: str,
+    n_bins: int = 10,
+) -> dict[str, np.ndarray]:
+    """
+    Decile calibration table ordered by predicted score, top decile first.
+
+    Returned as numeric arrays so save_metrics_with_artifacts writes them to the
+    `.npz` sidecar rather than bloating the scalar JSON metrics.
+    """
+    actual = np.asarray(actual, dtype=np.float64).reshape(-1)
+    score = np.asarray(score, dtype=np.float64).reshape(-1)
+    if actual.shape != score.shape:
+        raise ValueError(
+            f"Decile calibration actual/score shape mismatch: {actual.shape} vs {score.shape}"
+        )
+    finite = np.isfinite(actual) & np.isfinite(score)
+    actual = actual[finite]
+    score = score[finite]
+    if actual.size == 0:
+        empty = np.array([], dtype=np.float64)
+        return {
+            f"_{prefix}_decile": empty,
+            f"_{prefix}_decile_n": empty,
+            f"_{prefix}_decile_actual_mean": empty,
+            f"_{prefix}_decile_pred_mean": empty,
+            f"_{prefix}_decile_actual_total": empty,
+            f"_{prefix}_decile_pred_total": empty,
+            f"_{prefix}_decile_actual_lift": empty,
+        }
+
+    order = np.argsort(score)[::-1]
+    groups = np.array_split(order, min(n_bins, actual.size))
+    pop_mean = actual.mean()
+    rows = []
+    for i, idx in enumerate(groups, start=1):
+        actual_mean = float(actual[idx].mean())
+        pred_mean = float(score[idx].mean())
+        rows.append((
+            i,
+            len(idx),
+            actual_mean,
+            pred_mean,
+            float(actual[idx].sum()),
+            float(score[idx].sum()),
+            float(actual_mean / pop_mean) if pop_mean != 0 else float("nan"),
+        ))
+    arr = np.asarray(rows, dtype=np.float64)
+    return {
+        f"_{prefix}_decile": arr[:, 0],
+        f"_{prefix}_decile_n": arr[:, 1],
+        f"_{prefix}_decile_actual_mean": arr[:, 2],
+        f"_{prefix}_decile_pred_mean": arr[:, 3],
+        f"_{prefix}_decile_actual_total": arr[:, 4],
+        f"_{prefix}_decile_pred_total": arr[:, 5],
+        f"_{prefix}_decile_actual_lift": arr[:, 6],
+    }
+
+
 def _mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(np.abs(y_true - y_pred)))
 
@@ -242,6 +416,8 @@ def aggregate_spend_to_raw_total(
 def compute_all_metrics(
     y_freq_true: np.ndarray,
     y_freq_pred: np.ndarray,
+    y_freq_true_per_week: Optional[np.ndarray] = None,
+    y_freq_pred_per_week: Optional[np.ndarray] = None,
     y_spend_true_raw_total: Optional[np.ndarray] = None,
     y_spend_pred_raw_total: Optional[np.ndarray] = None,
     y_spend_true_per_week: Optional[np.ndarray] = None,
@@ -252,6 +428,8 @@ def compute_all_metrics(
     true_activity_per_week: Optional[np.ndarray] = None,
     smearing_factor: Optional[float] = None,
     weekly_discount_rate: float = 0.0,
+    freq_mase_scale: Optional[float] = None,
+    spend_mase_scale: Optional[float] = None,
 ) -> dict:
     """
     Compute all evaluation metrics and return as a flat dict.
@@ -267,6 +445,8 @@ def compute_all_metrics(
     Args:
         y_freq_true:             (N,) true total transaction counts (unclipped)
         y_freq_pred:             (N,) predicted total transaction counts
+        y_freq_true_per_week:    (N, H) true per-week transaction counts
+        y_freq_pred_per_week:    (N, H) predicted per-week transaction counts
         y_spend_true_raw_total:  (N,) raw-currency holdout totals — ground truth
         y_spend_pred_raw_total:  (N,) raw-currency holdout totals — prediction
         y_spend_true_per_week:   (N, H) per-week scaled log spend — ground truth
@@ -276,15 +456,32 @@ def compute_all_metrics(
         smearing_factor:         Duan's smearing correction factor from validation
                                  residuals (applied to predictions only). Omit or pass
                                  None to disable. Compute with compute_smearing_factor().
+        freq_mase_scale:         optional in-sample naive MAE denominator for frequency MASE
+        spend_mase_scale:        optional in-sample naive MAE denominator for raw-spend MASE
     """
+    y_freq_true = np.asarray(y_freq_true, dtype=np.float32)
+    y_freq_pred = np.asarray(y_freq_pred, dtype=np.float32)
+
     metrics = {
         "freq_rmse": freq_rmse(y_freq_true, y_freq_pred),
         "freq_mae": freq_mae(y_freq_true, y_freq_pred),
+        "freq_normalized_gini": normalized_gini(y_freq_true, y_freq_pred),
     }
     if customer_ids is not None:
         cohort = aggregate_cohort(y_freq_true, y_freq_pred, customer_ids)
         metrics["freq_mape"] = cohort["mape"]
         metrics["bias_pct"] = cohort["bias_pct"]
+    metrics.update(decile_calibration_arrays(y_freq_true, y_freq_pred, "freq"))
+
+    if y_freq_true_per_week is not None and y_freq_pred_per_week is not None:
+        true_freq_week = np.asarray(y_freq_true_per_week, dtype=np.float32)
+        pred_freq_week = np.asarray(y_freq_pred_per_week, dtype=np.float32)
+        metrics.update(per_week_aggregate_metrics(true_freq_week, pred_freq_week, "freq"))
+        metrics["freq_mase"] = mase(true_freq_week, pred_freq_week, scale=freq_mase_scale)
+        if freq_mase_scale is not None:
+            metrics["freq_mase_scale"] = float(freq_mase_scale)
+        metrics["_per_week_true_freq"] = true_freq_week
+        metrics["_per_week_pred_freq"] = pred_freq_week
 
     # Resolve spend inputs to raw-currency totals
     true_raw_total: Optional[np.ndarray] = None
@@ -324,6 +521,8 @@ def compute_all_metrics(
             metrics["smearing_factor"] = float(smearing_factor)
         metrics["spend_mae_raw"] = _mae(true_raw_total, pred_raw_total)
         metrics["spend_rmse_raw"] = _rmse(true_raw_total, pred_raw_total)
+        metrics["spend_normalized_gini"] = normalized_gini(true_raw_total, pred_raw_total)
+        metrics.update(decile_calibration_arrays(true_raw_total, pred_raw_total, "spend"))
 
         # log1p of raw total — keeps a log-scale view without the sum-of-logs bug
         true_log = np.log1p(true_raw_total)
@@ -337,6 +536,14 @@ def compute_all_metrics(
         total_pred = float(pred_raw_total.sum())
         metrics["spend_bias_pct"] = bias_pct(total_true, total_pred)
 
+    if true_raw_matrix is not None and pred_raw_matrix is not None:
+        metrics.update(per_week_aggregate_metrics(true_raw_matrix, pred_raw_matrix, "spend"))
+        metrics["spend_mase"] = mase(true_raw_matrix, pred_raw_matrix, scale=spend_mase_scale)
+        if spend_mase_scale is not None:
+            metrics["spend_mase_scale"] = float(spend_mase_scale)
+        metrics["_per_week_true_spend"] = true_raw_matrix
+        metrics["_per_week_pred_spend"] = pred_raw_matrix
+
     # Per-customer CLV: only computable when we have per-week matrices
     # (joint deep models only; base LSTM and BTYD benchmarks produce scalar totals).
     if true_raw_matrix is not None and pred_raw_matrix is not None:
@@ -346,24 +553,38 @@ def compute_all_metrics(
         metrics["clv_rmse"] = float(np.sqrt(np.mean((true_clv - pred_clv) ** 2)))
         metrics["clv_spearman"] = clv_spearman(true_clv, pred_clv)
         metrics["clv_decile_lift"] = clv_decile_lift(true_clv, pred_clv)
+        metrics["clv_normalized_gini"] = normalized_gini(true_clv, pred_clv)
         metrics["clv_total_true"] = float(true_clv.sum())
         metrics["clv_total_pred"] = float(pred_clv.sum())
+        metrics.update(decile_calibration_arrays(true_clv, pred_clv, "clv"))
         # Save per-customer arrays for paired bootstrap significance testing.
         # Stored as lists so they survive json.dump without extra serialisation.
         metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
         metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
         metrics["_per_customer_spend_ae"] = np.abs(true_raw_total - pred_raw_total).tolist()
         metrics["_per_customer_clv_ae"] = np.abs(true_clv - pred_clv).tolist()
+        metrics["_per_customer_true_freq"] = y_freq_true.tolist()
+        metrics["_per_customer_pred_freq"] = y_freq_pred.tolist()
+        metrics["_per_customer_true_spend"] = true_raw_total.tolist()
+        metrics["_per_customer_pred_spend"] = pred_raw_total.tolist()
+        metrics["_per_customer_true_clv"] = true_clv.tolist()
+        metrics["_per_customer_pred_clv"] = pred_clv.tolist()
     elif true_raw_total is not None and pred_raw_total is not None:
         # Benchmark models: save per-customer arrays for freq/spend bootstrap
         # (CLV is skipped — no per-week decomposition available).
         metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
         metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
         metrics["_per_customer_spend_ae"] = np.abs(true_raw_total - pred_raw_total).tolist()
+        metrics["_per_customer_true_freq"] = y_freq_true.tolist()
+        metrics["_per_customer_pred_freq"] = y_freq_pred.tolist()
+        metrics["_per_customer_true_spend"] = true_raw_total.tolist()
+        metrics["_per_customer_pred_spend"] = pred_raw_total.tolist()
     elif true_raw_total is None:
         # Frequency-only models (Base LSTM, Pareto/NBD, Pareto/GGG, GPPM)
         metrics["_per_customer_freq_se"] = ((y_freq_true - y_freq_pred) ** 2).tolist()
         metrics["_per_customer_freq_ae"] = np.abs(y_freq_true - y_freq_pred).tolist()
+        metrics["_per_customer_true_freq"] = y_freq_true.tolist()
+        metrics["_per_customer_pred_freq"] = y_freq_pred.tolist()
 
     return metrics
 

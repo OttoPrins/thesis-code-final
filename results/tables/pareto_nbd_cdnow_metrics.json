@@ -1,0 +1,15 @@
+{
+  "freq_rmse": 1.1631473302841187,
+  "freq_mae": 0.5381752252578735,
+  "freq_mape": 8.347710957096572,
+  "bias_pct": 8.347710957096572,
+  "model": "pareto_nbd",
+  "dataset": "cdnow",
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "pareto_nbd_cdnow",
+  "final_manifest_benchmark_name": "pareto_nbd_cdnow",
+  "final_manifest_config": "experiments/configs/lstm_base_cdnow.yaml",
+  "final_manifest_config_hash": "b875aa811328",
+  "final_manifest_actual_config_hash": "2debae65e76e",
+  "arrays_file": "pareto_nbd_cdnow_arrays.npz"
+}

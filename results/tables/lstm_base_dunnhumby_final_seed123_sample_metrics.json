@@ -1,0 +1,16 @@
+{
+  "freq_rmse": 14.217832565307617,
+  "freq_mae": 8.644034385681152,
+  "freq_mape": 2.5534866277221426,
+  "bias_pct": -2.5534866277221426,
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "lstm_base_dunnhumby_final_seed123_sample",
+  "final_manifest_config": "experiments/configs/lstm_base_dunnhumby.yaml",
+  "final_manifest_config_hash": "f1d3b0103dd9",
+  "final_manifest_actual_config_hash": "0738e9fe6b0f",
+  "final_manifest_seed": 123,
+  "final_manifest_epochs": 100,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 30,
+  "arrays_file": "lstm_base_dunnhumby_final_seed123_sample_arrays.npz"
+}

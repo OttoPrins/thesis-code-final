@@ -117,6 +117,15 @@ def paired_bootstrap(
 
 
 def _latest_metrics_file(metrics_dir: Path, run_prefix: str) -> Optional[Path]:
+    return _select_metrics_file(metrics_dir, run_prefix)
+
+
+def _select_metrics_file(
+    metrics_dir: Path,
+    run_prefix: str,
+    seed_filter: Optional[int] = None,
+    mode_filter: Optional[str] = None,
+) -> Optional[Path]:
     """
     Find the most recent metrics JSON for a run prefix.
 
@@ -149,6 +158,25 @@ def _latest_metrics_file(metrics_dir: Path, run_prefix: str) -> Optional[Path]:
         candidates = final_candidates
         if not candidates:
             return None
+
+    # For final thesis tables we compare matched seeded DL runs. Keep benchmark
+    # rows usable: if no candidate has the requested seed/mode, fall back to the
+    # manifest-valid benchmark candidate instead of dropping it.
+    if seed_filter is not None:
+        seeded = [
+            path for path in candidates
+            if f"_seed{seed_filter}" in path.stem.removesuffix("_metrics")
+        ]
+        if seeded:
+            candidates = seeded
+    if mode_filter is not None:
+        mode_matched = [
+            path for path in candidates
+            if path.stem.removesuffix("_metrics").endswith(f"_{mode_filter}")
+        ]
+        if mode_matched:
+            candidates = mode_matched
+
     # Prefer seed-aggregated or the highest numbered version
     return candidates[-1]
 
@@ -177,6 +205,8 @@ def run_significance_tests(
     metrics: list[str],
     n_resamples: int = 10_000,
     seed: int = 42,
+    seed_filter: Optional[int] = None,
+    mode_filter: Optional[str] = None,
 ) -> list[dict]:
     """
     Run paired bootstrap for all (model_a, model_b, metric) combinations.
@@ -193,8 +223,8 @@ def run_significance_tests(
     """
     results = []
     for (prefix_a, prefix_b) in pairs:
-        path_a = _latest_metrics_file(metrics_dir, prefix_a)
-        path_b = _latest_metrics_file(metrics_dir, prefix_b)
+        path_a = _select_metrics_file(metrics_dir, prefix_a, seed_filter, mode_filter)
+        path_b = _select_metrics_file(metrics_dir, prefix_b, seed_filter, mode_filter)
 
         if path_a is None:
             print(f"[significance] WARNING: no metrics file for {prefix_a!r} — skipping")
@@ -236,6 +266,8 @@ def run_significance_tests(
             results.append({
                 "model_a": prefix_a,
                 "model_b": prefix_b,
+                "file_a": path_a.name,
+                "file_b": path_b.name,
                 "metric": metric,
                 **res,
             })
@@ -246,7 +278,7 @@ def _save_csv(results: list[dict], out_path: Path) -> None:
     if not results:
         print("[significance] No results to save.")
         return
-    fieldnames = ["model_a", "model_b", "metric", "delta", "ci_low", "ci_high",
+    fieldnames = ["model_a", "model_b", "file_a", "file_b", "metric", "delta", "ci_low", "ci_high",
                   "p_value", "n_customers", "n_resamples"]
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -273,6 +305,20 @@ def main():
     parser.add_argument("--n_resamples", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--seed_filter", type=int, default=None,
+        help=(
+            "Prefer metrics files containing this training seed. "
+            "Benchmarks without a seed suffix are kept as fallbacks."
+        ),
+    )
+    parser.add_argument(
+        "--mode_filter", choices=["sample", "expected"], default=None,
+        help=(
+            "Prefer metrics files with this inference mode suffix. "
+            "Benchmarks without a mode suffix are kept as fallbacks."
+        ),
+    )
+    parser.add_argument(
         "--out", type=Path, default=None,
         help="Output CSV path. Defaults to <metrics_dir>/significance_tests.csv"
     )
@@ -294,6 +340,8 @@ def main():
         metrics=args.metrics,
         n_resamples=args.n_resamples,
         seed=args.seed,
+        seed_filter=args.seed_filter,
+        mode_filter=args.mode_filter,
     )
     _save_csv(results, out_path)
 

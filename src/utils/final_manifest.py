@@ -31,10 +31,11 @@ def _manifest_hash_config(config: dict[str, Any]) -> dict[str, Any]:
     Return the config surface frozen by the final manifest.
 
     Final seed sweeps intentionally vary `training.seed`, while sensitivity runs
-    may vary `inference.mode`. Those fields are checked explicitly as runtime
-    metadata, so they are removed from the structural config fingerprint.
-    Epoch count and scenario count stay in the hash because smoke overrides must
-    never pass as final results.
+    may vary `inference.mode`. `train.py --seed_override/--inference_mode` also
+    appends suffixes to `output.run_name`. These runtime fields are checked
+    explicitly as metadata, so they are removed from the structural config
+    fingerprint. Epoch count and scenario count stay in the hash because smoke
+    overrides must never pass as final results.
     """
     cfg = copy.deepcopy(config)
     training = cfg.get("training")
@@ -43,6 +44,9 @@ def _manifest_hash_config(config: dict[str, Any]) -> dict[str, Any]:
     inference = cfg.get("inference")
     if isinstance(inference, dict):
         inference.pop("mode", None)
+    output = cfg.get("output")
+    if isinstance(output, dict):
+        output.pop("run_name", None)
     return cfg
 
 

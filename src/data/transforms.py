@@ -170,8 +170,8 @@ class SpendScaler:
     uncertainty parameters do their job on losses with comparable scales.
 
     log1p (rather than plain log) handles the log(0) on inactive weeks where
-    weekly_spend = 0; spend masking in the trainer ensures inactive-week
-    targets do not contribute to the spend loss.
+    weekly_spend = 0; the primary joint model trains on these zero targets so
+    the spend head learns the zero-inflated CLV surface.
 
     Fitted on calibration set only (kept stateless to make leakage impossible).
     """

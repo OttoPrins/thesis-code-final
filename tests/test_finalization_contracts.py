@@ -11,21 +11,30 @@ from src.evaluation.benchmarks import (
     GPPMModel,
     GammaPoissonPropensityModel,
     get_benchmark_model,
+    stan_sampler_diagnostics,
 )
-from src.evaluation.compare import export_latex_table
+from src.evaluation.compare import _filter_metric_files, export_latex_table
 from src.evaluation.metrics import (
+    compute_all_metrics,
+    mase,
+    mase_scale,
     metrics_arrays_path,
+    normalized_gini,
+    per_week_aggregate_metrics,
     save_metrics_with_artifacts,
     split_metric_artifacts,
 )
+from src.models.losses import KendallMultiTaskLoss
 from src.models import LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
+from src.training.inference import _step_from_logits, _zero_inactive_spend_feedback
 from src.training.trainer import Trainer
 from src.utils.final_manifest import (
     attach_manifest_metadata,
     manifest_config_hash,
     result_matches_manifest,
 )
+from train import _add_result_validity_checks
 
 
 def test_metrics_json_is_scalar_only_and_arrays_go_to_npz(tmp_path):
@@ -45,6 +54,84 @@ def test_metrics_json_is_scalar_only_and_arrays_go_to_npz(tmp_path):
 
     with np.load(metrics_arrays_path(metrics_path)) as data:
         assert np.array_equal(data["per_customer_freq_se"], np.array([1.0, 4.0, 9.0]))
+
+
+def test_metrics_sidecar_keeps_true_pred_vectors_for_analysis_notebook(tmp_path):
+    class IdentitySpendScaler:
+        def inverse_transform_spend(self, values):
+            return np.asarray(values, dtype=np.float32)
+
+    metrics = compute_all_metrics(
+        y_freq_true=np.array([1.0, 3.0]),
+        y_freq_pred=np.array([2.0, 2.5]),
+        y_spend_true_per_week=np.array([[10.0, 0.0], [5.0, 6.0]], dtype=np.float32),
+        y_spend_pred_per_week=np.array([[8.0, 1.0], [7.0, 4.0]], dtype=np.float32),
+        customer_ids=np.array([101, 102]),
+        scaler=IdentitySpendScaler(),
+        weekly_discount_rate=0.0,
+    )
+    metrics_path = tmp_path / "lstm_joint_cdnow_final_seed42_sample_metrics.json"
+    _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
+
+    with open(metrics_path) as f:
+        saved = json.load(f)
+    assert "per_customer_true_clv" not in saved
+    assert saved["arrays_file"] == arrays_path.name
+
+    with np.load(arrays_path) as data:
+        assert np.array_equal(data["per_customer_true_freq"], np.array([1.0, 3.0]))
+        assert np.array_equal(data["per_customer_pred_freq"], np.array([2.0, 2.5]))
+        assert np.array_equal(data["per_customer_true_spend"], np.array([10.0, 11.0]))
+        assert np.array_equal(data["per_customer_pred_spend"], np.array([9.0, 11.0]))
+        assert np.array_equal(data["per_customer_true_clv"], np.array([10.0, 11.0]))
+        assert np.array_equal(data["per_customer_pred_clv"], np.array([9.0, 11.0]))
+        assert np.array_equal(data["per_week_true_spend"], np.array([[10.0, 0.0], [5.0, 6.0]]))
+        assert np.array_equal(data["per_week_pred_spend"], np.array([[8.0, 1.0], [7.0, 4.0]]))
+
+
+def test_sparse_metrics_include_weekly_scaled_gini_and_decile_artifacts(tmp_path):
+    class IdentitySpendScaler:
+        def inverse_transform_spend(self, values):
+            return np.asarray(values, dtype=np.float32)
+
+    true_freq_week = np.array([[0, 1, 0, 2], [1, 0, 0, 0], [0, 2, 1, 0]], dtype=np.float32)
+    pred_freq_week = np.array([[0, 1, 1, 1], [0, 0, 0, 0], [1, 1, 1, 0]], dtype=np.float32)
+    metrics = compute_all_metrics(
+        y_freq_true=true_freq_week.sum(axis=1),
+        y_freq_pred=pred_freq_week.sum(axis=1),
+        y_freq_true_per_week=true_freq_week,
+        y_freq_pred_per_week=pred_freq_week,
+        y_spend_true_per_week=np.array([[0, 5, 0, 7], [2, 0, 0, 0], [0, 4, 3, 0]], dtype=np.float32),
+        y_spend_pred_per_week=np.array([[0, 4, 1, 6], [0, 0, 0, 0], [1, 3, 4, 0]], dtype=np.float32),
+        customer_ids=np.array([1, 2, 3]),
+        scaler=IdentitySpendScaler(),
+        weekly_discount_rate=0.0,
+    )
+    assert metrics["freq_weekly_mape"] >= 0
+    assert np.isfinite(metrics["freq_mase"])
+    assert "freq_normalized_gini" in metrics
+    assert "spend_normalized_gini" in metrics
+    assert "clv_normalized_gini" in metrics
+
+    metrics_path = tmp_path / "joint_metrics.json"
+    _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
+    with np.load(arrays_path) as data:
+        assert data["per_week_true_freq"].shape == (3, 4)
+        assert data["per_week_pred_freq"].shape == (3, 4)
+        assert data["freq_decile_actual_mean"].ndim == 1
+        assert data["spend_decile_pred_mean"].ndim == 1
+        assert data["clv_decile_actual_lift"].ndim == 1
+
+
+def test_mase_weekly_metrics_and_normalized_gini_helpers():
+    y_true = np.array([[1, 2, 4], [0, 1, 1]], dtype=np.float32)
+    assert mase(y_true, y_true) == pytest.approx(0.0)
+    assert mase_scale(y_true) == pytest.approx(np.mean([1, 2, 1, 0]))
+    assert mase(y_true, y_true + 1, scale=mase_scale(y_true)) == pytest.approx(1 / 1.0)
+    weekly = per_week_aggregate_metrics(y_true, y_true, "freq")
+    assert weekly["freq_weekly_mape"] == pytest.approx(0.0)
+    assert normalized_gini(np.array([0, 1, 3]), np.array([0, 1, 3])) == pytest.approx(1.0)
+    assert normalized_gini(np.array([0, 1, 3]), np.array([3, 1, 0])) < 0
 
 
 def test_split_metric_artifacts_rejects_non_scalar_non_numeric_values():
@@ -75,6 +162,107 @@ def test_true_gppm_requires_weekly_event_log_or_dependencies():
     })
     with pytest.raises(RuntimeError, match="weekly event log"):
         model.fit(rfm)
+
+
+def test_gppm_sampler_diagnostics_gate_invalid_stan_fits():
+    class FakeFit:
+        def __init__(self, diagnose_text, rhats):
+            self._diagnose_text = diagnose_text
+            self._rhats = rhats
+
+        def diagnose(self):
+            return self._diagnose_text
+
+        def summary(self):
+            return pd.DataFrame({"R_hat": self._rhats})
+
+    ok = stan_sampler_diagnostics(
+        FakeFit("No divergent transitions found.", [1.0, 1.01])
+    )
+    assert ok["benchmark_valid"]
+
+    bad = stan_sampler_diagnostics(
+        FakeFit("3 of 1000 (0.3%) transitions ended with a divergence.", [1.0, 1.01])
+    )
+    assert not bad["benchmark_valid"]
+    assert bad["stan_divergent_transitions"] == 3
+
+    bad_rhat = stan_sampler_diagnostics(
+        FakeFit("No divergent transitions found.", [1.0, 1.2])
+    )
+    assert not bad_rhat["benchmark_valid"]
+
+
+def test_deep_run_validity_checks_flag_mechanical_failures():
+    metrics = {
+        "freq_rmse": 1.0,
+        "freq_mae": 1.0,
+        "freq_mape": 0.0,
+        "bias_pct": 0.0,
+    }
+    results = {"pred_freq": np.zeros((2, 3), dtype=np.float32)}
+    _add_result_validity_checks(
+        metrics,
+        results=results,
+        true_per_week=np.ones((2, 3), dtype=np.float32),
+        evaluation_cfg={},
+        joint=False,
+    )
+    assert not metrics["run_valid"]
+    assert "all-zero frequency forecast" in metrics["run_invalid_reason"]
+
+    metrics = {
+        "freq_rmse": 1.0,
+        "freq_mae": 1.0,
+        "freq_mape": 0.0,
+        "bias_pct": 0.0,
+        "spend_mae_raw": 1.0,
+        "spend_rmse_raw": 1.0,
+        "spend_bias_pct": 0.0,
+        "spend_weekly_total_true": 10.0,
+        "spend_weekly_total_pred": 101.0,
+    }
+    results = {
+        "pred_freq": np.ones((2, 3), dtype=np.float32),
+        "pred_activity": np.ones((2, 3), dtype=np.float32),
+        "pred_spend": np.ones((2, 3), dtype=np.float32),
+    }
+    _add_result_validity_checks(
+        metrics,
+        results=results,
+        true_per_week=np.ones((2, 3), dtype=np.float32),
+        evaluation_cfg={"validity_max_spend_total_ratio": 10.0},
+        joint=True,
+    )
+    assert not metrics["run_valid"]
+    assert "spend total ratio" in metrics["run_invalid_reason"]
+
+
+def test_comparison_filter_skips_stale_deep_results_without_run_valid(tmp_path):
+    stale = tmp_path / "lstm_joint_cdnow_final_seed42_sample_metrics.json"
+    stale.write_text(json.dumps({"freq_rmse": 1.0}))
+    valid = tmp_path / "lstm_joint_cdnow_final_seed7_sample_metrics.json"
+    valid.write_text(json.dumps({"freq_rmse": 1.0, "run_valid": True}))
+    bench = tmp_path / "pareto_nbd_cdnow_metrics.json"
+    bench.write_text(json.dumps({"freq_rmse": 1.0, "model": "pareto_nbd"}))
+    stale_gppm = tmp_path / "gppm_cdnow_metrics.json"
+    stale_gppm.write_text(json.dumps({"freq_rmse": 1.0, "model": "gppm"}))
+    valid_gppm = tmp_path / "gppm_cdnow_valid_metrics.json"
+    valid_gppm.write_text(json.dumps({
+        "freq_rmse": 1.0,
+        "model": "gppm",
+        "benchmark_valid": True,
+    }))
+
+    kept = _filter_metric_files(
+        [str(stale), str(valid), str(bench), str(stale_gppm), str(valid_gppm)],
+        final_only=False,
+    )
+    assert str(stale) not in kept
+    assert str(stale_gppm) not in kept
+    assert str(valid) in kept
+    assert str(bench) in kept
+    assert str(valid_gppm) in kept
 
 
 def test_lstm_is_one_layer_seq2seq_with_shared_joint_encoder():
@@ -131,6 +319,83 @@ def test_transformer_uses_position_and_time2vec_only_for_temporal_encoding():
     assert not hasattr(model, "erpe")
 
 
+def _tiny_transformer_batch():
+    return {
+        "week": torch.tensor([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4]], dtype=torch.long),
+        "position": torch.tensor([[0, 1, 2, 3, 4], [0, 1, 2, 3, 4]], dtype=torch.long),
+        "trans": torch.tensor([[0, 1, 0, 2, 0], [0, 0, 1, 0, 0]], dtype=torch.long),
+        "spend": torch.tensor([[0.0, 1.0, 0.0, 1.2, 0.0], [0.0, 0.0, 0.8, 0.0, 0.0]]),
+        "delta_t": torch.tensor([[1, 0, 1, 0, 1], [1, 2, 0, 1, 2]], dtype=torch.float32),
+        "mask": torch.tensor([[0, 1, 1, 1, 1], [1, 1, 1, 1, 1]], dtype=torch.float32),
+        "y_freq": torch.tensor([[1, 0, 2, 0, 0], [0, 1, 0, 0, 0]], dtype=torch.long),
+        "y_spend": torch.tensor([[1.0, 0.0, 1.1, 0.0, 0.0], [0.0, 0.7, 0.0, 0.0, 0.0]]),
+    }
+
+
+def _run_transformer_finite_smoke(device: torch.device):
+    torch.manual_seed(0)
+    model = TransformerModel(
+        max_week=51,
+        max_trans=3,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        dropout=0.0,
+        time2vec_dim=4,
+        joint=True,
+    ).to(device)
+    loss_fn = KendallMultiTaskLoss(n_tasks=2).to(device)
+    optimizer = torch.optim.Adam(
+        list(model.parameters()) + list(loss_fn.parameters()),
+        lr=1e-3,
+    )
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        device=device,
+        joint=True,
+        multi_task_loss=loss_fn,
+        kendall_warmup_epochs=0,
+        max_grad_norm=1.0,
+    )
+    for _ in range(3):
+        metrics = trainer.train_epoch([_tiny_transformer_batch()])
+        assert np.isfinite(metrics["total_loss"])
+
+
+def test_transformer_cpu_training_smoke_is_finite_with_loss_mask():
+    _run_transformer_finite_smoke(torch.device("cpu"))
+
+
+@pytest.mark.skipif(
+    not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()),
+    reason="MPS backend is not available",
+)
+def test_transformer_mps_training_smoke_is_finite_with_loss_mask():
+    _run_transformer_finite_smoke(torch.device("mps"))
+
+
+def test_sample_mode_activity_is_binary_and_matches_sampled_class():
+    torch.manual_seed(0)
+    logits = torch.tensor([
+        [6.0, 0.0, 0.0, 0.0],
+        [0.0, 6.0, 0.0, 0.0],
+        [0.0, 0.0, 6.0, 0.0],
+    ])
+    next_class, pred, activity = _step_from_logits(logits, mode="sample", max_trans=3)
+    assert torch.equal(pred, next_class.float())
+    assert set(activity.cpu().numpy().tolist()).issubset({0.0, 1.0})
+    assert torch.equal(activity, (next_class > 0).float())
+
+
+def test_inactive_frequency_zeros_spend_feedback():
+    log_spend = torch.tensor([-1.0, 0.5, 2.0])
+    next_class = torch.tensor([0, 1, 0])
+    gated = _zero_inactive_spend_feedback(log_spend, next_class)
+    assert torch.equal(gated, torch.tensor([0.0, 0.5, 0.0]))
+
+
 def test_final_manifest_rejects_hash_and_runtime_overrides(tmp_path):
     cfg_path = tmp_path / "toy_cdnow.yaml"
     cfg = {
@@ -161,10 +426,12 @@ def test_final_manifest_rejects_hash_and_runtime_overrides(tmp_path):
     manifest_path = tmp_path / "final_manifest.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest))
 
+    runtime_cfg = yaml.safe_load(yaml.safe_dump(cfg))
+    runtime_cfg["output"]["run_name"] = "toy_cdnow_v1_seed7_sample"
     metrics = attach_manifest_metadata(
         {},
         config_path=cfg_path,
-        config=cfg,
+        config=runtime_cfg,
         run_name="toy_cdnow_v1_seed7_sample",
         manifest_path=manifest_path,
     )

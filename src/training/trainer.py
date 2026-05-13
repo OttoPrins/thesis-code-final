@@ -58,6 +58,34 @@ class Trainer:
         self.kendall_warmup_epochs = kendall_warmup_epochs
         self.current_epoch: int = 0
 
+    def _named_optimized_parameters(self):
+        """Yield trainable parameters owned by the optimizer path."""
+        yield from self.model.named_parameters()
+        if self.multi_task_loss is not None:
+            for name, param in self.multi_task_loss.named_parameters():
+                yield f"multi_task_loss.{name}", param
+
+    def _optimized_parameters(self) -> list[nn.Parameter]:
+        return [
+            param for _, param in self._named_optimized_parameters()
+            if param.requires_grad
+        ]
+
+    @staticmethod
+    def _assert_finite_loss(loss: torch.Tensor, stage: str) -> None:
+        if not torch.isfinite(loss).item():
+            raise FloatingPointError(f"Non-finite {stage} loss: {loss.item()}")
+
+    def _assert_finite_gradients(self) -> None:
+        bad_params = []
+        for name, param in self._named_optimized_parameters():
+            if param.grad is not None and not torch.isfinite(param.grad).all().item():
+                bad_params.append(name)
+        if bad_params:
+            shown = ", ".join(bad_params[:8])
+            suffix = "" if len(bad_params) <= 8 else f", ... ({len(bad_params)} total)"
+            raise FloatingPointError(f"Non-finite gradients in {shown}{suffix}")
+
     def _forward(self, batch: dict):
         """
         Run forward pass, normalising different return signatures.
@@ -105,11 +133,18 @@ class Trainer:
             delta_t = batch.get("delta_t")
             if delta_t is not None:
                 delta_t = delta_t.to(self.device)
+            # The training `mask` is a loss mask for valid customer-period targets.
+            # Dense weekly grids are not padded sequences, so do not reuse it as an
+            # attention padding mask. Only pass a true padding mask when a future
+            # dataset/collate path provides one explicitly.
+            padding_mask = batch.get("padding_mask")
+            if padding_mask is not None:
+                padding_mask = padding_mask.to(self.device)
             out = self.model(
                 week, trans,
                 spend=spend,
                 position=position,
-                padding_mask=mask,
+                padding_mask=padding_mask,
                 static_covariates=static_cov,
                 dynamic_covariates=dynamic_cov,
                 delta_t=delta_t,
@@ -148,13 +183,10 @@ class Trainer:
         if self.joint:
             y_spend = batch["y_spend"].to(self.device)
             mse_per_step = F.mse_loss(log_spend, y_spend, reduction="none")
-            # Mask zero-purchase weeks: spend regression target is 0 on inactive
-            # weeks, which would teach the model to predict ~0 everywhere. Train
-            # the spend head only on weeks where a purchase actually happened.
-            activity_mask = (y_freq > 0).float()
-            spend_mask = mask * activity_mask
-            spend_denom = spend_mask.sum().clamp(min=1.0)
-            spend_loss = (mse_per_step * spend_mask).sum() / spend_denom
+            # Thesis protocol: train log-spend over every valid customer-period,
+            # including zero-spend weeks. Conditional-positive spend is a separate
+            # diagnostic variant, not the primary joint model.
+            spend_loss = (mse_per_step * mask).sum() / mask.sum().clamp(min=1.0)
             total_loss = self.multi_task_loss([freq_loss, spend_loss])
 
             # Log Kendall task weights (exp(-log_var) per task)
@@ -178,9 +210,17 @@ class Trainer:
         for batch in dataloader:
             self.optimizer.zero_grad()
             loss, metrics = self._compute_loss(batch)
+            self._assert_finite_loss(loss, "training")
             loss.backward()
+            self._assert_finite_gradients()
             if self.max_grad_norm > 0:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                grad_norm = nn.utils.clip_grad_norm_(
+                    self._optimized_parameters(), self.max_grad_norm
+                )
+                if not torch.isfinite(grad_norm).item():
+                    raise FloatingPointError(
+                        f"Non-finite gradient norm before clipping: {grad_norm.item()}"
+                    )
             self.optimizer.step()
 
             for k, v in metrics.items():
@@ -197,7 +237,8 @@ class Trainer:
 
         with torch.no_grad():
             for batch in dataloader:
-                _, metrics = self._compute_loss(batch)
+                loss, metrics = self._compute_loss(batch)
+                self._assert_finite_loss(loss, "validation")
                 for k, v in metrics.items():
                     totals[k] = totals.get(k, 0.0) + v
                 n_batches += 1

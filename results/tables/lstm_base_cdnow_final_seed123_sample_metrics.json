@@ -1,0 +1,16 @@
+{
+  "freq_rmse": 1.2546372413635254,
+  "freq_mae": 0.5522916913032532,
+  "freq_mape": 36.50501468109845,
+  "bias_pct": -36.50501468109845,
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "lstm_base_cdnow_final_seed123_sample",
+  "final_manifest_config": "experiments/configs/lstm_base_cdnow.yaml",
+  "final_manifest_config_hash": "789114d35866",
+  "final_manifest_actual_config_hash": "b7b8f6954331",
+  "final_manifest_seed": 123,
+  "final_manifest_epochs": 100,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 30,
+  "arrays_file": "lstm_base_cdnow_final_seed123_sample_arrays.npz"
+}

@@ -1,0 +1,15 @@
+{
+  "freq_rmse": 33.91511154174805,
+  "freq_mae": 19.464054107666016,
+  "freq_mape": 74.21148205273407,
+  "bias_pct": -74.21148205273407,
+  "model": "pareto_nbd",
+  "dataset": "dunnhumby",
+  "final_manifest_version": "2026-05-05-final",
+  "final_manifest_run_name": "pareto_nbd_dunnhumby",
+  "final_manifest_benchmark_name": "pareto_nbd_dunnhumby",
+  "final_manifest_config": "experiments/configs/lstm_base_dunnhumby.yaml",
+  "final_manifest_config_hash": "79c1874ce833",
+  "final_manifest_actual_config_hash": "d760e15f9f38",
+  "arrays_file": "pareto_nbd_dunnhumby_arrays.npz"
+}

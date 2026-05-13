@@ -3,6 +3,7 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/raw/CDNOW_sample.txt
 
 # Model checkpoints
 src/models/checkpoints/

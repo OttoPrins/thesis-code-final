@@ -1,0 +1,36 @@
+# .kaggleignore — excludes files from `kaggle datasets version` uploads.
+# Syntax is identical to .gitignore.
+
+# Raw data — uploaded as separate per-dataset Kaggle datasets, not part of the code repo
+data/
+
+# Generated outputs — created at Kaggle runtime
+results/
+
+# Python virtual environment — Kaggle has its own Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Model checkpoints — generated at Kaggle runtime
+*.pt
+
+# Large papers / PDFs
+Empirical_Papers/
+
+# Log files and OS noise
+*.log
+.DS_Store
+.DS_Store?
+._*
+
+# Claude / IDE artifacts
+.claude/
+.vscode/
+.idea/
+
+# Kaggle itself doesn't need the git history
+.git/

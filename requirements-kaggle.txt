@@ -1,0 +1,24 @@
+# requirements-kaggle.txt
+#
+# Only install this file on Kaggle — NOT locally.
+# Your full local requirements are in requirements.txt.
+#
+# Kaggle pre-installs: torch, numpy, pandas, scikit-learn, matplotlib,
+# seaborn, scipy, tqdm, pyyaml, shap. This file adds only the packages
+# that are genuinely missing.
+#
+# DO NOT add cmdstanpy or rpy2 here — they require a C++ compiler (Stan)
+# and a full R installation, neither of which is available on Kaggle by
+# default.  Probabilistic benchmarks (Pareto/GGG, GPPM) are skipped in
+# Kaggle runs; only the DL models (LSTM, Transformer) are trained there.
+#
+# DO NOT add wandb — it is listed in requirements.txt but is never
+# imported anywhere in the codebase.
+#
+# DO NOT pin numpy. Kaggle's base image ships NumPy 2.x and ~15 base
+# packages (shap, jax, cupy, opencv, pytensor, rasterio, ...) now require
+# numpy>=2. The codebase was audited 2026-05-13 and is NumPy 2.x
+# compatible (no np.int / np.float / np.in1d / np.trapz / np.product use).
+
+lifetimes>=0.11.3        # Pareto/NBD, BG/NBD, Gamma-Gamma (pure Python, no compiler)
+openpyxl>=3.1.0          # UCI Online Retail II is an Excel (.xlsx) workbook

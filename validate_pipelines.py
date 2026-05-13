@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 import traceback
 
@@ -47,6 +48,9 @@ def validate_dataset(name: str) -> bool:
 
     try:
         config = load_config(config_path)
+        if os.environ.get("KAGGLE_ENV") == "1":
+            from src.utils.config import apply_kaggle_overrides
+            apply_kaggle_overrides(config)
         pipeline = PIPELINES[name]()
         train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
     except Exception:

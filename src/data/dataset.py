@@ -95,6 +95,10 @@ class CustomerDataset(Dataset):
         self.customer_ids = torch.tensor(data["customer_ids"], dtype=torch.long)
         self.mask = torch.tensor(data["mask"], dtype=torch.float32)
         self.max_trans = data["max_trans"]
+        # top_bin_value: E[weekly_freq | weekly_freq >= max_trans] on calibration data.
+        # Used at inference to decode the censored top-bin class to its conditional mean
+        # rather than exactly max_trans, reducing systematic under-prediction.
+        self.top_bin_value: float = float(data.get("top_bin_value", self.max_trans))
         self.include_seed = include_seed
 
         # T-1 = input sequence length per sample (used for dynamic covariate slicing)

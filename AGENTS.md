@@ -147,7 +147,7 @@ encoder. They must be trained jointly, not as two separate models.
 
 ## 6. Data Pipeline Architecture
 
-This is the **immediate priority** — implement before any model training.
+This section documents the implemented data pipeline architecture.
 
 ### Design Principles
 1. **Common interface:** Every dataset produces the same PyTorch-ready tensors.
@@ -407,11 +407,28 @@ paper or find an R-to-Python port. GPPM may require PyMC/CmdStan.
 ```
 thesis-code/
 ├── AGENTS.md                         ← This file. Read at session start.
+├── CLAUDE.md                         ← Claude Code entry point (mirrors AGENTS.md)
+├── README.md
+├── requirements.txt
+├── requirements-kaggle.txt           ← Kaggle-specific dependencies
+├── train.py                          ← Main training entry point
+├── run_benchmarks.py                 ← Probabilistic benchmark runner
+├── run_seeds.py                      ← Multi-seed experiment runner
+├── run_full_analysis.sh              ← End-to-end analysis script
+├── validate_pipelines.py             ← Pipeline validation utility
+├── validate_final_setup.py           ← Pre-run setup validation
+├── push_to_kaggle.sh                 ← Push notebook to Kaggle
+├── upload_data_to_kaggle.sh          ← Upload data to Kaggle dataset
+├── kernel-metadata.json              ← Kaggle kernel config
+├── dataset-metadata.json             ← Kaggle dataset config
+├── Empirical_Papers/                 ← 21 research PDFs + literature_matrix.xlsx
+├── Resuts_Kaggle_Notebook/           ← Kaggle run outputs (checkpoints/, tables/)
 ├── prompts/
-│   ├── session_start.md              ← Paste at start of every session
-│   ├── data_pipeline_session.md      ← Session prompt for data work
-│   ├── model_training_session.md     ← Session prompt for training
-│   └── evaluation_session.md        ← Session prompt for evaluation
+│   ├── session_start.md
+│   ├── data_pipeline_session.md
+│   ├── model_training_session.md
+│   ├── evaluation_session.md
+│   └── run_experiments.md
 ├── src/
 │   ├── data/
 │   │   ├── pipeline.py               ← Abstract BasePipeline
@@ -429,77 +446,88 @@ thesis-code/
 │   │   ├── heads.py                  ← FrequencyHead (softmax) + SpendHead (regression)
 │   │   └── losses.py                 ← KendallMultiTaskLoss
 │   ├── training/
-│   │   ├── trainer.py                ← Training loop (or Lightning module)
-│   │   └── callbacks.py              ← EarlyStopping, ModelCheckpoint
+│   │   ├── trainer.py                ← Training loop
+│   │   ├── callbacks.py              ← EarlyStopping, ModelCheckpoint
+│   │   └── inference.py              ← Autoregressive inference + scenario sampling
 │   ├── evaluation/
-│   │   ├── metrics.py                ← RMSE, MAE, MAPE, bias, R² implementations
+│   │   ├── metrics.py                ← RMSE, MAE, MAPE, bias, R²
 │   │   ├── benchmarks.py             ← Pareto/NBD, BG/NBD, Pareto/GGG, GPPM wrappers
-│   │   └── compare.py                ← Build comparison tables + plots
+│   │   ├── compare.py                ← Build comparison tables + plots
+│   │   ├── calibration.py            ← Calibration diagnostics
+│   │   ├── significance.py           ← Statistical significance tests
+│   │   ├── rolling_origin.py         ← Rolling-origin cross-validation
+│   │   ├── shap_analysis.py          ← SHAP attribution (Extension 3)
+│   │   ├── rescore.py                ← Re-scoring from saved arrays
+│   │   └── stan/                     ← Stan models for Bayesian benchmarks
 │   └── utils/
 │       ├── config.py                 ← Load YAML configs
 │       ├── seed.py                   ← Set random seeds everywhere
-│       └── logging.py                ← Consistent logging setup
+│       └── final_manifest.py         ← Finalization manifest helper
 ├── notebooks/
-│   ├── 01_eda_cdnow.ipynb            ← EDA for CDNOW
-│   ├── 02_eda_uci.ipynb              ← EDA for UCI Retail
-│   ├── 03_eda_tafeng.ipynb           ← EDA for Ta-Feng
-│   ├── 04_eda_dunnhumby.ipynb        ← EDA for Dunnhumby (include covariate distributions)
-│   ├── 05_baseline_btyd.ipynb        ← Fit and evaluate probabilistic benchmarks
+│   ├── 01_canary_cdnow.ipynb         ← CDNOW pipeline canary + quick EDA
+│   ├── kaggle_runner.ipynb           ← Kaggle cloud training wrapper
 │   └── 06_results_comparison.ipynb  ← Final comparison tables + thesis plots
+├── tests/
+│   ├── test_data_contracts.py
+│   ├── test_finalization_contracts.py
+│   └── test_gppm_recovery.py
 ├── experiments/
-│   └── configs/
-│       ├── lstm_base_cdnow.yaml
-│       ├── lstm_joint_cdnow.yaml
-│       ├── transformer_joint_cdnow.yaml
-│       ├── lstm_joint_uci.yaml
-│       ├── lstm_joint_tafeng.yaml
-│       ├── transformer_joint_tafeng.yaml
-│       └── extension3_dunnhumby.yaml
+│   ├── configs/                      ← 29 YAML experiment configs
+│   │   ├── lstm_base_{cdnow,dunnhumby,tafeng,uci}.yaml
+│   │   ├── lstm_joint_{cdnow,dunnhumby,tafeng,uci}{,_v2}.yaml
+│   │   ├── transformer_joint_{cdnow,dunnhumby,tafeng,uci}{,_v2}.yaml
+│   │   └── extension3_{lstm,transformer}_{none,static,dynamic,full}_dunnhumby.yaml
+│   ├── insights/                     ← Comparison plots
+│   └── final_manifest.yaml
 ├── results/
-│   ├── tables/                       ← CSV comparison tables (thesis-ready)
-│   ├── plots/                        ← Saved figures (PDF or PNG, 300 DPI)
-│   └── checkpoints/                  ← Best model .pt files (gitignored)
+│   ├── tables/                       ← JSON/CSV/NPZ result files (172 files as of 2026-05-18)
+│   ├── plots/                        ← Saved thesis figures (to be populated)
+│   ├── checkpoints/                  ← Best model .pt files (gitignored)
+│   ├── logs/                         ← Training logs
+│   └── archive/                      ← Pre-final results snapshot
 ├── data/
 │   ├── raw/                          ← Original downloaded files (gitignored)
 │   └── processed/                    ← Cleaned + preprocessed (gitignored for large files)
-├── requirements.txt
-└── README.md
+└── venv/                             ← Python virtual environment (gitignored)
 ```
 
 ---
 
-## 13. Development Sequence (do this in order)
+## 13. Development Sequence
 
-**Current priority: Data pipeline (Stage 0)**
+**Stage 0 — Data Pipeline (complete)**
+- [x] Download all 4 datasets to `data/raw/`
+- [x] Implement `src/data/transforms.py` (WeeklyAggregator, TemporalSplitter, Scaler, SequenceBuilder)
+- [x] Implement `src/data/dataset.py` (CustomerDataset + collate_fn)
+- [x] Implement `src/data/datasets/cdnow.py` — CDNOW pipeline working end-to-end
+- [x] Validate CDNOW pipeline: shapes verified via `01_canary_cdnow.ipynb`
+- [x] Implement remaining dataset pipelines (uci_retail, tafeng, dunnhumby)
+- [ ] Write full EDA notebooks for UCI, Ta-Feng, Dunnhumby (not done; `01_canary_cdnow.ipynb` exists for CDNOW only)
 
-- [ ] Download all 4 datasets to `data/raw/`
-- [ ] Implement `src/data/transforms.py` (WeeklyAggregator, TemporalSplitter, Scaler, SequenceBuilder)
-- [ ] Implement `src/data/dataset.py` (CustomerDataset + collate_fn)
-- [ ] Implement `src/data/datasets/cdnow.py` — get CDNOW pipeline working end-to-end first
-- [ ] Validate CDNOW pipeline: check shapes, inspect sequences, verify no leakage
-- [ ] Implement remaining dataset pipelines (uci_retail, tafeng, dunnhumby)
-- [ ] Write EDA notebooks for all 4 datasets
+**Stage 1 — Replication (complete)**
+- [x] Fit Pareto/NBD and BG/NBD + Gamma-Gamma on all 4 datasets
+- [x] Fit Pareto/GGG (Platzer & Reutterer 2016) on CDNOW
+- [x] Fit GPPM (Dew & Ansari 2018) on CDNOW
+- [x] Implement Base LSTM + training loop; trained on all 4 datasets (3 seeds each)
+- [x] Compute RMSE, cohort bias, MAPE; saved to `results/tables/`
 
-**Stage 1 — Replication**
-- [ ] Fit Pareto/NBD and BG/NBD via `lifetimes` on CDNOW
-- [ ] Fit Pareto/GGG (Platzer & Reutterer 2016) on CDNOW
-- [ ] Fit GPPM (Dew & Ansari 2018) on CDNOW
-- [ ] Implement Base LSTM + training loop; match Valendin et al. (2022) CDNOW results
-- [ ] Compute RMSE, cohort bias, MAPE; save to `results/tables/`
+**Stage 2 — Extension 1 (complete)**
+- [x] Add SpendHead and KendallMultiTaskLoss
+- [x] Train Joint LSTM on all 4 datasets (3 seeds each)
 
-**Stage 2 — Extension 1**
-- [ ] Add SpendHead and KendallMultiTaskLoss
-- [ ] Train Joint LSTM on CDNOW; compare to Pareto/NBD + Gamma-Gamma pipeline
+**Stage 3 — Extension 2 (complete)**
+- [x] Implement Time2Vec + sinusoidal PE
+- [x] Implement Transformer encoder
+- [x] Train Transformer on all 4 datasets (3 seeds each)
+- [x] `comparison_all.csv` and `comparison_all.tex` generated
 
-**Stage 3 — Extension 2**
-- [ ] Implement Time2Vec + sinusoidal PE
-- [ ] Implement Transformer encoder
-- [ ] Train Transformer on all 4 datasets; compare vs. LSTM
-
-**Stage 4 — Extension 3**
-- [ ] Build Dunnhumby covariate pipeline (demographics + campaign exposure features)
-- [ ] Train Joint LSTM + Transformer with covariates on Dunnhumby
-- [ ] Compute SHAP values; build ablation bar charts
+**Stage 4 — Extension 3 (partial)**
+- [x] Build Dunnhumby covariate pipeline (demographics + campaign exposure)
+- [x] Train extension3 (none + static covariates) for LSTM + Transformer, 3 seeds
+- [ ] Train extension3 dynamic + full covariate variants
+- [ ] Compute SHAP values for covariate attribution
+- [ ] Generate thesis plots (save to `results/plots/`, 300 DPI)
+- [ ] Finalize `06_results_comparison.ipynb` with all final figures
 
 ---
 

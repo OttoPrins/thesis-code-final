@@ -40,7 +40,7 @@ training:
   scheduler: {type: cosine, warmup_fraction: 0.05}
   seed: 42
 
-loss: {type: kendall, n_tasks: 2, warmup_epochs: 5, spend_loss: nll}
+loss: {type: kendall, n_tasks: 2, warmup_epochs: 5, spend_loss: nll, freq_logvar_max: 2.0}
 calibration: {temperature_scaling: true, aggregate_scaling: true}
 output: {run_name: transformer_joint_tafeng_v2, results_dir: results, save_checkpoint: true}
 inference: {n_scenarios: 200, mode: sample, use_kv_cache: true}

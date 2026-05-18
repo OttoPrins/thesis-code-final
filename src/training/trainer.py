@@ -204,8 +204,12 @@ class Trainer:
                 per_step = 0.5 * (torch.exp(-log_var) * (y_spend - spend_mu) ** 2 + log_var)
             return (per_step * positive_mask).sum() / denom
 
+        # Restrict loss to active (purchase) weeks only.  Training on inactive weeks
+        # (log1p(0) = 0 target) teaches the head to predict ≈0 everywhere → -93% bias.
         mse_per_step = F.mse_loss(spend_mu, y_spend, reduction="none")
-        return (mse_per_step * mask).sum() / mask.sum().clamp(min=1.0)
+        active = (active_mask * mask).to(dtype=mse_per_step.dtype)
+        denom = active.sum().clamp(min=1.0)
+        return (mse_per_step * active).sum() / denom
 
     def _compute_loss(self, batch: dict):
         """

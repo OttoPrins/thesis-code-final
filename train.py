@@ -377,6 +377,16 @@ def main():
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
     print(f"  Train customers: {len(train_ds)}, Val: {len(val_ds)}, Inference: {len(inference_ds)}")
 
+    # Build class_values for top-bin decode correction (A2).
+    # pipeline.run() updates model_cfg["max_trans"] from calibration data, so this
+    # reads the correct cap even when freq_cap=auto overrides the YAML placeholder.
+    _max_trans = model_cfg["max_trans"]
+    _top_bin = getattr(inference_ds, "top_bin_value", float(_max_trans))
+    class_values = torch.tensor(
+        list(range(_max_trans)) + [_top_bin], dtype=torch.float32
+    )
+    print(f"  top-bin decode: class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})")
+
     batch_size = training_cfg["batch_size"]
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
@@ -399,7 +409,11 @@ def main():
     opt_params = list(model.parameters())
 
     if joint:
-        multi_task_loss = KendallMultiTaskLoss(n_tasks=2).to(device)
+        _freq_logvar_max = config.get("loss", {}).get("freq_logvar_max", None)
+        multi_task_loss = KendallMultiTaskLoss(
+            n_tasks=2,
+            freq_logvar_max=float(_freq_logvar_max) if _freq_logvar_max is not None else None,
+        ).to(device)
         opt_params += list(multi_task_loss.parameters())
 
     optimizer_name = training_cfg.get("optimizer", "adam").lower()
@@ -490,6 +504,7 @@ def main():
             device=device,
             mode=inference_mode,
             temperature=temperature,
+            class_values=class_values,
         )
     elif model_cfg["type"] == "transformer":
         results = autoregressive_inference_transformer(
@@ -502,6 +517,7 @@ def main():
             use_kv_cache=inference_cfg.get("use_kv_cache", True),
             mode=inference_mode,
             temperature=temperature,
+            class_values=class_values,
         )
     else:
         raise ValueError(f"Unknown model type for inference: {model_cfg['type']!r}")

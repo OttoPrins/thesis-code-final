@@ -1,33 +1,27 @@
-# V2 — Transformer on CDNOW with hurdle spend head and calibrated inference
+# V2 — Base LSTM on UCI Online Retail II (frequency only, hardened training protocol)
 dataset:
-  name: cdnow
+  name: uci
   raw_dir: data/raw
-  calibration_weeks: 52
-  holdout_weeks: 26
-  origin_date: "1997-01-01"
+  calibration_weeks: 78    # first 18 months
+  holdout_weeks: 26        # last 6 months
   min_active_weeks: 1
-  prefer_sample_file: true
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
-  spend_scaler: robust
+  freq_cap: auto           # 99th-percentile cap from calibration
+  max_week: 51
+  max_trans: 5             # placeholder; pipeline overrides from freq_cap=auto
 
 validation:
   mode: rolling_origin
-  origins: [[26, 13], [39, 13]]
+  origins: [[52, 13], [65, 13]]
 
 model:
-  type: transformer
+  type: lstm
   max_week: 51
-  max_trans: 3
-  d_model: 64
-  n_heads: 4
-  n_layers: 2
-  d_ff: 256
+  max_trans: 5             # placeholder; pipeline overrides from freq_cap=auto
+  hidden_size: 128
+  num_layers: 1
   dropout: 0.1
-  time2vec_dim: 8
-  joint: true
-  spend_head: hurdle_lognormal
-  state_feature_dim: 1
+  joint: false
 
 training:
   epochs: 300
@@ -45,25 +39,20 @@ training:
   seed: 42
 
 loss:
-  type: kendall
-  n_tasks: 2
-  warmup_epochs: 5
-  spend_loss: nll
-  freq_logvar_max: 2.0
+  type: cross_entropy
 
 calibration:
   temperature_scaling: true
   aggregate_scaling: true
 
 output:
-  run_name: transformer_joint_cdnow_v2
+  run_name: lstm_base_uci_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 200
   mode: sample
-  use_kv_cache: true
 
 evaluation:
   weekly_discount_rate: 0.0018

@@ -46,6 +46,7 @@ loss:
   n_tasks: 2
   warmup_epochs: 5
   spend_loss: nll
+  freq_logvar_max: 2.0
 
 calibration:
   temperature_scaling: true

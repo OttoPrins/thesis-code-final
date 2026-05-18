@@ -30,18 +30,20 @@ CONFIGS_DIR = Path("experiments/configs")
 
 # Default sweep: every DL training config (excludes pure-benchmark configs).
 DEFAULT_CONFIGS = [
-    "lstm_base_cdnow",
-    "lstm_joint_cdnow",
-    "transformer_joint_cdnow",
-    "lstm_base_uci",
-    "lstm_joint_uci",
-    "transformer_joint_uci",
-    "lstm_base_tafeng",
-    "lstm_joint_tafeng",
-    "transformer_joint_tafeng",
-    "lstm_base_dunnhumby",
-    "lstm_joint_dunnhumby",
-    "transformer_joint_dunnhumby",
+    # V2 configs (hardened: rolling-origin, 300 epochs, n_scenarios=200, hurdle spend head)
+    "lstm_base_cdnow_v2",
+    "lstm_joint_cdnow_v2",
+    "transformer_joint_cdnow_v2",
+    "lstm_base_uci_v2",
+    "lstm_joint_uci_v2",
+    "transformer_joint_uci_v2",
+    "lstm_base_tafeng_v2",
+    "lstm_joint_tafeng_v2",
+    "transformer_joint_tafeng_v2",
+    "lstm_base_dunnhumby_v2",
+    "lstm_joint_dunnhumby_v2",
+    "transformer_joint_dunnhumby_v2",
+    # Extension 3 (Dunnhumby covariate ablation — no v2 suffix; uses separate config track)
     "extension3_lstm_none_dunnhumby",
     "extension3_lstm_static_dunnhumby",
     "extension3_lstm_dynamic_dunnhumby",

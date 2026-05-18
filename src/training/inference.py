@@ -66,14 +66,21 @@ def _step_from_logits(
     mode: str,
     max_trans: int,
     temperature: float = 1.0,
+    class_values: Optional[torch.Tensor] = None,
 ) -> tuple:
     """
     Convert per-step softmax logits to feedback class, prediction, and activity.
 
     Args:
-        logits:    (B, n_classes) raw logits at one time step
-        mode:      'sample' (multinomial) or 'expected' (deterministic E[k])
-        max_trans: top class index (for clamping the expected-mode embedding lookup)
+        logits:       (B, n_classes) raw logits at one time step
+        mode:         'sample' (multinomial) or 'expected' (deterministic E[k])
+        max_trans:    top class index (for clamping the expected-mode embedding lookup)
+        class_values: (n_classes,) float — value to assign to each class when
+                      accumulating predictions.  The last entry should be
+                      E[count | count >= max_trans], not just max_trans, so the
+                      censored top bin is decoded to its calibration conditional mean
+                      rather than the clipping threshold.  If None, falls back to
+                      arange(n_classes) (original behaviour — top bin = max_trans).
 
     Returns:
         next_class: (B,) long — what to feed back into the next step's embedding
@@ -84,14 +91,21 @@ def _step_from_logits(
     temp = max(float(temperature), 1e-6)
     probs = torch.softmax(logits / temp, dim=-1)
     p_active = 1.0 - probs[:, 0]
+    n_classes = probs.size(-1)
+
+    if class_values is not None:
+        cv = class_values.to(device=probs.device, dtype=probs.dtype)
+    else:
+        cv = torch.arange(n_classes, dtype=probs.dtype, device=probs.device)
+
     if mode == "sample":
-        sampled = torch.multinomial(probs, 1).squeeze(-1)
+        sampled = torch.multinomial(probs, 1).squeeze(-1)  # (B,) integer class index
         sampled_active = (sampled > 0).to(probs.dtype)
-        return sampled, sampled.float(), sampled_active
+        # Map each sampled class to its representative value via class_values.
+        pred_val = cv[sampled]
+        return sampled, pred_val, sampled_active
     if mode == "expected":
-        n_classes = probs.size(-1)
-        class_vals = torch.arange(n_classes, dtype=probs.dtype, device=probs.device)
-        ev = (probs * class_vals).sum(dim=-1)  # (B,)
+        ev = (probs * cv).sum(dim=-1)  # (B,) — weighted mean using representative values
         next_class = ev.round().long().clamp(0, max_trans)
         return next_class, ev, p_active
     raise ValueError(f"Unknown inference mode: {mode!r} — expected 'sample' or 'expected'.")
@@ -125,6 +139,7 @@ def autoregressive_inference_lstm(
     device: Optional[torch.device] = None,
     mode: str = "sample",
     temperature: float = 1.0,
+    class_values: Optional[torch.Tensor] = None,
 ) -> dict:
     """
     Run autoregressive LSTM inference over the holdout period.
@@ -141,6 +156,9 @@ def autoregressive_inference_lstm(
                            Forced to 1 when mode='expected' (deterministic).
         device:            torch.device; defaults to model's parameter device
         mode:              'sample' (default) or 'expected' — see module docstring.
+        class_values:      (n_classes,) float tensor — representative value per class.
+                           Last entry = E[count | count >= max_trans] for top-bin
+                           decode correction.  None → arange(n_classes) (original).
 
     Returns:
         dict with:
@@ -232,7 +250,8 @@ def autoregressive_inference_lstm(
             # Step 0 of holdout from last calibration output
             last_logits = freq_logits[:, -1, :]
             prev_trans, pred_val, p_active = _step_from_logits(
-                last_logits, mode, max_trans, temperature=temperature
+                last_logits, mode, max_trans, temperature=temperature,
+                class_values=class_values,
             )
 
             preds = np.zeros((B, H), dtype=np.float32)
@@ -288,7 +307,8 @@ def autoregressive_inference_lstm(
                     )
 
                 prev_trans, pred_val, p_active = _step_from_logits(
-                    freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature
+                    freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature,
+                    class_values=class_values,
                 )
                 preds[:, h] = pred_val.cpu().numpy()
                 activity[:, h] = p_active.cpu().numpy()
@@ -341,6 +361,7 @@ def autoregressive_inference_transformer(
     use_kv_cache: bool = True,
     mode: str = "sample",
     temperature: float = 1.0,
+    class_values: Optional[torch.Tensor] = None,
 ) -> dict:
     """
     Run autoregressive Transformer inference over the holdout period.
@@ -451,7 +472,8 @@ def autoregressive_inference_transformer(
 
                 last_logits = freq_logits[:, -1, :]
                 prev_trans, pred_val, p_active = _step_from_logits(
-                    last_logits, mode, max_trans, temperature=temperature
+                    last_logits, mode, max_trans, temperature=temperature,
+                    class_values=class_values,
                 )
                 preds[:, 0] = pred_val.cpu().numpy()
                 activity[:, 0] = p_active.cpu().numpy()
@@ -504,7 +526,8 @@ def autoregressive_inference_transformer(
                         freq_logits_step, kv_cache = step_out
 
                     prev_trans, pred_val, p_active = _step_from_logits(
-                        freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature
+                        freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature,
+                        class_values=class_values,
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()
@@ -555,7 +578,8 @@ def autoregressive_inference_transformer(
 
                     last_logits = freq_logits[:, -1, :]
                     next_class, pred_val, p_active = _step_from_logits(
-                        last_logits, mode, max_trans, temperature=temperature
+                        last_logits, mode, max_trans, temperature=temperature,
+                        class_values=class_values,
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()

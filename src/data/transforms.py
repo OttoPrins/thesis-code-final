@@ -332,8 +332,16 @@ class SequenceBuilder:
         row_idx = df_fill["customer_id"].map(cid_to_row).values.astype(int)
         col_idx = df_fill["week"].values.astype(int)
 
+        # Compute top-bin conditional mean BEFORE clipping, using calibration data only.
+        # At inference the model decodes the censored top-bin "K+" class as exactly K,
+        # losing all mass above K.  Replacing K with E[count | count >= K] reduces the
+        # systematic under-prediction on high-frequency datasets (tafeng, uci, dunnhumby).
+        raw_freq = df_fill["weekly_freq"].values
+        top_vals = raw_freq[raw_freq >= self.max_trans]
+        top_bin_value: float = float(np.mean(top_vals)) if len(top_vals) > 0 else float(self.max_trans)
+
         full_trans[row_idx, col_idx] = np.minimum(
-            df_fill["weekly_freq"].values.astype(np.int32), self.max_trans
+            raw_freq.astype(np.int32), self.max_trans
         )
         full_spend[row_idx, col_idx] = df_fill[spend_col].values.astype(np.float32)
 
@@ -386,4 +394,5 @@ class SequenceBuilder:
             "seed_delta_t": full_delta_t,
             "seed_state_features": seed_state_features,
             "max_trans": self.max_trans,
+            "top_bin_value": top_bin_value,
         }

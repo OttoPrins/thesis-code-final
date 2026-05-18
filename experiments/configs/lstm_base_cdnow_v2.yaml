@@ -1,33 +1,29 @@
-# V2 — Transformer on CDNOW with hurdle spend head and calibrated inference
+# V2 — Base LSTM on CDNOW (frequency only, hardened training protocol)
+# Matches Valendin et al. (2022) architecture; v2 adds rolling-origin validation,
+# cosine LR schedule, temperature calibration, and 200 MC scenarios for stable bias.
 dataset:
   name: cdnow
   raw_dir: data/raw
-  calibration_weeks: 52
-  holdout_weeks: 26
+  calibration_weeks: 52   # final thesis protocol: Jan-Dec 1997 calibration
+  holdout_weeks: 26       # final thesis protocol: Jan-Jun 1998 holdout
   origin_date: "1997-01-01"
   min_active_weeks: 1
   prefer_sample_file: true
   val_fraction: 0.1
-  freq_bins: [0, 1, 2, 3]
-  spend_scaler: robust
+  freq_bins: [0, 1, 2, 3]   # paper-faithful for CDNOW replication
 
 validation:
   mode: rolling_origin
   origins: [[26, 13], [39, 13]]
 
 model:
-  type: transformer
+  type: lstm
   max_week: 51
-  max_trans: 3
-  d_model: 64
-  n_heads: 4
-  n_layers: 2
-  d_ff: 256
+  max_trans: 3            # CDNOW: 99.68% of active weeks <=3 trans
+  hidden_size: 128
+  num_layers: 1           # single LSTM layer (confirmed from Valendin et al. repo)
   dropout: 0.1
-  time2vec_dim: 8
-  joint: true
-  spend_head: hurdle_lognormal
-  state_feature_dim: 1
+  joint: false
 
 training:
   epochs: 300
@@ -45,25 +41,20 @@ training:
   seed: 42
 
 loss:
-  type: kendall
-  n_tasks: 2
-  warmup_epochs: 5
-  spend_loss: nll
-  freq_logvar_max: 2.0
+  type: cross_entropy
 
 calibration:
   temperature_scaling: true
   aggregate_scaling: true
 
 output:
-  run_name: transformer_joint_cdnow_v2
+  run_name: lstm_base_cdnow_v2
   results_dir: results
   save_checkpoint: true
 
 inference:
   n_scenarios: 200
   mode: sample
-  use_kv_cache: true
 
 evaluation:
   weekly_discount_rate: 0.0018

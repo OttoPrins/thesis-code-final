@@ -355,6 +355,7 @@ def _spend_per_week_raw_matrix(
     scaler,
     activity_weights: Optional[np.ndarray] = None,
     smearing_factor: Optional[float] = None,
+    calibration_factor: float = 1.0,
 ) -> np.ndarray:
     """
     Convert per-week scaled log-spend to raw-currency (N, H) matrix.
@@ -370,6 +371,8 @@ def _spend_per_week_raw_matrix(
     raw = np.clip(raw, 0.0, None)
     if smearing_factor is not None and smearing_factor != 1.0:
         raw = raw * float(smearing_factor)
+    if calibration_factor != 1.0:
+        raw = raw * float(calibration_factor)
     if activity_weights is not None:
         raw = raw * np.asarray(activity_weights, dtype=raw.dtype)
     return raw
@@ -380,6 +383,7 @@ def aggregate_spend_to_raw_total(
     scaler,
     activity_weights: Optional[np.ndarray] = None,
     smearing_factor: Optional[float] = None,
+    calibration_factor: float = 1.0,
 ) -> np.ndarray:
     """
     Convert a per-week scaled log-spend array to per-customer raw-currency totals.
@@ -409,6 +413,7 @@ def aggregate_spend_to_raw_total(
         per_week_scaled_log, scaler,
         activity_weights=activity_weights,
         smearing_factor=smearing_factor,
+        calibration_factor=calibration_factor,
     )
     return raw.sum(axis=1).astype(np.float32)
 
@@ -430,6 +435,8 @@ def compute_all_metrics(
     weekly_discount_rate: float = 0.0,
     freq_mase_scale: Optional[float] = None,
     spend_mase_scale: Optional[float] = None,
+    freq_calibration_factor: float = 1.0,
+    spend_calibration_factor: float = 1.0,
 ) -> dict:
     """
     Compute all evaluation metrics and return as a flat dict.
@@ -460,13 +467,15 @@ def compute_all_metrics(
         spend_mase_scale:        optional in-sample naive MAE denominator for raw-spend MASE
     """
     y_freq_true = np.asarray(y_freq_true, dtype=np.float32)
-    y_freq_pred = np.asarray(y_freq_pred, dtype=np.float32)
+    y_freq_pred = np.asarray(y_freq_pred, dtype=np.float32) * float(freq_calibration_factor)
 
     metrics = {
         "freq_rmse": freq_rmse(y_freq_true, y_freq_pred),
         "freq_mae": freq_mae(y_freq_true, y_freq_pred),
         "freq_normalized_gini": normalized_gini(y_freq_true, y_freq_pred),
     }
+    if freq_calibration_factor != 1.0:
+        metrics["freq_calibration_factor"] = float(freq_calibration_factor)
     if customer_ids is not None:
         cohort = aggregate_cohort(y_freq_true, y_freq_pred, customer_ids)
         metrics["freq_mape"] = cohort["mape"]
@@ -475,7 +484,10 @@ def compute_all_metrics(
 
     if y_freq_true_per_week is not None and y_freq_pred_per_week is not None:
         true_freq_week = np.asarray(y_freq_true_per_week, dtype=np.float32)
-        pred_freq_week = np.asarray(y_freq_pred_per_week, dtype=np.float32)
+        pred_freq_week = (
+            np.asarray(y_freq_pred_per_week, dtype=np.float32)
+            * float(freq_calibration_factor)
+        )
         metrics.update(per_week_aggregate_metrics(true_freq_week, pred_freq_week, "freq"))
         metrics["freq_mase"] = mase(true_freq_week, pred_freq_week, scale=freq_mase_scale)
         if freq_mase_scale is not None:
@@ -512,6 +524,7 @@ def compute_all_metrics(
             y_spend_pred_per_week, scaler,
             activity_weights=pred_activity_per_week,
             smearing_factor=smearing_factor,
+            calibration_factor=spend_calibration_factor,
         )
         true_raw_total = true_raw_matrix.sum(axis=1).astype(np.float32)
         pred_raw_total = pred_raw_matrix.sum(axis=1).astype(np.float32)
@@ -519,6 +532,8 @@ def compute_all_metrics(
     if true_raw_total is not None and pred_raw_total is not None:
         if smearing_factor is not None:
             metrics["smearing_factor"] = float(smearing_factor)
+        if spend_calibration_factor != 1.0:
+            metrics["spend_calibration_factor"] = float(spend_calibration_factor)
         metrics["spend_mae_raw"] = _mae(true_raw_total, pred_raw_total)
         metrics["spend_rmse_raw"] = _rmse(true_raw_total, pred_raw_total)
         metrics["spend_normalized_gini"] = normalized_gini(true_raw_total, pred_raw_total)

@@ -9,7 +9,8 @@ Design constraints (from CLAUDE.md):
     - Frequency discretised to {0, 1, ..., cap} where the cap is the 99th
       percentile of nonzero weekly counts on the calibration set (Valendin's
       "use all observed classes" rule, made data-driven)
-    - Spend always log1p-transformed (no further scaling — see SpendScaler)
+    - Spend always log1p-transformed; v2 joint models may robust-scale log spend
+      using calibration data only (see SpendScaler)
     - Scaler fitted on calibration set ONLY (no holdout leakage)
     - Sequences padded with zeros; mask marks padding positions
     - min_active_weeks defaults to 1: every customer that ever transacted in
@@ -158,7 +159,7 @@ class TemporalSplitter:
 
 class SpendScaler:
     """
-    Applies log1p to spend. No further scaling.
+    Applies log1p to spend, with an optional robust scaling mode for v2 models.
 
     Why no MinMaxScaler: with Kendall homoscedastic uncertainty weighting
     (Kendall et al. 2018), the per-task variances σ_i² are learnable
@@ -173,10 +174,15 @@ class SpendScaler:
     weekly_spend = 0; the primary joint model trains on these zero targets so
     the spend head learns the zero-inflated CLV surface.
 
+    `method="log"` preserves the original final-results protocol.
+    `method="robust"` fits median/IQR on positive log1p calibration spend only.
+    Zero-spend weeks remain encoded as 0.0, preserving the inactive-week sentinel
+    used by the autoregressive spend feedback path.
+
     Fitted on calibration set only (kept stateless to make leakage impossible).
     """
 
-    def __init__(self, scale: bool = False):
+    def __init__(self, scale: bool = False, method: str = "log"):
         # `scale` is retained for API compatibility but is now a no-op.
         # Explicitly forbid the historical MinMax behaviour: it interacts badly
         # with Kendall's homoscedastic loss weighting.
@@ -187,15 +193,53 @@ class SpendScaler:
                 "frequency CrossEntropy, which is what Kendall task uncertainty "
                 "weighting assumes."
             )
+        if method not in {"log", "robust"}:
+            raise ValueError("SpendScaler method must be 'log' or 'robust'")
+        self.method = method
+        self.center_: float = 0.0
+        self.scale_: float = 1.0
+        self.fitted_: bool = False
 
     def fit_transform(self, spend: np.ndarray) -> np.ndarray:
-        return np.log1p(spend).astype(np.float32)
+        log_spend = np.log1p(np.asarray(spend, dtype=np.float64))
+        if self.method == "robust":
+            positive = log_spend[log_spend > 0]
+            if positive.size:
+                q25, q75 = np.percentile(positive, [25, 75])
+                iqr = q75 - q25
+                self.center_ = float(np.median(positive))
+                self.scale_ = float(iqr if iqr > 1e-8 else np.std(positive))
+                if self.scale_ <= 1e-8:
+                    self.scale_ = 1.0
+            else:
+                self.center_ = 0.0
+                self.scale_ = 1.0
+        self.fitted_ = True
+        return self.transform(spend)
 
     def transform(self, spend: np.ndarray) -> np.ndarray:
-        return np.log1p(spend).astype(np.float32)
+        if not self.fitted_:
+            # Stateless log mode remains backwards-compatible with older callers.
+            self.fitted_ = self.method == "log"
+        log_spend = np.log1p(np.asarray(spend, dtype=np.float64))
+        if self.method == "robust":
+            transformed = np.where(
+                log_spend > 0,
+                (log_spend - self.center_) / self.scale_,
+                0.0,
+            )
+            return transformed.astype(np.float32)
+        return log_spend.astype(np.float32)
+
+    def inverse_transform_log1p(self, values: np.ndarray) -> np.ndarray:
+        """Map model-space spend values back to unscaled log1p-spend."""
+        values = np.asarray(values, dtype=np.float64)
+        if self.method == "robust":
+            return values * self.scale_ + self.center_
+        return values
 
     def inverse_transform_spend(self, log_spend: np.ndarray) -> np.ndarray:
-        return np.expm1(log_spend)
+        return np.expm1(self.inverse_transform_log1p(log_spend))
 
 
 class SequenceBuilder:
@@ -240,8 +284,10 @@ class SequenceBuilder:
             trans_input   : (N, T-1) int32   — transaction counts (teacher forcing)
             spend_input   : (N, T-1) float32 — log-spend at each input step
             delta_t_input : (N, T-1) float32 — weeks since last purchase at each input step
+            state_features: (N, T-1, S) float32 — optional causal state features
             y_freq        : (N, T-1) int32   — target freq class, shifted +1
             y_spend       : (N, T-1) float32 — target log-spend, shifted +1
+            active_mask   : (N, T-1) float32 — 1 when target period is active
             customer_ids  : (N,)     int64   — customer identifiers
             mask          : (N, T-1) float32 — 1=real, 0=padding
             seed_week     : (N, T)   int32   — full calibration week-of-year sequence
@@ -249,6 +295,7 @@ class SequenceBuilder:
             seed_trans    : (N, T)   int32   — full calibration trans (inference)
             seed_spend    : (N, T)   float32 — full calibration spend (inference)
             seed_delta_t  : (N, T)   float32 — full calibration delta_t (inference seed)
+            seed_state_features: (N, T, S) float32 — full state feature trajectory
             max_trans     : int              — clipping value used
         """
         T = self.calibration_weeks
@@ -300,6 +347,7 @@ class SequenceBuilder:
         trans_input = full_trans[:, :-1]             # (N, T-1)
         spend_input = full_spend[:, :-1]             # (N, T-1)
         delta_t_input = full_delta_t[:, :-1]         # (N, T-1)
+        state_features = delta_t_input[..., None].astype(np.float32)
         y_freq = full_trans[:, 1:]                   # (N, T-1)
         y_spend = full_spend[:, 1:]                  # (N, T-1)
 
@@ -314,8 +362,10 @@ class SequenceBuilder:
         first_week_idx = first_week_series.reindex(customers).values.astype(np.int32)  # (N,)
         target_steps = np.arange(1, T, dtype=np.int32)  # (T-1,)
         mask = (target_steps[None, :] > first_week_idx[:, None]).astype(np.float32)
+        active_mask = ((y_freq > 0).astype(np.float32) * mask).astype(np.float32)
 
         customer_ids = np.array(customers, dtype=np.int64)
+        seed_state_features = full_delta_t[..., None].astype(np.float32)
 
         return {
             "week_input": week_input,
@@ -323,8 +373,10 @@ class SequenceBuilder:
             "trans_input": trans_input,
             "spend_input": spend_input,
             "delta_t_input": delta_t_input,
+            "state_features": state_features,
             "y_freq": y_freq,
             "y_spend": y_spend,
+            "active_mask": active_mask,
             "customer_ids": customer_ids,
             "mask": mask,
             "seed_week": full_weeks,
@@ -332,5 +384,6 @@ class SequenceBuilder:
             "seed_trans": full_trans,
             "seed_spend": full_spend,
             "seed_delta_t": full_delta_t,
+            "seed_state_features": seed_state_features,
             "max_trans": self.max_trans,
         }

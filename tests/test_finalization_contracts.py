@@ -13,6 +13,7 @@ from src.evaluation.benchmarks import (
     get_benchmark_model,
     stan_sampler_diagnostics,
 )
+from src.evaluation.calibration import conservative_ratio_factor, fit_aggregate_calibration
 from src.evaluation.compare import _filter_metric_files, export_latex_table
 from src.evaluation.metrics import (
     compute_all_metrics,
@@ -282,6 +283,29 @@ def test_lstm_is_one_layer_seq2seq_with_shared_joint_encoder():
     assert not torch.allclose(spend, richer_spend)
 
 
+def test_lstm_v2_hurdle_head_returns_mu_and_log_var():
+    torch.manual_seed(0)
+    model = LSTMModel(
+        max_week=51,
+        max_trans=3,
+        memory_units=8,
+        dense_units=8,
+        joint=True,
+        spend_head="hurdle_lognormal",
+        state_feature_dim=1,
+    )
+    week = torch.arange(5).unsqueeze(0)
+    trans = torch.zeros((1, 5), dtype=torch.long)
+    spend_history = torch.zeros((1, 5), dtype=torch.float32)
+    state_features = torch.zeros((1, 5, 1), dtype=torch.float32)
+    logits, spend_mu, spend_log_var, _ = model(
+        week, trans, spend=spend_history, state_features=state_features
+    )
+    assert logits.shape == (1, 5, 4)
+    assert spend_mu.shape == (1, 5)
+    assert spend_log_var.shape == (1, 5)
+
+
 def test_transformer_uses_position_and_time2vec_only_for_temporal_encoding():
     torch.manual_seed(0)
     model = TransformerModel(
@@ -364,6 +388,33 @@ def _run_transformer_finite_smoke(device: torch.device):
         assert np.isfinite(metrics["total_loss"])
 
 
+def test_hurdle_spend_loss_ignores_inactive_targets():
+    model = LSTMModel(
+        max_week=51,
+        max_trans=1,
+        memory_units=4,
+        dense_units=4,
+        joint=True,
+        spend_head="hurdle_lognormal",
+    )
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(model.parameters()),
+        device=torch.device("cpu"),
+        joint=True,
+        multi_task_loss=KendallMultiTaskLoss(n_tasks=2),
+        spend_loss="nll",
+    )
+    loss = trainer._compute_spend_loss(
+        spend_mu=torch.tensor([[99.0, 1.0]]),
+        y_spend=torch.tensor([[0.0, 1.0]]),
+        mask=torch.ones((1, 2)),
+        active_mask=torch.tensor([[0.0, 1.0]]),
+        spend_log_var=torch.zeros((1, 2)),
+    )
+    assert loss.item() == pytest.approx(0.0, abs=1e-6)
+
+
 def test_transformer_cpu_training_smoke_is_finite_with_loss_mask():
     _run_transformer_finite_smoke(torch.device("cpu"))
 
@@ -387,6 +438,28 @@ def test_sample_mode_activity_is_binary_and_matches_sampled_class():
     assert torch.equal(pred, next_class.float())
     assert set(activity.cpu().numpy().tolist()).issubset({0.0, 1.0})
     assert torch.equal(activity, (next_class > 0).float())
+
+
+def test_expected_mode_is_deterministic_and_temperature_supported():
+    logits = torch.tensor([[0.0, 1.0, 2.0, 3.0]])
+    a = _step_from_logits(logits, mode="expected", max_trans=3, temperature=1.5)
+    b = _step_from_logits(logits, mode="expected", max_trans=3, temperature=1.5)
+    assert torch.equal(a[0], b[0])
+    assert torch.equal(a[1], b[1])
+    assert torch.equal(a[2], b[2])
+
+
+def test_conservative_aggregate_calibration_shrinks_and_clips():
+    assert conservative_ratio_factor(100.0, 50.0, shrinkage=0.5) == pytest.approx(1.5)
+    assert conservative_ratio_factor(100.0, 1.0, max_factor=4.0) == pytest.approx(4.0)
+    cal = fit_aggregate_calibration({
+        "freq_true_total": 100.0,
+        "freq_pred_total": 50.0,
+        "spend_true_total": 10.0,
+        "spend_pred_total": 20.0,
+    })
+    assert cal.freq_factor == pytest.approx(1.5)
+    assert cal.spend_factor == pytest.approx(0.75)
 
 
 def test_inactive_frequency_zeros_spend_feedback():

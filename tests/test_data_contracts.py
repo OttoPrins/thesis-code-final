@@ -5,7 +5,7 @@ import pytest
 from src.data.datasets.cdnow import CDNOWPipeline
 from src.data.datasets.dunnhumby import DunnhumbyPipeline
 from src.data.datasets.uci_retail import UCIRetailPipeline
-from src.data.transforms import SequenceBuilder
+from src.data.transforms import SequenceBuilder, SpendScaler
 
 
 def test_cdnow_loads_canonical_5_column_sample(tmp_path):
@@ -78,6 +78,24 @@ def test_sequence_builder_uses_calendar_week_and_absolute_position():
     assert data["week_input"][0, 58] == 6
     assert data["position_input"][0, 52] == 52
     assert data["seed_position"][0, -1] == 59
+    assert data["active_mask"].shape == data["y_freq"].shape
+    assert data["state_features"].shape == (1, 59, 1)
+    assert data["seed_state_features"].shape == (1, 60, 1)
+
+
+def test_robust_spend_scaler_fits_calibration_only_and_preserves_zero_sentinel():
+    scaler = SpendScaler(method="robust")
+    train = np.array([0.0, 10.0, 20.0, 1000.0], dtype=np.float32)
+    transformed = scaler.fit_transform(train)
+    center_before = scaler.center_
+    scale_before = scaler.scale_
+
+    holdout = scaler.transform(np.array([0.0, 999999.0], dtype=np.float32))
+    assert transformed[0] == pytest.approx(0.0)
+    assert holdout[0] == pytest.approx(0.0)
+    assert scaler.center_ == pytest.approx(center_before)
+    assert scaler.scale_ == pytest.approx(scale_before)
+    assert scaler.inverse_transform_spend(transformed[1]) == pytest.approx(10.0, rel=1e-5)
 
 
 class TinyDunnhumbyPipeline(DunnhumbyPipeline):

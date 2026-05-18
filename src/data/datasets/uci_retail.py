@@ -62,7 +62,7 @@ class UCIRetailPipeline(BasePipeline):
         splitter = TemporalSplitter(calib_weeks, holdout_weeks)
         calib, holdout = splitter.split(agg)
 
-        scaler = SpendScaler()
+        scaler = SpendScaler(method=dataset_cfg.get("spend_scaler", "log"))
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 

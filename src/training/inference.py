@@ -65,6 +65,7 @@ def _step_from_logits(
     logits: torch.Tensor,
     mode: str,
     max_trans: int,
+    temperature: float = 1.0,
 ) -> tuple:
     """
     Convert per-step softmax logits to feedback class, prediction, and activity.
@@ -80,7 +81,8 @@ def _step_from_logits(
         p_active:   (B,) float — sample mode: binary sampled activity;
                     expected mode: P(freq>0) for spend gating
     """
-    probs = torch.softmax(logits, dim=-1)
+    temp = max(float(temperature), 1e-6)
+    probs = torch.softmax(logits / temp, dim=-1)
     p_active = 1.0 - probs[:, 0]
     if mode == "sample":
         sampled = torch.multinomial(probs, 1).squeeze(-1)
@@ -122,6 +124,7 @@ def autoregressive_inference_lstm(
     n_scenarios: int = 30,
     device: Optional[torch.device] = None,
     mode: str = "sample",
+    temperature: float = 1.0,
 ) -> dict:
     """
     Run autoregressive LSTM inference over the holdout period.
@@ -179,6 +182,9 @@ def autoregressive_inference_lstm(
             seed_spend = seed_spend.to(device)
         elif joint:
             seed_spend = torch.zeros_like(seed_week, dtype=torch.float32, device=device)
+        seed_state_features = batch.get("seed_state_features")
+        if seed_state_features is not None:
+            seed_state_features = seed_state_features.to(device)
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
@@ -197,25 +203,37 @@ def autoregressive_inference_lstm(
         scenario_spend = np.zeros((B, H), dtype=np.float64) if joint else None
 
         for _ in range(n_scenarios):
+            cur_state_delta = None
+            if seed_state_features is not None and seed_state_features.size(-1) > 0:
+                cur_state_delta = seed_state_features[:, -1, 0].clone()
+
             # Warm up: feed full calibration seed
             dyn_warmup = dynamic_cov[:, :calibration_weeks, :] if dynamic_cov is not None else None
             if joint:
-                freq_logits, log_spend, hidden = model(
+                warmup_out = model(
                     seed_week, seed_trans,
                     spend=seed_spend,
+                    state_features=seed_state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dyn_warmup,
                 )
+                if len(warmup_out) == 4:
+                    freq_logits, log_spend, _, hidden = warmup_out
+                else:
+                    freq_logits, log_spend, hidden = warmup_out
             else:
                 freq_logits, hidden = model(
                     seed_week, seed_trans,
+                    state_features=seed_state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dyn_warmup,
                 )
 
             # Step 0 of holdout from last calibration output
             last_logits = freq_logits[:, -1, :]
-            prev_trans, pred_val, p_active = _step_from_logits(last_logits, mode, max_trans)
+            prev_trans, pred_val, p_active = _step_from_logits(
+                last_logits, mode, max_trans, temperature=temperature
+            )
 
             preds = np.zeros((B, H), dtype=np.float32)
             activity = np.zeros((B, H), dtype=np.float32)
@@ -235,6 +253,11 @@ def autoregressive_inference_lstm(
                 week_input = torch.full((B, 1), week_idx, dtype=torch.long, device=device)
                 trans_input = prev_trans.unsqueeze(1)
                 spend_input = prev_spend.unsqueeze(1) if prev_spend is not None else None
+                state_step = None
+                if cur_state_delta is not None:
+                    purchased = (prev_trans > 0).to(cur_state_delta.dtype)
+                    cur_state_delta = (1.0 - purchased) * (cur_state_delta + 1.0)
+                    state_step = cur_state_delta.unsqueeze(1).unsqueeze(-1)
 
                 # Dynamic covariate slice for this holdout step: (B, 1, D)
                 dyn_step = None
@@ -244,22 +267,28 @@ def autoregressive_inference_lstm(
                         dyn_step = dynamic_cov[:, step_idx: step_idx + 1, :]
 
                 if joint:
-                    freq_logits_step, log_spend_step, hidden = model(
+                    step_out = model(
                         week_input, trans_input, hidden,
                         spend=spend_input,
+                        state_features=state_step,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_step,
                     )
+                    if len(step_out) == 4:
+                        freq_logits_step, log_spend_step, _, hidden = step_out
+                    else:
+                        freq_logits_step, log_spend_step, hidden = step_out
                     spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
                 else:
                     freq_logits_step, hidden = model(
                         week_input, trans_input, hidden,
+                        state_features=state_step,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_step,
                     )
 
                 prev_trans, pred_val, p_active = _step_from_logits(
-                    freq_logits_step[:, 0, :], mode, max_trans
+                    freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature
                 )
                 preds[:, h] = pred_val.cpu().numpy()
                 activity[:, h] = p_active.cpu().numpy()
@@ -311,6 +340,7 @@ def autoregressive_inference_transformer(
     device: Optional[torch.device] = None,
     use_kv_cache: bool = True,
     mode: str = "sample",
+    temperature: float = 1.0,
 ) -> dict:
     """
     Run autoregressive Transformer inference over the holdout period.
@@ -362,6 +392,9 @@ def autoregressive_inference_transformer(
             seed_spend = seed_spend.to(device)
         elif joint:
             seed_spend = torch.zeros_like(seed_week, dtype=torch.float32, device=device)
+        seed_state_features = batch.get("seed_state_features")
+        if seed_state_features is not None:
+            seed_state_features = seed_state_features.to(device)
         customer_ids = batch["customer_id"].numpy()
         B = seed_week.size(0)
 
@@ -403,18 +436,22 @@ def autoregressive_inference_transformer(
                 )
                 warmup_out = model(
                     seed_week, seed_trans, spend=seed_spend, position=seed_position, kv_cache=[],
+                    state_features=seed_state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dyn_warmup,
                     delta_t=seed_delta_t,
                 )
                 if joint:
-                    freq_logits, log_spend, kv_cache = warmup_out
+                    if len(warmup_out) == 4:
+                        freq_logits, log_spend, _, kv_cache = warmup_out
+                    else:
+                        freq_logits, log_spend, kv_cache = warmup_out
                 else:
                     freq_logits, kv_cache = warmup_out
 
                 last_logits = freq_logits[:, -1, :]
                 prev_trans, pred_val, p_active = _step_from_logits(
-                    last_logits, mode, max_trans
+                    last_logits, mode, max_trans, temperature=temperature
                 )
                 preds[:, 0] = pred_val.cpu().numpy()
                 activity[:, 0] = p_active.cpu().numpy()
@@ -438,6 +475,9 @@ def autoregressive_inference_transformer(
                         purchased = (prev_trans > 0).to(cur_delta_t.dtype)
                         cur_delta_t = (1.0 - purchased) * (cur_delta_t + 1.0)
                         delta_t_step = cur_delta_t.unsqueeze(1)  # (B, 1)
+                    state_step = (
+                        delta_t_step.unsqueeze(-1) if delta_t_step is not None else None
+                    )
 
                     # Dynamic covariate slice for this step: (B, 1, D)
                     dyn_step = None
@@ -449,18 +489,22 @@ def autoregressive_inference_transformer(
                     step_out = model(
                         week_input, trans_input, spend=spend_input,
                         position=position_input, kv_cache=kv_cache,
+                        state_features=state_step,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_step,
                         delta_t=delta_t_step,
                     )
                     if joint:
-                        freq_logits_step, log_spend_step, kv_cache = step_out
+                        if len(step_out) == 4:
+                            freq_logits_step, log_spend_step, _, kv_cache = step_out
+                        else:
+                            freq_logits_step, log_spend_step, kv_cache = step_out
                         spend_preds[:, h] = log_spend_step[:, 0].cpu().numpy()
                     else:
                         freq_logits_step, kv_cache = step_out
 
                     prev_trans, pred_val, p_active = _step_from_logits(
-                        freq_logits_step[:, 0, :], mode, max_trans
+                        freq_logits_step[:, 0, :], mode, max_trans, temperature=temperature
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()
@@ -482,6 +526,9 @@ def autoregressive_inference_transformer(
                 ctx_delta_t = (
                     seed_delta_t.clone() if seed_delta_t is not None else None
                 )
+                ctx_state_features = (
+                    seed_state_features.clone() if seed_state_features is not None else None
+                )
 
                 for h in range(H):
                     dyn_ctx = (
@@ -490,13 +537,17 @@ def autoregressive_inference_transformer(
                     out = model(
                         ctx_week, ctx_trans,
                         spend=ctx_spend,
+                        state_features=ctx_state_features,
                         position=ctx_position,
                         static_covariates=static_cov,
                         dynamic_covariates=dyn_ctx,
                         delta_t=ctx_delta_t,
                     )
                     if joint:
-                        freq_logits, log_spend = out
+                        if len(out) == 3:
+                            freq_logits, log_spend, _ = out
+                        else:
+                            freq_logits, log_spend = out
                         spend_preds[:, h] = log_spend[:, -1].cpu().numpy()
                     else:
                         freq_logits = out
@@ -504,7 +555,7 @@ def autoregressive_inference_transformer(
 
                     last_logits = freq_logits[:, -1, :]
                     next_class, pred_val, p_active = _step_from_logits(
-                        last_logits, mode, max_trans
+                        last_logits, mode, max_trans, temperature=temperature
                     )
                     preds[:, h] = pred_val.cpu().numpy()
                     activity[:, h] = p_active.cpu().numpy()
@@ -530,6 +581,11 @@ def autoregressive_inference_transformer(
                         ctx_delta_t = torch.cat(
                             [ctx_delta_t, next_delta_t.unsqueeze(1)], dim=1
                         )
+                        if ctx_state_features is not None:
+                            next_state = next_delta_t.unsqueeze(1).unsqueeze(-1)
+                            ctx_state_features = torch.cat(
+                                [ctx_state_features, next_state], dim=1
+                            )
 
             scenario_freq += preds
             scenario_activity += activity

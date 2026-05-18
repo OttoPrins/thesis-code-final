@@ -278,12 +278,18 @@ class TransformerModel(nn.Module):
         static_cov_dim: int = 0,
         dynamic_cov_dim: int = 0,
         cov_emb_dim: int = 8,
+        state_feature_dim: int = 0,
+        spend_head: str = "regression",
     ):
         super().__init__()
         self.joint = joint
         self.max_trans = max_trans
         self.static_cov_dim = static_cov_dim
         self.dynamic_cov_dim = dynamic_cov_dim
+        self.state_feature_dim = state_feature_dim
+        self.spend_head_type = spend_head
+        if spend_head not in {"regression", "hurdle_lognormal"}:
+            raise ValueError("spend_head must be 'regression' or 'hurdle_lognormal'")
         self.d_model = d_model
         n_classes = max_trans + 1
 
@@ -296,6 +302,9 @@ class TransformerModel(nn.Module):
         # Project combined embedding to d_model
         self.input_proj = nn.Linear(week_emb_dim + trans_emb_dim, d_model)
         self.spend_proj: Optional[nn.Linear] = nn.Linear(1, d_model) if joint else None
+        self.state_proj: Optional[nn.Linear] = (
+            nn.Linear(state_feature_dim, d_model) if state_feature_dim > 0 else None
+        )
 
         # Time2Vec + sinusoidal PE
         self.time2vec = Time2Vec(time2vec_dim)
@@ -321,13 +330,15 @@ class TransformerModel(nn.Module):
         # Prediction heads (applied at every time step)
         self.freq_head = nn.Linear(d_model, n_classes)
         if joint:
-            self.spend_head = nn.Linear(d_model, 1)
+            spend_out_dim = 2 if spend_head == "hurdle_lognormal" else 1
+            self.spend_head = nn.Linear(d_model, spend_out_dim)
 
     def forward(
         self,
         week: torch.Tensor,                                  # (B, T) integer week indices
         trans: torch.Tensor,                                 # (B, T) integer transaction counts
         spend: Optional[torch.Tensor] = None,                # (B, T) scaled log-spend history
+        state_features: Optional[torch.Tensor] = None,       # (B, T, S) causal state inputs
         position: Optional[torch.Tensor] = None,             # (B, T) absolute sequence positions
         padding_mask: Optional[torch.Tensor] = None,         # (B, T): 1=real, 0=padding
         kv_cache: Optional[List[Dict]] = None,               # per-layer cache for inference
@@ -354,6 +365,7 @@ class TransformerModel(nn.Module):
         rather than an absolute calendar index. If None (legacy callers),
         falls back to the absolute position index.
         spend: per-step scaled log-spend history, projected into d_model for joint models.
+        state_features: optional causal state features projected into d_model.
 
         Returns:
             Without kv_cache:
@@ -376,6 +388,14 @@ class TransformerModel(nn.Module):
             if spend is None:
                 spend = torch.zeros((B, T), dtype=h.dtype, device=week.device)
             h = h + self.spend_proj(spend.to(dtype=h.dtype).unsqueeze(-1))
+        if self.state_proj is not None:
+            if state_features is None:
+                state_features = torch.zeros(
+                    (B, T, self.state_feature_dim),
+                    dtype=h.dtype,
+                    device=week.device,
+                )
+            h = h + self.state_proj(state_features.to(dtype=h.dtype))
 
         # Time2Vec on elapsed time (BTYD-aligned). Sequential ordering is still
         # provided by the sinusoidal positional encoding below; week-of-year
@@ -414,12 +434,22 @@ class TransformerModel(nn.Module):
         if kv_cache is not None:
             # Inference mode: return predictions + updated cache
             if self.joint:
-                log_spend = self.spend_head(h).squeeze(-1)
+                spend_out = self.spend_head(h)
+                if self.spend_head_type == "hurdle_lognormal":
+                    spend_mu = spend_out[..., 0]
+                    spend_log_var = spend_out[..., 1]
+                    return freq_logits, spend_mu, spend_log_var, new_caches
+                log_spend = spend_out.squeeze(-1)
                 return freq_logits, log_spend, new_caches
             return freq_logits, new_caches
 
         # Training mode: standard output
         if self.joint:
-            log_spend = self.spend_head(h).squeeze(-1)
+            spend_out = self.spend_head(h)
+            if self.spend_head_type == "hurdle_lognormal":
+                spend_mu = spend_out[..., 0]
+                spend_log_var = spend_out[..., 1]
+                return freq_logits, spend_mu, spend_log_var
+            log_spend = spend_out.squeeze(-1)
             return freq_logits, log_spend
         return freq_logits

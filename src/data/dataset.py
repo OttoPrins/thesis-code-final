@@ -35,8 +35,10 @@ class CustomerDataset(Dataset):
         trans       : (T-1,)  int   — transaction counts (teacher forcing input)
         spend       : (T-1,)  float — log-spend at each input step
         delta_t     : (T-1,)  float — weeks since last purchase at each step
+        state_features: (T-1, S) float — optional causal state features
         y_freq      : (T-1,)  int   — target frequency class at each step
         y_spend     : (T-1,)  float — target log-spend at each step
+        active_mask : (T-1,)  float — 1 when target frequency is positive
         mask        : (T-1,)  float — 1=real data, 0=padding
         customer_id : ()      int   — customer identifier
 
@@ -51,6 +53,7 @@ class CustomerDataset(Dataset):
         seed_trans   : (T,)    int   — full calibration transaction sequence
         seed_spend   : (T,)    float — full calibration spend sequence
         seed_delta_t : (T,)    float — full calibration elapsed-time sequence
+        seed_state_features: (T, S) float — full causal state feature sequence
     """
 
     def __init__(self, data: dict, include_seed: bool = False):
@@ -77,8 +80,18 @@ class CustomerDataset(Dataset):
             self.delta_t = torch.tensor(data["delta_t_input"], dtype=torch.float32)
         else:
             self.delta_t = torch.zeros_like(self.spend)
+        if "state_features" in data:
+            self.state_features = torch.tensor(data["state_features"], dtype=torch.float32)
+        else:
+            self.state_features = self.delta_t.unsqueeze(-1)
         self.y_freq = torch.tensor(data["y_freq"], dtype=torch.long)
         self.y_spend = torch.tensor(data["y_spend"], dtype=torch.float32)
+        if "active_mask" in data:
+            self.active_mask = torch.tensor(data["active_mask"], dtype=torch.float32)
+        else:
+            self.active_mask = (self.y_freq > 0).float() * torch.tensor(
+                data["mask"], dtype=torch.float32
+            )
         self.customer_ids = torch.tensor(data["customer_ids"], dtype=torch.long)
         self.mask = torch.tensor(data["mask"], dtype=torch.float32)
         self.max_trans = data["max_trans"]
@@ -100,10 +113,17 @@ class CustomerDataset(Dataset):
                 self.seed_delta_t = torch.tensor(data["seed_delta_t"], dtype=torch.float32)
             else:
                 self.seed_delta_t = torch.zeros_like(self.seed_spend)
+            if "seed_state_features" in data:
+                self.seed_state_features = torch.tensor(
+                    data["seed_state_features"], dtype=torch.float32
+                )
+            else:
+                self.seed_state_features = self.seed_delta_t.unsqueeze(-1)
         else:
             self.seed_week = None
             self.seed_position = None
             self.seed_delta_t = None
+            self.seed_state_features = None
 
         # Static covariates: (N, S) — constant per customer, no time dimension
         self.static_covariates: Optional[torch.Tensor] = None
@@ -139,8 +159,10 @@ class CustomerDataset(Dataset):
             "trans": self.trans[idx],
             "spend": self.spend[idx],
             "delta_t": self.delta_t[idx],
+            "state_features": self.state_features[idx],
             "y_freq": self.y_freq[idx],
             "y_spend": self.y_spend[idx],
+            "active_mask": self.active_mask[idx],
             "customer_id": self.customer_ids[idx],
             "mask": self.mask[idx],
         }
@@ -152,6 +174,8 @@ class CustomerDataset(Dataset):
             item["seed_spend"] = self.seed_spend[idx]
             if self.seed_delta_t is not None:
                 item["seed_delta_t"] = self.seed_delta_t[idx]
+            if self.seed_state_features is not None:
+                item["seed_state_features"] = self.seed_state_features[idx]
 
         # Static covariates: always (S,) — same for training and inference
         if self.static_covariates is not None:

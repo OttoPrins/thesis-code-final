@@ -60,6 +60,10 @@ class LSTMModel(nn.Module):
                           These are constant per customer and broadcast across T.
         dynamic_cov_dim:  Number of time-varying covariate features (e.g. coupons, campaigns).
         cov_emb_dim:      Projection dimension for each covariate type (default 8).
+        state_feature_dim:Number of causal state features (e.g. delta_t) projected into
+                          the shared encoder for v2 joint models.
+        spend_head:       "regression" for the original scalar spend head, or
+                          "hurdle_lognormal" for v2 spend_mu/spend_log_var output.
     """
 
     def __init__(
@@ -73,12 +77,18 @@ class LSTMModel(nn.Module):
         static_cov_dim: int = 0,
         dynamic_cov_dim: int = 0,
         cov_emb_dim: int = 8,
+        state_feature_dim: int = 0,
+        spend_head: str = "regression",
     ):
         super().__init__()
         self.joint = joint
         self.max_trans = max_trans
         self.static_cov_dim = static_cov_dim
         self.dynamic_cov_dim = dynamic_cov_dim
+        self.state_feature_dim = state_feature_dim
+        self.spend_head_type = spend_head
+        if spend_head not in {"regression", "hurdle_lognormal"}:
+            raise ValueError("spend_head must be 'regression' or 'hurdle_lognormal'")
         n_classes = max_trans + 1
 
         # Embedding layers (categorical inputs — not raw floats)
@@ -94,6 +104,11 @@ class LSTMModel(nn.Module):
         self.spend_proj: Optional[nn.Linear] = None
         if joint:
             self.spend_proj = nn.Linear(1, cov_emb_dim)
+            lstm_input_dim += cov_emb_dim
+
+        self.state_proj: Optional[nn.Linear] = None
+        if state_feature_dim > 0:
+            self.state_proj = nn.Linear(state_feature_dim, cov_emb_dim)
             lstm_input_dim += cov_emb_dim
 
         # Static covariate projection (Extension 3): constant per customer, broadcast across T
@@ -126,7 +141,8 @@ class LSTMModel(nn.Module):
 
         # Spend head (Extension 1 only): scalar regression
         if joint:
-            self.spend_head = nn.Linear(dense_units, 1)
+            spend_out_dim = 2 if spend_head == "hurdle_lognormal" else 1
+            self.spend_head = nn.Linear(dense_units, spend_out_dim)
 
     def forward(
         self,
@@ -134,6 +150,7 @@ class LSTMModel(nn.Module):
         trans: torch.Tensor,                             # (B, T) integer transaction counts
         hidden: Optional[Tuple] = None,                  # (h_0, c_0) for stateful inference
         spend: Optional[torch.Tensor] = None,            # (B, T) scaled log-spend history
+        state_features: Optional[torch.Tensor] = None,   # (B, T, S) causal state features
         static_covariates: Optional[torch.Tensor] = None,   # (B, S) static per-customer
         dynamic_covariates: Optional[torch.Tensor] = None,  # (B, T, D) time-varying
     ):
@@ -154,6 +171,7 @@ class LSTMModel(nn.Module):
             static_covariates:  (B, S) — projected and broadcast across all T positions
             dynamic_covariates: (B, T, D) — projected and concatenated per time step
             spend:             (B, T) — projected continuous log-spend input for joint models
+            state_features:    (B, T, S) — projected causal state inputs for v2 models
 
         Returns:
             freq_logits: (B, T, n_classes)
@@ -174,6 +192,16 @@ class LSTMModel(nn.Module):
             spend_emb = self.spend_proj(spend.to(dtype=e_week.dtype).unsqueeze(-1))
             x = torch.cat([x, spend_emb], dim=-1)
 
+        if self.state_proj is not None:
+            if state_features is None:
+                state_features = torch.zeros(
+                    (B, T, self.state_feature_dim),
+                    dtype=e_week.dtype,
+                    device=week.device,
+                )
+            state_emb = self.state_proj(state_features.to(dtype=e_week.dtype))
+            x = torch.cat([x, state_emb], dim=-1)
+
         # Static covariates: project (B, S) → (B, cov_emb_dim), expand across T
         if self.static_proj is not None and static_covariates is not None:
             s_emb = self.static_proj(static_covariates)          # (B, cov_emb_dim)
@@ -192,7 +220,12 @@ class LSTMModel(nn.Module):
         freq_logits = self.freq_head(h)  # (B, T, n_classes)
 
         if self.joint:
-            log_spend = self.spend_head(h).squeeze(-1)  # (B, T)
+            spend_out = self.spend_head(h)
+            if self.spend_head_type == "hurdle_lognormal":
+                spend_mu = spend_out[..., 0]
+                spend_log_var = spend_out[..., 1]
+                return freq_logits, spend_mu, spend_log_var, hidden
+            log_spend = spend_out.squeeze(-1)  # (B, T)
             return freq_logits, log_spend, hidden
 
         return freq_logits, hidden

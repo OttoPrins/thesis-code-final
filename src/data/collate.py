@@ -21,8 +21,10 @@ def collate_fn(batch):
         trans       : (B, T-1)  long
         spend       : (B, T-1)  float
         delta_t     : (B, T-1)  float
+        state_features: (B, T-1, S) float
         y_freq      : (B, T-1)  long
         y_spend     : (B, T-1)  float
+        active_mask : (B, T-1)  float
         customer_id : (B,)      long
         mask        : (B, T-1)  float
     Optional (Extension 3 — Dunnhumby only):
@@ -35,14 +37,17 @@ def collate_fn(batch):
         seed_trans   : (B, T)    long
         seed_spend   : (B, T)    float
         seed_delta_t : (B, T)    float
+        seed_state_features: (B, T, S) float
     """
     result = {
         "week": torch.stack([item["week"] for item in batch]),
         "position": torch.stack([item["position"] for item in batch]),
         "trans": torch.stack([item["trans"] for item in batch]),
         "spend": torch.stack([item["spend"] for item in batch]),
+        "state_features": torch.stack([item["state_features"] for item in batch]),
         "y_freq": torch.stack([item["y_freq"] for item in batch]),
         "y_spend": torch.stack([item["y_spend"] for item in batch]),
+        "active_mask": torch.stack([item["active_mask"] for item in batch]),
         "customer_id": torch.stack([item["customer_id"] for item in batch]),
         "mask": torch.stack([item["mask"] for item in batch]),
     }
@@ -61,6 +66,10 @@ def collate_fn(batch):
         if "seed_delta_t" in batch[0]:
             result["seed_delta_t"] = torch.stack(
                 [item["seed_delta_t"] for item in batch]
+            )
+        if "seed_state_features" in batch[0]:
+            result["seed_state_features"] = torch.stack(
+                [item["seed_state_features"] for item in batch]
             )
 
     if "static_covariates" in batch[0]:

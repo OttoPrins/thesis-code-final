@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import math
 from pathlib import Path
 
 import numpy as np
@@ -97,11 +98,20 @@ def _compute_val_smearing(model, val_loader, device, joint, scaler):
         if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
             dynamic_cov = batch["dynamic_covariates"].to(device)
 
+        state_features = batch.get("state_features")
+        if state_features is not None:
+            state_features = state_features.to(device)
+
         if isinstance(model, LSTMModel):
-            _, log_spend, _ = model(week, trans,
-                                    spend=spend,
-                                    static_covariates=static_cov,
-                                    dynamic_covariates=dynamic_cov)
+            out = model(week, trans,
+                        spend=spend,
+                        state_features=state_features,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dynamic_cov)
+            if len(out) == 4:
+                _, log_spend, _, _ = out
+            else:
+                _, log_spend, _ = out
         elif isinstance(model, TransformerModel):
             delta_t = batch.get("delta_t")
             if delta_t is not None:
@@ -109,11 +119,16 @@ def _compute_val_smearing(model, val_loader, device, joint, scaler):
             padding_mask = batch.get("padding_mask")
             if padding_mask is not None:
                 padding_mask = padding_mask.to(device)
-            _, log_spend = model(week, trans, position=position, padding_mask=padding_mask,
-                                 spend=spend,
-                                 static_covariates=static_cov,
-                                 dynamic_covariates=dynamic_cov,
-                                 delta_t=delta_t)
+            out = model(week, trans, position=position, padding_mask=padding_mask,
+                        spend=spend,
+                        state_features=state_features,
+                        static_covariates=static_cov,
+                        dynamic_covariates=dynamic_cov,
+                        delta_t=delta_t)
+            if len(out) == 3:
+                _, log_spend, _ = out
+            else:
+                _, log_spend = out
         else:
             return None
 
@@ -123,8 +138,8 @@ def _compute_val_smearing(model, val_loader, device, joint, scaler):
         else:
             activity = mask
 
-        true_log_all.append(y_spend.cpu().numpy())
-        pred_log_all.append(log_spend.cpu().numpy())
+        true_log_all.append(scaler.inverse_transform_log1p(y_spend.cpu().numpy()))
+        pred_log_all.append(scaler.inverse_transform_log1p(log_spend.cpu().numpy()))
         mask_all.append(activity.cpu().numpy())
 
     if not true_log_all:
@@ -143,6 +158,8 @@ def build_model(config: dict) -> torch.nn.Module:
     static_cov_dim = model_cfg.get("static_cov_dim", 0)
     dynamic_cov_dim = model_cfg.get("dynamic_cov_dim", 0)
     cov_emb_dim = model_cfg.get("cov_emb_dim", 8)
+    state_feature_dim = model_cfg.get("state_feature_dim", 0)
+    spend_head = model_cfg.get("spend_head", "regression")
 
     if model_type == "lstm":
         return LSTMModel(
@@ -155,6 +172,8 @@ def build_model(config: dict) -> torch.nn.Module:
             static_cov_dim=static_cov_dim,
             dynamic_cov_dim=dynamic_cov_dim,
             cov_emb_dim=cov_emb_dim,
+            state_feature_dim=state_feature_dim,
+            spend_head=spend_head,
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -170,6 +189,8 @@ def build_model(config: dict) -> torch.nn.Module:
             static_cov_dim=static_cov_dim,
             dynamic_cov_dim=dynamic_cov_dim,
             cov_emb_dim=cov_emb_dim,
+            state_feature_dim=state_feature_dim,
+            spend_head=spend_head,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
@@ -193,7 +214,10 @@ def _add_result_validity_checks(
     invalid_reasons: list[str] = []
     warnings: list[str] = []
 
-    pred_per_week = np.asarray(results["pred_freq"], dtype=np.float64)
+    pred_per_week = (
+        np.asarray(results["pred_freq"], dtype=np.float64)
+        * float(metrics.get("freq_calibration_factor", 1.0))
+    )
     if not np.isfinite(pred_per_week).all():
         invalid_reasons.append("non-finite frequency predictions")
 
@@ -323,6 +347,7 @@ def main():
         output_cfg["run_name"] = f"{output_cfg['run_name']}_{args.inference_mode}"
     if args.max_epochs is not None:
         training_cfg["epochs"] = args.max_epochs
+        training_cfg["max_epochs"] = args.max_epochs
     if args.n_scenarios is not None:
         config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
 
@@ -377,17 +402,39 @@ def main():
         multi_task_loss = KendallMultiTaskLoss(n_tasks=2).to(device)
         opt_params += list(multi_task_loss.parameters())
 
-    optimizer = torch.optim.Adam(
+    optimizer_name = training_cfg.get("optimizer", "adam").lower()
+    optimizer_cls = torch.optim.AdamW if optimizer_name == "adamw" else torch.optim.Adam
+    optimizer = optimizer_cls(
         opt_params,
         lr=training_cfg["lr"],
         weight_decay=training_cfg.get("weight_decay", 0.0),
     )
 
+    epochs = int(training_cfg.get("max_epochs", training_cfg.get("epochs", 100)))
+    steps_per_epoch = max(1, len(train_loader))
+    total_steps = max(1, epochs * steps_per_epoch)
+    scheduler = None
+    scheduler_cfg = training_cfg.get("scheduler", {})
+    scheduler_type = scheduler_cfg.get("type", training_cfg.get("lr_scheduler", "none"))
+    if str(scheduler_type).lower() == "cosine":
+        warmup_steps = max(
+            1,
+            int(total_steps * float(scheduler_cfg.get("warmup_fraction", 0.05))),
+        )
+
+        def lr_lambda(step: int) -> float:
+            if step < warmup_steps:
+                return float(step + 1) / float(warmup_steps)
+            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+            return 0.5 * (1.0 + math.cos(math.pi * min(1.0, progress)))
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+
     # Early stopping
     early_stopping = EarlyStopping(patience=training_cfg["early_stopping_patience"])
 
     # Train
-    print(f"\nTraining for up to {training_cfg['epochs']} epochs ...")
+    print(f"\nTraining for up to {epochs} epochs ...")
     loss_cfg = config.get("loss", {})
     trainer = Trainer(
         model=model,
@@ -397,11 +444,14 @@ def main():
         multi_task_loss=multi_task_loss,
         max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
         kendall_warmup_epochs=loss_cfg.get("warmup_epochs", 5),
+        spend_loss=loss_cfg.get("spend_loss", "mse"),
+        scheduler=scheduler,
+        restore_best_checkpoint=training_cfg.get("restore_best_checkpoint", True),
     )
     history = trainer.fit(
         train_loader=train_loader,
         val_loader=val_loader,
-        epochs=training_cfg["epochs"],
+        epochs=epochs,
         early_stopping=early_stopping,
     )
 
@@ -424,7 +474,11 @@ def main():
     inference_cfg = config.get("inference", {})
     n_scenarios = inference_cfg.get("n_scenarios", 30)
     inference_mode = inference_cfg.get("mode", "sample")
-    print(f"  inference mode: {inference_mode}  n_scenarios: {n_scenarios}")
+    temperature = float(inference_cfg.get("temperature", 1.0))
+    print(
+        f"  inference mode: {inference_mode}  n_scenarios: {n_scenarios}  "
+        f"temperature: {temperature:.4f}"
+    )
 
     if model_cfg["type"] == "lstm":
         results = autoregressive_inference_lstm(
@@ -435,6 +489,7 @@ def main():
             n_scenarios=n_scenarios,
             device=device,
             mode=inference_mode,
+            temperature=temperature,
         )
     elif model_cfg["type"] == "transformer":
         results = autoregressive_inference_transformer(
@@ -446,6 +501,7 @@ def main():
             device=device,
             use_kv_cache=inference_cfg.get("use_kv_cache", True),
             mode=inference_mode,
+            temperature=temperature,
         )
     else:
         raise ValueError(f"Unknown model type for inference: {model_cfg['type']!r}")
@@ -500,6 +556,9 @@ def main():
 
     evaluation_cfg = config.get("evaluation", {})
     weekly_discount_rate = evaluation_cfg.get("weekly_discount_rate", 0.0)
+    calibration_cfg = config.get("calibration", {})
+    freq_calibration_factor = float(calibration_cfg.get("freq_factor", 1.0))
+    spend_calibration_factor = float(calibration_cfg.get("spend_factor", 1.0))
 
     metrics = compute_all_metrics(
         y_freq_true=true_total_freq,
@@ -507,6 +566,8 @@ def main():
         customer_ids=true_ids,
         scaler=scaler if joint else None,
         weekly_discount_rate=weekly_discount_rate,
+        freq_calibration_factor=freq_calibration_factor,
+        spend_calibration_factor=spend_calibration_factor,
         **freq_week_kwargs,
         **spend_kwargs,
     )

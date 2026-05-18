@@ -96,7 +96,7 @@ class CDNOWPipeline(BasePipeline):
         calib, holdout = splitter.split(agg)
 
         # Stage 4: Scale spend (fit on calibration only — no leakage)
-        scaler = SpendScaler()
+        scaler = SpendScaler(method=dataset_cfg.get("spend_scaler", "log"))
         calib = calib.copy()
         calib["log_spend"] = scaler.fit_transform(calib["weekly_spend"].values)
 

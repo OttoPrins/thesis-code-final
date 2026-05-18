@@ -48,6 +48,9 @@ class Trainer:
         multi_task_loss: nn.Module = None,
         max_grad_norm: float = 1.0,
         kendall_warmup_epochs: int = 5,
+        spend_loss: str = "mse",
+        scheduler=None,
+        restore_best_checkpoint: bool = True,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -56,6 +59,9 @@ class Trainer:
         self.multi_task_loss = multi_task_loss
         self.max_grad_norm = max_grad_norm
         self.kendall_warmup_epochs = kendall_warmup_epochs
+        self.spend_loss = spend_loss
+        self.scheduler = scheduler
+        self.restore_best_checkpoint = restore_best_checkpoint
         self.current_epoch: int = 0
 
     def _named_optimized_parameters(self):
@@ -91,8 +97,9 @@ class Trainer:
         Run forward pass, normalising different return signatures.
 
         Returns:
-            freq_logits: (B, T, n_classes)
-            log_spend:   (B, T) or None
+            freq_logits:    (B, T, n_classes)
+            spend_mu:       (B, T) or None
+            spend_log_var:  (B, T) or None for hurdle/lognormal heads
         """
         week = batch["week"].to(self.device)
         position = batch.get("position")
@@ -102,6 +109,9 @@ class Trainer:
         spend = batch.get("spend")
         if spend is not None:
             spend = spend.to(self.device)
+        state_features = batch.get("state_features")
+        if state_features is not None:
+            state_features = state_features.to(self.device)
         mask = batch["mask"].to(self.device)
 
         # Covariates are optional (Extension 3 — Dunnhumby only)
@@ -114,19 +124,27 @@ class Trainer:
 
         if isinstance(self.model, LSTMModel):
             if self.joint:
-                freq_logits, log_spend, _ = self.model(
+                out = self.model(
                     week, trans,
                     spend=spend,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
+                if len(out) == 4:
+                    freq_logits, spend_mu, spend_log_var, _ = out
+                else:
+                    freq_logits, spend_mu, _ = out
+                    spend_log_var = None
             else:
                 freq_logits, _ = self.model(
                     week, trans,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
-                log_spend = None
+                spend_mu = None
+                spend_log_var = None
         elif isinstance(self.model, TransformerModel):
             # Pass elapsed-time feature so Time2Vec learns inter-transaction
             # regularities (the BTYD signal) rather than absolute calendar position.
@@ -143,6 +161,7 @@ class Trainer:
             out = self.model(
                 week, trans,
                 spend=spend,
+                state_features=state_features,
                 position=position,
                 padding_mask=padding_mask,
                 static_covariates=static_cov,
@@ -150,14 +169,43 @@ class Trainer:
                 delta_t=delta_t,
             )
             if self.joint:
-                freq_logits, log_spend = out
+                if len(out) == 3:
+                    freq_logits, spend_mu, spend_log_var = out
+                else:
+                    freq_logits, spend_mu = out
+                    spend_log_var = None
             else:
                 freq_logits = out
-                log_spend = None
+                spend_mu = None
+                spend_log_var = None
         else:
             raise TypeError(f"Unknown model type: {type(self.model)}")
 
-        return freq_logits, log_spend
+        return freq_logits, spend_mu, spend_log_var
+
+    def _compute_spend_loss(
+        self,
+        spend_mu: torch.Tensor,
+        y_spend: torch.Tensor,
+        mask: torch.Tensor,
+        active_mask: torch.Tensor,
+        spend_log_var: torch.Tensor | None,
+    ) -> torch.Tensor:
+        spend_head_type = getattr(self.model, "spend_head_type", "regression")
+        if spend_head_type == "hurdle_lognormal":
+            positive_mask = (active_mask * mask).to(dtype=spend_mu.dtype)
+            denom = positive_mask.sum().clamp(min=1.0)
+            if self.spend_loss == "huber":
+                per_step = F.smooth_l1_loss(spend_mu, y_spend, reduction="none")
+            else:
+                if spend_log_var is None:
+                    spend_log_var = torch.zeros_like(spend_mu)
+                log_var = spend_log_var.clamp(-8.0, 8.0)
+                per_step = 0.5 * (torch.exp(-log_var) * (y_spend - spend_mu) ** 2 + log_var)
+            return (per_step * positive_mask).sum() / denom
+
+        mse_per_step = F.mse_loss(spend_mu, y_spend, reduction="none")
+        return (mse_per_step * mask).sum() / mask.sum().clamp(min=1.0)
 
     def _compute_loss(self, batch: dict):
         """
@@ -170,7 +218,7 @@ class Trainer:
         mask = batch["mask"].to(self.device)
         y_freq = batch["y_freq"].to(self.device)
 
-        freq_logits, log_spend = self._forward(batch)
+        freq_logits, spend_mu, spend_log_var = self._forward(batch)
         B, T, n_classes = freq_logits.shape
 
         ce_per_step = F.cross_entropy(
@@ -182,11 +230,14 @@ class Trainer:
 
         if self.joint:
             y_spend = batch["y_spend"].to(self.device)
-            mse_per_step = F.mse_loss(log_spend, y_spend, reduction="none")
-            # Thesis protocol: train log-spend over every valid customer-period,
-            # including zero-spend weeks. Conditional-positive spend is a separate
-            # diagnostic variant, not the primary joint model.
-            spend_loss = (mse_per_step * mask).sum() / mask.sum().clamp(min=1.0)
+            active_mask = batch.get("active_mask")
+            if active_mask is not None:
+                active_mask = active_mask.to(self.device)
+            else:
+                active_mask = (y_freq > 0).float() * mask
+            spend_loss = self._compute_spend_loss(
+                spend_mu, y_spend, mask, active_mask, spend_log_var
+            )
             total_loss = self.multi_task_loss([freq_loss, spend_loss])
 
             # Log Kendall task weights (exp(-log_var) per task)
@@ -222,6 +273,8 @@ class Trainer:
                         f"Non-finite gradient norm before clipping: {grad_norm.item()}"
                     )
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             for k, v in metrics.items():
                 totals[k] = totals.get(k, 0.0) + v
@@ -316,7 +369,7 @@ class Trainer:
                     print(f"Early stopping triggered at epoch {epoch + 1}.")
                     break
 
-        if early_stopping is not None:
+        if early_stopping is not None and self.restore_best_checkpoint:
             early_stopping.load_best(self.model)
 
         return history

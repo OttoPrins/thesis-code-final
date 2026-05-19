@@ -18,6 +18,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import os
 import subprocess
 import sys
 import time
@@ -112,16 +114,21 @@ def main():
             print(f"  python train.py --config {cfg} --seed_override {seed} --inference_mode {mode}")
         return
 
-    failures = []
-    t0 = time.time()
-    for i, (cfg, seed, mode) in enumerate(jobs, start=1):
-        elapsed_min = (time.time() - t0) / 60
-        print(f"\n[{i}/{len(jobs)}  t={elapsed_min:.1f}min]  {Path(cfg).stem} seed={seed} mode={mode}")
+    # Detect available GPUs for parallel dispatch.
+    try:
+        import torch as _torch
+        _n_gpus = _torch.cuda.device_count() if _torch.cuda.is_available() else 1
+    except ImportError:
+        _n_gpus = 1
+    n_parallel = min(_n_gpus, 2)
 
-        # Build the expected run_name from config basename + seed + mode
+    # Pre-filter jobs serially (YAML peek + skip-existing check must be sequential
+    # to avoid file-read races and interleaved stdout).
+    import yaml as _yaml
+    t0 = time.time()
+    pending = []  # list of (cfg, seed, mode, cmd, env, label)
+    for i, (cfg, seed, mode) in enumerate(jobs):
         cfg_basename = Path(cfg).stem
-        # Peek at the YAML to find the configured run_name suffix and version
-        import yaml as _yaml
         with open(cfg) as _f:
             _cfg_yaml = _yaml.safe_load(_f)
         base_run_name = _cfg_yaml.get("output", {}).get("run_name", cfg_basename)
@@ -130,6 +137,10 @@ def main():
         if args.skip_existing and _existing_metrics_are_final_valid(expected_metrics):
             print(f"  [skip] {expected_metrics} already exists and is final-valid")
             continue
+
+        gpu_id = i % n_parallel
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
         cmd = [
             sys.executable, "train.py",
@@ -141,10 +152,26 @@ def main():
             cmd += ["--max_epochs", str(args.max_epochs)]
         if args.n_scenarios is not None:
             cmd += ["--n_scenarios", str(args.n_scenarios)]
-        result = subprocess.run(cmd)
-        if result.returncode != 0:
-            failures.append((cfg, seed, mode, result.returncode))
-            print(f"  FAILED (exit {result.returncode})")
+
+        label = f"{cfg_basename}  seed={seed}  mode={mode}  GPU={gpu_id}"
+        pending.append((cfg, seed, mode, cmd, env, label))
+
+    print(f"Running {len(pending)} job(s) with {n_parallel} parallel worker(s)")
+
+    failures = []
+
+    def _run_one(job):
+        cfg, seed, mode, cmd, env, label = job
+        elapsed_min = (time.time() - t0) / 60
+        print(f"\n[t={elapsed_min:.1f}min]  {label}")
+        result = subprocess.run(cmd, env=env)
+        return cfg, seed, mode, result.returncode
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
+        for cfg, seed, mode, rc in executor.map(_run_one, pending):
+            if rc != 0:
+                failures.append((cfg, seed, mode, rc))
+                print(f"  FAILED: {Path(cfg).stem} seed={seed} mode={mode} (exit {rc})")
 
     print(f"\n=== Sweep complete in {(time.time()-t0)/60:.1f} min ===")
     if failures:

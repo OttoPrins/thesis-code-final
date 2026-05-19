@@ -1,0 +1,40 @@
+2026-05-12 20:12:34,626 - __main__ - INFO - Loading dunnhumby dataset...
+2026-05-12 20:12:38,381 - __main__ - INFO - Calibration RFM: 2498 customers
+2026-05-12 20:12:38,381 - __main__ - INFO - Holdout ground truth: 2498 customers
+/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/lifetimes/fitters/pareto_nbd_fitter.py:216: RuntimeWarning: invalid value encountered in logaddexp
+  A_2 = logaddexp(-(r + x) * log(alpha + T) - s * log(beta + T), log(s) + log_A_0 - log(r_s_x))
+2026-05-12 20:12:54,444 - src.evaluation.benchmarks - INFO - Fitted pareto_nbd on 2498 customers
+2026-05-12 20:12:54,460 - __main__ - INFO - Saved metrics: results/tables/pareto_nbd_dunnhumby_metrics.json
+2026-05-12 20:12:54,460 - __main__ - INFO - Saved array artifacts: results/tables/pareto_nbd_dunnhumby_arrays.npz
+2026-05-12 20:12:54,592 - src.evaluation.benchmarks - INFO - Fitted bgnbd_gg on 2498 customers
+2026-05-12 20:12:54,619 - __main__ - INFO - Saved metrics: results/tables/bgnbd_gg_dunnhumby_metrics.json
+2026-05-12 20:12:54,619 - __main__ - INFO - Saved array artifacts: results/tables/bgnbd_gg_dunnhumby_arrays.npz
+Config: experiments/configs/lstm_base_dunnhumby.yaml
+Dataset: dunnhumby
+Models: pareto_nbd, bgnbd_gg
+
+--- PARETO_NBD ---
+Metrics for pareto_nbd:
+  freq_rmse: 33.9151
+  freq_mae: 19.4641
+  freq_mape: 74.2115
+  bias_pct: -74.2115
+
+--- BGNBD_GG ---
+Metrics for bgnbd_gg:
+  freq_rmse: 19.2183
+  freq_mae: 10.6464
+  freq_mape: 2.3482
+  bias_pct: 2.3482
+  spend_mae_raw: 309.6513
+  spend_rmse_raw: 485.5006
+  spend_mae_log: 0.8049
+  spend_rmse_log: 1.3519
+  spend_r2_log: 0.3799
+  spend_bias_pct: -5.6500
+
+=== Summary ===
+Model           Freq RMSE    Freq MAPE    Bias %     Spend MAE raw   Spend R² log  
+----------------------------------------------------------------------------------
+pareto_nbd      33.9151      74.2115      -74.21     nan             nan           
+bgnbd_gg        19.2183      2.3482       2.35       309.6513        0.3799        

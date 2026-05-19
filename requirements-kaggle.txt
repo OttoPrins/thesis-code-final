@@ -22,3 +22,4 @@
 
 lifetimes>=0.11.3        # Pareto/NBD, BG/NBD, Gamma-Gamma (pure Python, no compiler)
 openpyxl>=3.1.0          # UCI Online Retail II is an Excel (.xlsx) workbook
+optuna>=3.0.0            # tune.py HPO (SS dose + loss weighting); pure Python

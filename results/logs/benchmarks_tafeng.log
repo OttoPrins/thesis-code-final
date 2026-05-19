@@ -1,0 +1,40 @@
+2026-05-12 20:09:49,616 - __main__ - INFO - Loading tafeng dataset...
+2026-05-12 20:09:50,890 - __main__ - INFO - Calibration RFM: 27809 customers
+2026-05-12 20:09:50,890 - __main__ - INFO - Holdout ground truth: 27809 customers
+/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/lifetimes/fitters/pareto_nbd_fitter.py:216: RuntimeWarning: invalid value encountered in logaddexp
+  A_2 = logaddexp(-(r + x) * log(alpha + T) - s * log(beta + T), log(s) + log_A_0 - log(r_s_x))
+2026-05-12 20:12:29,785 - src.evaluation.benchmarks - INFO - Fitted pareto_nbd on 27809 customers
+2026-05-12 20:12:30,211 - __main__ - INFO - Saved metrics: results/tables/pareto_nbd_tafeng_metrics.json
+2026-05-12 20:12:30,211 - __main__ - INFO - Saved array artifacts: results/tables/pareto_nbd_tafeng_arrays.npz
+2026-05-12 20:12:30,916 - src.evaluation.benchmarks - INFO - Fitted bgnbd_gg on 27809 customers
+2026-05-12 20:12:31,121 - __main__ - INFO - Saved metrics: results/tables/bgnbd_gg_tafeng_metrics.json
+2026-05-12 20:12:31,121 - __main__ - INFO - Saved array artifacts: results/tables/bgnbd_gg_tafeng_arrays.npz
+Config: experiments/configs/lstm_base_tafeng.yaml
+Dataset: tafeng
+Models: pareto_nbd, bgnbd_gg
+
+--- PARETO_NBD ---
+Metrics for pareto_nbd:
+  freq_rmse: 1.2929
+  freq_mae: 0.9240
+  freq_mape: 14.8025
+  bias_pct: 14.8025
+
+--- BGNBD_GG ---
+Metrics for bgnbd_gg:
+  freq_rmse: 1.2972
+  freq_mae: 0.9309
+  freq_mape: 16.1003
+  bias_pct: 16.1003
+  spend_mae_raw: 945.0035
+  spend_rmse_raw: 3442.3401
+  spend_mae_log: 2.4820
+  spend_rmse_log: 3.9015
+  spend_r2_log: -0.2212
+  spend_bias_pct: 15.8118
+
+=== Summary ===
+Model           Freq RMSE    Freq MAPE    Bias %     Spend MAE raw   Spend R² log  
+----------------------------------------------------------------------------------
+pareto_nbd      1.2929       14.8025      14.80      nan             nan           
+bgnbd_gg        1.2972       16.1003      16.10      945.0035        -0.2212       

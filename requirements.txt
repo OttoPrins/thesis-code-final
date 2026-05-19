@@ -17,3 +17,4 @@ cmdstanpy>=1.2.0       # true Stan-backed GPPM; also requires installing CmdStan
 # under the explicit benchmark name `gamma_poisson`; it is not reported as GPPM.
 rpy2>=3.5.0,<3.6       # optional: Pareto/GGG via R BTYDplus; 3.6.x expects newer R C symbols on this setup
 shap>=0.42.0           # Extension 3 covariate ablation
+optuna>=3.0.0          # hyperparameter search (tune.py): SS dose + loss weighting

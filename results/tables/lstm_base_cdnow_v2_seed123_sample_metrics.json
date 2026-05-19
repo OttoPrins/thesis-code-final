@@ -1,0 +1,18 @@
+{
+  "freq_rmse": 1.1718413829803467,
+  "freq_mae": 0.5656025409698486,
+  "freq_normalized_gini": 0.6718299028109558,
+  "freq_mape": 9.323375280884196,
+  "bias_pct": -9.323375280884196,
+  "freq_weekly_mae": 11.047156639074764,
+  "freq_weekly_total_true": 1196.0,
+  "freq_weekly_total_pred": 1084.4924947405234,
+  "freq_weekly_mape": 23.752493015965545,
+  "freq_weekly_bias_pct": -4.503859394703938,
+  "freq_mase": 0.419541174109348,
+  "freq_mase_scale": 0.08338133039507842,
+  "run_valid": true,
+  "run_invalid_reason": "",
+  "run_warning": "",
+  "arrays_file": "lstm_base_cdnow_v2_seed123_sample_arrays.npz"
+}

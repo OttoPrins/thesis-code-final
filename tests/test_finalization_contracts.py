@@ -415,6 +415,129 @@ def test_hurdle_spend_loss_ignores_inactive_targets():
     assert loss.item() == pytest.approx(0.0, abs=1e-6)
 
 
+def test_scheduled_sampling_forward_equals_teacher_forcing_at_zero_prob():
+    """At ε=0 the stepwise SS unroll must equal the vectorized teacher-forced
+    forward (LSTM recurrence equivalence) — guarantees SS adds no bias when off."""
+    torch.manual_seed(0)
+    model = LSTMModel(max_week=51, max_trans=3, memory_units=8, dense_units=8, dropout=0.0)
+    model.eval()  # disable dropout for an exact comparison
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(model.parameters()),
+        device=torch.device("cpu"),
+        joint=False,
+    )
+    batch = {
+        "week": torch.tensor([[0, 1, 2, 3], [4, 5, 6, 7]]),
+        "trans": torch.tensor([[0, 1, 0, 2], [1, 0, 0, 3]]),
+        "mask": torch.ones((2, 4)),
+        "y_freq": torch.tensor([[1, 0, 2, 0], [0, 0, 3, 1]]),
+    }
+    tf_logits, _, _ = trainer._forward(batch)
+    ss_logits, _, _ = trainer._scheduled_sampling_forward_lstm(batch, ss_prob=0.0)
+    assert ss_logits.shape == tf_logits.shape
+    assert torch.allclose(ss_logits, tf_logits, atol=1e-5)
+
+
+def test_ss_prob_gating_and_ramp():
+    """ε is 0 when disabled / before start / for non-LSTM, and ramps to max_prob."""
+    model = LSTMModel(max_week=51, max_trans=3, memory_units=4, dense_units=4)
+    model.train()
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(model.parameters()),
+        device=torch.device("cpu"),
+        joint=False,
+        scheduled_sampling={"enabled": True, "start_epoch": 5, "max_prob": 0.3,
+                            "schedule": "linear"},
+    )
+    trainer._total_epochs = 25
+    trainer.current_epoch = 0
+    assert trainer._ss_prob() == 0.0          # before start_epoch
+    trainer.current_epoch = 5
+    assert trainer._ss_prob() == pytest.approx(0.0, abs=1e-9)  # at start
+    trainer.current_epoch = 25
+    assert trainer._ss_prob() == pytest.approx(0.3, rel=1e-6)  # capped at max_prob
+    trainer.current_epoch = 15
+    assert 0.0 < trainer._ss_prob() < 0.3     # ramping
+    model.eval()                              # SS only during training
+    assert trainer._ss_prob() == 0.0
+    trainer.scheduled_sampling = None         # disabled → off
+    model.train()
+    assert trainer._ss_prob() == 0.0
+
+
+def test_scheduled_sampling_joint_fit_is_finite_end_to_end():
+    """Joint hurdle LSTM trained via fit() with scheduled sampling enabled across
+    the start_epoch boundary must stay finite (exercises the stepwise unroll +
+    spend feedback + Kendall + backward end-to-end)."""
+    torch.manual_seed(0)
+    model = LSTMModel(
+        max_week=51, max_trans=3, memory_units=8, dense_units=8,
+        joint=True, spend_head="hurdle_lognormal", state_feature_dim=1,
+    )
+    loss_fn = KendallMultiTaskLoss(n_tasks=2, spend_logvar_max=2.0)
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(list(model.parameters()) + list(loss_fn.parameters())),
+        device=torch.device("cpu"),
+        joint=True,
+        multi_task_loss=loss_fn,
+        spend_loss="nll",
+        kendall_warmup_epochs=1,
+        scheduled_sampling={"enabled": True, "start_epoch": 1, "max_prob": 0.5,
+                            "schedule": "linear"},
+    )
+    batch = {
+        "week": torch.tensor([[0, 1, 2, 3], [4, 5, 6, 7]]),
+        "trans": torch.tensor([[0, 1, 0, 2], [1, 0, 0, 3]]),
+        "spend": torch.tensor([[0.0, 1.2, 0.0, 0.7], [0.9, 0.0, 0.0, 1.5]]),
+        "state_features": torch.zeros((2, 4, 1)),
+        "mask": torch.ones((2, 4)),
+        "y_freq": torch.tensor([[1, 0, 2, 0], [0, 0, 3, 1]]),
+        "y_spend": torch.tensor([[1.0, 0.0, 0.8, 0.0], [0.0, 0.0, 1.3, 0.5]]),
+        "active_mask": torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 0.0, 1.0, 1.0]]),
+    }
+    history = trainer.fit(
+        train_loader=[batch], val_loader=[batch], epochs=4,
+        early_stopping=EarlyStopping(patience=10),
+    )
+    assert all(np.isfinite(history["train_loss"]))
+    assert all(np.isfinite(history["val_loss"]))
+    assert len(history["train_loss"]) == 4
+
+
+def test_hpo_objective_penalizes_invalid_and_degenerate_runs():
+    """The HPO objective must (a) hard-penalize invalid runs and (b) NOT reward a
+    near-zero-bias model that has collapsed per-customer discrimination (the
+    degenerate trap seen in the SS smoke: bias≈0 but gini≈0)."""
+    from tune import _objective_value
+
+    # Invalid run → max penalty regardless of other metrics.
+    assert _objective_value({"run_valid": False, "bias_pct": 0.0}, joint=False) == 10.0
+
+    # Degenerate: tiny bias but no discrimination (gini≈0) must score WORSE than
+    # a model with modest bias but real discrimination (gini high).
+    degenerate = _objective_value(
+        {"run_valid": True, "bias_pct": 1.0, "freq_normalized_gini": 0.0}, joint=False
+    )
+    skilled = _objective_value(
+        {"run_valid": True, "bias_pct": 10.0, "freq_normalized_gini": 0.65}, joint=False
+    )
+    assert skilled < degenerate
+
+    # Joint objective rewards positive spend R² and CLV Spearman.
+    worse_spend = _objective_value(
+        {"run_valid": True, "bias_pct": 5.0, "freq_normalized_gini": 0.6,
+         "spend_r2_log": -0.6, "clv_spearman": 0.4}, joint=True
+    )
+    better_spend = _objective_value(
+        {"run_valid": True, "bias_pct": 5.0, "freq_normalized_gini": 0.6,
+         "spend_r2_log": 0.45, "clv_spearman": 0.6}, joint=True
+    )
+    assert better_spend < worse_spend
+
+
 def test_transformer_cpu_training_smoke_is_finite_with_loss_mask():
     _run_transformer_finite_smoke(torch.device("cpu"))
 
@@ -584,3 +707,22 @@ def test_trainer_restores_best_validation_weights_without_early_stop():
     trainer.fit(train_loader=[object()], val_loader=[object()], epochs=3, early_stopping=stopper)
 
     assert model.weight.item() == pytest.approx(2.0)
+
+
+def test_spend_logvar_max_floors_spend_task_weight():
+    """A drifted spend log_var must be clamped so the spend task is not silenced."""
+    capped = KendallMultiTaskLoss(n_tasks=2, spend_logvar_max=2.0)
+    uncapped = KendallMultiTaskLoss(n_tasks=2)
+    with torch.no_grad():
+        for m in (capped, uncapped):
+            m.log_vars.copy_(torch.tensor([0.0, 9.0]))  # spend log_var drifted high
+
+    losses = [torch.tensor(1.0), torch.tensor(1.0)]
+    # Effective spend weight = 0.5 * exp(-clamped_log_var).
+    # Uncapped: 0.5*exp(-9) ≈ 6e-5 (silenced). Capped at 2.0: 0.5*exp(-2) ≈ 0.068.
+    capped(losses)
+    floor = 0.5 * float(torch.exp(-torch.tensor(2.0)))
+    assert float(capped.task_weights[1]) == pytest.approx(floor, rel=1e-5)
+    assert float(uncapped.task_weights[1]) < 1e-3
+    # Frequency task (index 0) is untouched by the spend cap.
+    assert float(capped.task_weights[0]) == pytest.approx(0.5, rel=1e-5)

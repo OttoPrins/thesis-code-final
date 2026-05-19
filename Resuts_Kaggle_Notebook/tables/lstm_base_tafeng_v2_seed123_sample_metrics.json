@@ -1,0 +1,18 @@
+{
+  "freq_rmse": 1.5455873012542725,
+  "freq_mae": 1.1198196411132812,
+  "freq_normalized_gini": 0.6547186483636492,
+  "freq_mape": 62.59973404255319,
+  "bias_pct": 62.59973404255319,
+  "freq_weekly_mae": 4060.4289780430495,
+  "freq_weekly_total_true": 30127.0,
+  "freq_weekly_total_pred": 48986.41981868446,
+  "freq_weekly_mape": 76.26364544258303,
+  "freq_weekly_bias_pct": 71.51236906672005,
+  "freq_mase": 1.038865692549181,
+  "freq_mase_scale": 0.3518873876671712,
+  "run_valid": true,
+  "run_invalid_reason": "",
+  "run_warning": "",
+  "arrays_file": "lstm_base_tafeng_v2_seed123_sample_arrays.npz"
+}

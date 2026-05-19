@@ -1,0 +1,107 @@
+Config: experiments/configs/lstm_base_cdnow.yaml
+Run: lstm_base_cdnow_final
+Device: mps
+Loading dataset: cdnow ...
+[pipeline] freq_bins from config: [0, 1, 2, 3]
+  Train customers: 2115, Val: 234, Inference: 2349
+Model: lstm — 89,132 parameters
+
+Training for up to 100 epochs ...
+Epoch   1/100 — train_loss: 1.2666  val_loss: 1.0567
+Epoch   2/100 — train_loss: 0.5678  val_loss: 0.1985
+Epoch   3/100 — train_loss: 0.2162  val_loss: 0.1962
+Epoch   4/100 — train_loss: 0.1690  val_loss: 0.1442
+Epoch   5/100 — train_loss: 0.1505  val_loss: 0.1431
+Epoch   6/100 — train_loss: 0.1421  val_loss: 0.1403
+Epoch   7/100 — train_loss: 0.1437  val_loss: 0.1374
+Epoch   8/100 — train_loss: 0.1418  val_loss: 0.1366
+Epoch   9/100 — train_loss: 0.1350  val_loss: 0.1365
+Epoch  10/100 — train_loss: 0.1397  val_loss: 0.1362
+Epoch  11/100 — train_loss: 0.1390  val_loss: 0.1357
+Epoch  12/100 — train_loss: 0.1334  val_loss: 0.1356
+Epoch  13/100 — train_loss: 0.1404  val_loss: 0.1355
+Epoch  14/100 — train_loss: 0.1374  val_loss: 0.1352
+Epoch  15/100 — train_loss: 0.1394  val_loss: 0.1352
+Epoch  16/100 — train_loss: 0.1359  val_loss: 0.1348
+Epoch  17/100 — train_loss: 0.1344  val_loss: 0.1347
+Epoch  18/100 — train_loss: 0.1347  val_loss: 0.1346
+Epoch  19/100 — train_loss: 0.1397  val_loss: 0.1344
+Epoch  20/100 — train_loss: 0.1346  val_loss: 0.1342
+Epoch  21/100 — train_loss: 0.1347  val_loss: 0.1340
+Epoch  22/100 — train_loss: 0.1368  val_loss: 0.1341
+Epoch  23/100 — train_loss: 0.1372  val_loss: 0.1336
+Epoch  24/100 — train_loss: 0.1370  val_loss: 0.1332
+Epoch  25/100 — train_loss: 0.1337  val_loss: 0.1333
+Epoch  26/100 — train_loss: 0.1358  val_loss: 0.1335
+Epoch  27/100 — train_loss: 0.1352  val_loss: 0.1333
+Epoch  28/100 — train_loss: 0.1336  val_loss: 0.1327
+Epoch  29/100 — train_loss: 0.1358  val_loss: 0.1329
+Epoch  30/100 — train_loss: 0.1400  val_loss: 0.1324
+Epoch  31/100 — train_loss: 0.1373  val_loss: 0.1329
+Epoch  32/100 — train_loss: 0.1329  val_loss: 0.1322
+Epoch  33/100 — train_loss: 0.1310  val_loss: 0.1319
+Epoch  34/100 — train_loss: 0.1321  val_loss: 0.1317
+Epoch  35/100 — train_loss: 0.1289  val_loss: 0.1315
+Epoch  36/100 — train_loss: 0.1318  val_loss: 0.1310
+Epoch  37/100 — train_loss: 0.1316  val_loss: 0.1303
+Epoch  38/100 — train_loss: 0.1313  val_loss: 0.1316
+Epoch  39/100 — train_loss: 0.1299  val_loss: 0.1308
+Epoch  40/100 — train_loss: 0.1317  val_loss: 0.1293
+Epoch  41/100 — train_loss: 0.1288  val_loss: 0.1285
+Epoch  42/100 — train_loss: 0.1295  val_loss: 0.1262
+Epoch  43/100 — train_loss: 0.1270  val_loss: 0.1240
+Epoch  44/100 — train_loss: 0.1285  val_loss: 0.1300
+Epoch  45/100 — train_loss: 0.1273  val_loss: 0.1268
+Epoch  46/100 — train_loss: 0.1268  val_loss: 0.1233
+Epoch  47/100 — train_loss: 0.1260  val_loss: 0.1222
+Epoch  48/100 — train_loss: 0.1256  val_loss: 0.1215
+Epoch  49/100 — train_loss: 0.1253  val_loss: 0.1231
+Epoch  50/100 — train_loss: 0.1259  val_loss: 0.1223
+Epoch  51/100 — train_loss: 0.1238  val_loss: 0.1206
+Epoch  52/100 — train_loss: 0.1187  val_loss: 0.1223
+Epoch  53/100 — train_loss: 0.1203  val_loss: 0.1201
+Epoch  54/100 — train_loss: 0.1177  val_loss: 0.1197
+Epoch  55/100 — train_loss: 0.1213  val_loss: 0.1204
+Epoch  56/100 — train_loss: 0.1204  val_loss: 0.1195
+Epoch  57/100 — train_loss: 0.1181  val_loss: 0.1195
+Epoch  58/100 — train_loss: 0.1233  val_loss: 0.1217
+Epoch  59/100 — train_loss: 0.1186  val_loss: 0.1193
+Epoch  60/100 — train_loss: 0.1216  val_loss: 0.1205
+Epoch  61/100 — train_loss: 0.1205  val_loss: 0.1201
+Epoch  62/100 — train_loss: 0.1177  val_loss: 0.1194
+Epoch  63/100 — train_loss: 0.1180  val_loss: 0.1194
+Epoch  64/100 — train_loss: 0.1187  val_loss: 0.1200
+Early stopping triggered at epoch 64.
+
+Checkpoint saved: results/checkpoints/lstm_base_cdnow_final.pt
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 30
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.0201
+  Mean actual freq/week:       0.0196
+  Over-prediction ratio:       1.028x
+  Customers predicted as zero total:  0.749
+  Customers actually zero total:      0.781
+  Non-zero rate (pred, avg > 0.05):  0.120
+  Non-zero rate (true):               0.018
+
+Metrics saved: results/tables/lstm_base_cdnow_final_metrics.json
+Array artifacts saved: results/tables/lstm_base_cdnow_final_arrays.npz
+
+=== Holdout Evaluation ===
+  freq_rmse: 1.2159
+  freq_mae: 0.6316
+  freq_mape: 2.7731
+  bias_pct: 2.7731
+  final_manifest_version: 2026-05-05-final
+  final_manifest_run_name: lstm_base_cdnow_final
+  final_manifest_config: experiments/configs/lstm_base_cdnow.yaml
+  final_manifest_config_hash: b875aa811328
+  final_manifest_actual_config_hash: 2debae65e76e
+  final_manifest_seed: 42
+  final_manifest_epochs: 100
+  final_manifest_inference_mode: sample
+  final_manifest_n_scenarios: 30
+History saved: results/tables/lstm_base_cdnow_final_history.json

@@ -24,6 +24,7 @@ import torch.nn.functional as F
 
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerModel
+from src.training.inference import _zero_inactive_spend_feedback
 
 
 class Trainer:
@@ -51,6 +52,8 @@ class Trainer:
         spend_loss: str = "mse",
         scheduler=None,
         restore_best_checkpoint: bool = True,
+        spend_loss_normalize: bool = False,
+        scheduled_sampling: dict | None = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -63,6 +66,21 @@ class Trainer:
         self.scheduler = scheduler
         self.restore_best_checkpoint = restore_best_checkpoint
         self.current_epoch: int = 0
+        # Optional spend-loss scale normalization (paired with Kendall warm-up):
+        # divide spend_loss by its mean magnitude observed during warm-up so the
+        # adaptive Kendall weighting operates on comparably-scaled tasks. Frozen
+        # after warm-up. NOTE: shifts the absolute val-loss magnitude — early
+        # stopping is relative + best-checkpoint restore, so this is safe.
+        self.spend_loss_normalize = spend_loss_normalize
+        self._spend_norm: float = 1.0
+        self._spend_norm_sum: float = 0.0
+        self._spend_norm_count: int = 0
+        self._spend_norm_frozen: bool = False
+        # Scheduled sampling (Bengio et al. 2015) — exposure-bias mitigation so
+        # the autoregressive rollout stops collapsing on sparse data. LSTM-only,
+        # config-gated, default OFF (preserves paper-faithful teacher forcing).
+        self.scheduled_sampling = scheduled_sampling
+        self._total_epochs: int = 1
 
     def _named_optimized_parameters(self):
         """Yield trainable parameters owned by the optimizer path."""
@@ -76,6 +94,19 @@ class Trainer:
             param for _, param in self._named_optimized_parameters()
             if param.requires_grad
         ]
+
+    def _finalize_spend_norm(self) -> None:
+        """Freeze the spend-loss normalizer at the mean warm-up magnitude."""
+        if not self.spend_loss_normalize or self._spend_norm_frozen:
+            return
+        if self._spend_norm_count > 0:
+            self._spend_norm = max(self._spend_norm_sum / self._spend_norm_count, 1e-6)
+        self._spend_norm_frozen = True
+        print(
+            f"[spend-norm] frozen at {self._spend_norm:.4f} "
+            f"(absolute val-loss magnitude shifts accordingly; "
+            f"early stopping is relative so this is safe)"
+        )
 
     @staticmethod
     def _assert_finite_loss(loss: torch.Tensor, stage: str) -> None:
@@ -211,6 +242,152 @@ class Trainer:
         denom = active.sum().clamp(min=1.0)
         return (mse_per_step * active).sum() / denom
 
+    def _ss_prob(self) -> float:
+        """Scheduled-sampling probability ε for the current epoch (0 disables it).
+
+        ε is the per-step probability of feeding the model's own previous
+        prediction instead of the ground-truth token (Bengio et al. 2015).
+        Ramps from 0 at start_epoch up to max_prob, linear or inverse-sigmoid.
+        Only ever active for the LSTM during training.
+        """
+        cfg = self.scheduled_sampling
+        if not cfg or not cfg.get("enabled", False):
+            return 0.0
+        if not isinstance(self.model, LSTMModel) or not self.model.training:
+            return 0.0
+        start = int(cfg.get("start_epoch", self.kendall_warmup_epochs))
+        if self.current_epoch < start:
+            return 0.0
+        max_prob = float(cfg.get("max_prob", 0.25))
+        total = max(int(self._total_epochs), start + 1)
+        denom = max(total - start, 1)
+        progress = (self.current_epoch - start) / denom  # 0 → ~1
+        schedule = str(cfg.get("schedule", "linear")).lower()
+        if schedule == "inv_sigmoid":
+            # Inverse-sigmoid decay of teacher forcing → ε grows S-shaped.
+            import math
+            frac = 1.0 / (1.0 + math.exp(-6.0 * (progress - 0.5)))
+        else:
+            frac = progress
+        return float(max(0.0, min(max_prob, max_prob * frac)))
+
+    def _scheduled_sampling_forward_lstm(self, batch: dict, ss_prob: float):
+        """Step-by-step LSTM unroll with token-level scheduled sampling.
+
+        At each step t>0, with per-sample probability ss_prob, feed the model's
+        own sampled previous frequency (and the matching predicted spend / delta_t
+        state) instead of the ground-truth token — mirroring autoregressive
+        inference so the model is trained on its own error distribution and the
+        rollout stops collapsing on sparse data. Loss is still computed against
+        the ground-truth targets in _reduce_losses.
+
+        Returns (freq_logits (B,T,C), spend_mu (B,T)|None, spend_log_var|None).
+        """
+        week = batch["week"].to(self.device)
+        trans = batch["trans"].to(self.device)
+        B, T = week.shape
+        joint = self.joint
+        spend = batch.get("spend")
+        spend = spend.to(self.device) if (spend is not None and joint) else None
+        if joint and spend is None:
+            spend = torch.zeros((B, T), dtype=torch.float32, device=self.device)
+        state_features = batch.get("state_features")
+        has_state = (
+            state_features is not None
+            and getattr(self.model, "state_feature_dim", 0) > 0
+        )
+        if has_state:
+            state_features = state_features.to(self.device)
+        static_cov = batch.get("static_covariates")
+        if static_cov is not None:
+            static_cov = static_cov.to(self.device)
+        dynamic_cov = batch.get("dynamic_covariates")
+        if dynamic_cov is not None:
+            dynamic_cov = dynamic_cov.to(self.device)
+
+        hidden = None
+        logits_steps: list = []
+        mu_steps: list = []
+        logvar_steps: list = []
+
+        prev_class: torch.Tensor | None = None
+        prev_spend: torch.Tensor | None = None
+        run_delta: torch.Tensor | None = None
+        if has_state:
+            run_delta = state_features[:, 0, 0].clone()
+
+        for t in range(T):
+            if t == 0 or ss_prob <= 0.0:
+                use_pred = torch.zeros(B, dtype=torch.bool, device=self.device)
+            else:
+                use_pred = torch.rand(B, device=self.device) < ss_prob
+
+            trans_t = trans[:, t]
+            if prev_class is not None:
+                trans_t = torch.where(use_pred, prev_class, trans_t)
+
+            spend_in = None
+            if joint:
+                spend_t = spend[:, t]
+                if prev_spend is not None:
+                    spend_t = torch.where(use_pred, prev_spend, spend_t)
+                spend_in = spend_t.unsqueeze(1)
+
+            state_in = None
+            if has_state:
+                true_state_t = state_features[:, t, :]
+                if run_delta is not None:
+                    pred_state_t = true_state_t.clone()
+                    pred_state_t[:, 0] = run_delta
+                    state_t = torch.where(
+                        use_pred.unsqueeze(-1), pred_state_t, true_state_t
+                    )
+                else:
+                    state_t = true_state_t
+                state_in = state_t.unsqueeze(1)
+
+            dyn_in = None
+            if dynamic_cov is not None:
+                dyn_in = dynamic_cov[:, t : t + 1, :]
+
+            out = self.model(
+                week[:, t : t + 1],
+                trans_t.unsqueeze(1),
+                hidden,
+                spend=spend_in,
+                state_features=state_in,
+                static_covariates=static_cov,
+                dynamic_covariates=dyn_in,
+            )
+            if joint:
+                if len(out) == 4:
+                    logits_t, mu_t, logvar_t, hidden = out
+                    logvar_steps.append(logvar_t)
+                else:
+                    logits_t, mu_t, hidden = out
+                mu_steps.append(mu_t)
+            else:
+                logits_t, hidden = out
+            logits_steps.append(logits_t)
+
+            # Build the model's own feedback for the next step (detached: the
+            # discrete/continuous feedback is a constant input, as in inference).
+            with torch.no_grad():
+                probs = torch.softmax(logits_t[:, 0, :], dim=-1)
+                prev_class = torch.multinomial(probs, 1).squeeze(-1)
+                if joint:
+                    prev_spend = _zero_inactive_spend_feedback(
+                        mu_t[:, 0].detach(), prev_class
+                    )
+                if run_delta is not None:
+                    purchased = (trans_t > 0).to(run_delta.dtype)
+                    run_delta = (1.0 - purchased) * (run_delta + 1.0)
+
+        freq_logits = torch.cat(logits_steps, dim=1)
+        spend_mu = torch.cat(mu_steps, dim=1) if mu_steps else None
+        spend_log_var = torch.cat(logvar_steps, dim=1) if logvar_steps else None
+        return freq_logits, spend_mu, spend_log_var
+
     def _compute_loss(self, batch: dict):
         """
         Masked sequence-to-sequence loss.
@@ -222,7 +399,13 @@ class Trainer:
         mask = batch["mask"].to(self.device)
         y_freq = batch["y_freq"].to(self.device)
 
-        freq_logits, spend_mu, spend_log_var = self._forward(batch)
+        ss_prob = self._ss_prob()
+        if ss_prob > 0.0:
+            freq_logits, spend_mu, spend_log_var = self._scheduled_sampling_forward_lstm(
+                batch, ss_prob
+            )
+        else:
+            freq_logits, spend_mu, spend_log_var = self._forward(batch)
         B, T, n_classes = freq_logits.shape
 
         ce_per_step = F.cross_entropy(
@@ -242,6 +425,17 @@ class Trainer:
             spend_loss = self._compute_spend_loss(
                 spend_mu, y_spend, mask, active_mask, spend_log_var
             )
+            if self.spend_loss_normalize:
+                # Collect the raw spend-loss scale during the warm-up window
+                # (training batches only); divide by the frozen scale thereafter.
+                if (
+                    not self._spend_norm_frozen
+                    and self.model.training
+                    and self.current_epoch < self.kendall_warmup_epochs
+                ):
+                    self._spend_norm_sum += float(spend_loss.detach())
+                    self._spend_norm_count += 1
+                spend_loss = spend_loss / self._spend_norm
             total_loss = self.multi_task_loss([freq_loss, spend_loss])
 
             # Log Kendall task weights (exp(-log_var) per task)
@@ -316,6 +510,7 @@ class Trainer:
             history: dict with per-epoch lists:
                 train_loss, val_loss, and (if joint) task_weight_freq, task_weight_spend
         """
+        self._total_epochs = int(epochs)  # used by the scheduled-sampling ε schedule
         history: dict = {"train_loss": [], "val_loss": []}
         if self.joint:
             history["task_weight_freq"] = []
@@ -338,6 +533,9 @@ class Trainer:
             ):
                 self.multi_task_loss.unfreeze_log_vars()
                 print(f"[Kendall] log_vars unfrozen at epoch {epoch + 1}.")
+                # Freeze the spend-loss normalizer using the warm-up statistics
+                # so it is a constant when Kendall starts adapting.
+                self._finalize_spend_norm()
 
             train_metrics = self.train_epoch(train_loader)
             val_metrics = self.validate(val_loader)

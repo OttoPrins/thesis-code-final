@@ -67,3 +67,12 @@ Thumbs.db
 
 # OneDrive sync conflicts
 *MacBook*
+
+# Local Claude settings & worktrees (never commit)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Transient runtime artifacts
+*.textClipping
+run_full_analysis.log
+results/logs/*.pid

@@ -35,13 +35,43 @@ class KendallMultiTaskLoss(nn.Module):
         2.0 keeps the frequency precision above exp(-2)/2 ≈ 0.07 — meaningful
         gradient flows to the frequency head throughout training.
         Set to None (default) for unconstrained behaviour.
+
+    spend_logvar_max: symmetric upper bound on the spend task's log_var (task 1).
+        Without it the optimiser can drive log_var_spend toward the global +10
+        clamp (precision exp(-10) ≈ 4.5e-5), silencing the spend head — the
+        observed cause of negative spend R² on CDNOW/Ta-Feng/UCI. A value of 2.0
+        floors spend precision at exp(-2)/2 ≈ 0.07. None (default) = unconstrained.
     """
 
-    def __init__(self, n_tasks: int = 2, freq_logvar_max: float | None = None):
+    def __init__(
+        self,
+        n_tasks: int = 2,
+        freq_logvar_max: float | None = None,
+        spend_logvar_max: float | None = None,
+    ):
         super().__init__()
         # log(σ²) parameterisation for numerical stability (σ² = exp(log_var))
         self.log_vars = nn.Parameter(torch.zeros(n_tasks))
         self.freq_logvar_max = freq_logvar_max
+        self.spend_logvar_max = spend_logvar_max
+
+    def _effective_log_var(self, i: int) -> torch.Tensor:
+        """Per-task log_var with the global and per-task upper bounds applied.
+
+        Used by both forward (loss/gradient) and task_weights (logging) so the
+        reported weights always match the weights that actually drive training.
+        """
+        # Clamp guards against exp(-log_var) overflow if log_var drifts
+        log_var = self.log_vars[i].clamp(-10.0, 10.0)
+        # Optional upper bound on the frequency task (task 0) to prevent the
+        # frequency head from being starved of gradient signal.
+        if i == 0 and self.freq_logvar_max is not None:
+            log_var = log_var.clamp(max=float(self.freq_logvar_max))
+        # Symmetric upper bound on the spend task (task 1) so it cannot be
+        # silenced by the optimiser (cause of negative spend R²).
+        if i == 1 and self.spend_logvar_max is not None:
+            log_var = log_var.clamp(max=float(self.spend_logvar_max))
+        return log_var
 
     def forward(self, losses: list) -> torch.Tensor:
         """
@@ -52,20 +82,20 @@ class KendallMultiTaskLoss(nn.Module):
         """
         total = torch.zeros((), device=losses[0].device, dtype=losses[0].dtype)
         for i, loss in enumerate(losses):
-            # Clamp guards against exp(-log_var) overflow if log_var drifts
-            log_var = self.log_vars[i].clamp(-10.0, 10.0)
-            # Apply optional upper bound on the frequency task's log_var (task 0)
-            # to prevent the frequency head from being starved of gradient signal.
-            if i == 0 and self.freq_logvar_max is not None:
-                log_var = log_var.clamp(max=float(self.freq_logvar_max))
+            log_var = self._effective_log_var(i)
             precision = torch.exp(-log_var)
             total = total + 0.5 * precision * loss + 0.5 * log_var
         return total
 
     @property
     def task_weights(self):
-        """Return current effective task weights (1 / 2σ²) for logging."""
-        return (0.5 * torch.exp(-self.log_vars)).detach()
+        """Return current effective task weights (1 / 2σ²) for logging.
+
+        Mirrors the clamping in forward so logged weights reflect the weights
+        that actually drive training.
+        """
+        eff = torch.stack([self._effective_log_var(i) for i in range(self.log_vars.numel())])
+        return (0.5 * torch.exp(-eff)).detach()
 
     def freeze_log_vars(self):
         """Freeze log_vars at zero (equal task weighting) for warm-up epochs."""

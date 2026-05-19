@@ -351,7 +351,32 @@ def main():
     if args.n_scenarios is not None:
         config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
 
-    print(f"Config: {args.config}")
+    metrics = run_experiment(config, config_path=args.config)
+    evaluation_cfg = config.get("evaluation", {})
+    if not metrics["run_valid"] and evaluation_cfg.get("fail_on_invalid", True):
+        print(f"Invalid run: {metrics['run_invalid_reason']}", file=sys.stderr)
+        sys.exit(2)
+
+
+def run_experiment(
+    config: dict,
+    *,
+    config_path: str = "<in-memory>",
+    write_outputs: bool = True,
+) -> dict:
+    """Programmatic training + holdout inference. Returns the metrics dict.
+
+    `config` must already have any CLI/HPO overrides applied. When
+    write_outputs=False (HPO trials) the checkpoint / metrics / history / array
+    files are skipped so trials don't pollute results/. Used by CLI main() and
+    by tune.py (Optuna HPO).
+    """
+    training_cfg = config["training"]
+    dataset_cfg = config["dataset"]
+    model_cfg = config["model"]
+    output_cfg = config["output"]
+
+    print(f"Config: {config_path}")
     print(f"Run: {output_cfg['run_name']}")
 
     # Reproducibility
@@ -410,9 +435,11 @@ def main():
 
     if joint:
         _freq_logvar_max = config.get("loss", {}).get("freq_logvar_max", None)
+        _spend_logvar_max = config.get("loss", {}).get("spend_logvar_max", None)
         multi_task_loss = KendallMultiTaskLoss(
             n_tasks=2,
             freq_logvar_max=float(_freq_logvar_max) if _freq_logvar_max is not None else None,
+            spend_logvar_max=float(_spend_logvar_max) if _spend_logvar_max is not None else None,
         ).to(device)
         opt_params += list(multi_task_loss.parameters())
 
@@ -461,6 +488,8 @@ def main():
         spend_loss=loss_cfg.get("spend_loss", "mse"),
         scheduler=scheduler,
         restore_best_checkpoint=training_cfg.get("restore_best_checkpoint", True),
+        spend_loss_normalize=bool(loss_cfg.get("spend_loss_normalize", False)),
+        scheduled_sampling=training_cfg.get("scheduled_sampling", None),
     )
     history = trainer.fit(
         train_loader=train_loader,
@@ -471,7 +500,7 @@ def main():
 
     # Save checkpoint
     results_dir = Path(output_cfg["results_dir"])
-    if output_cfg.get("save_checkpoint", True):
+    if write_outputs and output_cfg.get("save_checkpoint", True):
         ckpt_dir = results_dir / "checkpoints"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         ckpt_path = ckpt_dir / f"{output_cfg['run_name']}.pt"
@@ -589,7 +618,7 @@ def main():
     )
     attach_manifest_metadata(
         metrics,
-        config_path=args.config,
+        config_path=config_path,
         config=config,
         run_name=output_cfg["run_name"],
     )
@@ -618,14 +647,15 @@ def main():
         print(f"  Non-zero rate (pred, avg > 0.05):  {(pred_per_week > 0.05).mean():.3f}")
         print(f"  Non-zero rate (true):               {(true_per_week > 0).mean():.3f}")
 
-    # Save metrics first so a crash in the print block doesn't lose results.
-    tables_dir = results_dir / "tables"
-    tables_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = tables_dir / f"{output_cfg['run_name']}_metrics.json"
-    _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
-    print(f"\nMetrics saved: {metrics_path}")
-    if arrays_path is not None:
-        print(f"Array artifacts saved: {arrays_path}")
+    if write_outputs:
+        # Save metrics first so a crash in the print block doesn't lose results.
+        tables_dir = results_dir / "tables"
+        tables_dir.mkdir(parents=True, exist_ok=True)
+        metrics_path = tables_dir / f"{output_cfg['run_name']}_metrics.json"
+        _, arrays_path = save_metrics_with_artifacts(metrics, metrics_path)
+        print(f"\nMetrics saved: {metrics_path}")
+        if arrays_path is not None:
+            print(f"Array artifacts saved: {arrays_path}")
 
     print("\n=== Holdout Evaluation ===")
     for k, v in metrics.items():
@@ -636,15 +666,14 @@ def main():
         else:
             print(f"  {k}: {v}")
 
-    # Save training history
-    history_path = tables_dir / f"{output_cfg['run_name']}_history.json"
-    with open(history_path, "w") as f:
-        json.dump(history, f, indent=2)
-    print(f"History saved: {history_path}")
+    if write_outputs:
+        # Save training history
+        history_path = tables_dir / f"{output_cfg['run_name']}_history.json"
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2)
+        print(f"History saved: {history_path}")
 
-    if not metrics["run_valid"] and evaluation_cfg.get("fail_on_invalid", True):
-        print(f"Invalid run: {metrics['run_invalid_reason']}", file=sys.stderr)
-        sys.exit(2)
+    return metrics
 
 
 if __name__ == "__main__":

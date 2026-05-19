@@ -1,0 +1,40 @@
+2026-05-12 20:08:20,428 - __main__ - INFO - Loading uci dataset...
+2026-05-12 20:09:40,164 - __main__ - INFO - Calibration RFM: 4930 customers
+2026-05-12 20:09:40,164 - __main__ - INFO - Holdout ground truth: 4930 customers
+/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/lifetimes/fitters/pareto_nbd_fitter.py:216: RuntimeWarning: invalid value encountered in logaddexp
+  A_2 = logaddexp(-(r + x) * log(alpha + T) - s * log(beta + T), log(s) + log_A_0 - log(r_s_x))
+2026-05-12 20:09:43,098 - src.evaluation.benchmarks - INFO - Fitted pareto_nbd on 4930 customers
+2026-05-12 20:09:43,134 - __main__ - INFO - Saved metrics: results/tables/pareto_nbd_uci_metrics.json
+2026-05-12 20:09:43,134 - __main__ - INFO - Saved array artifacts: results/tables/pareto_nbd_uci_arrays.npz
+2026-05-12 20:09:43,348 - src.evaluation.benchmarks - INFO - Fitted bgnbd_gg on 4930 customers
+2026-05-12 20:09:43,398 - __main__ - INFO - Saved metrics: results/tables/bgnbd_gg_uci_metrics.json
+2026-05-12 20:09:43,398 - __main__ - INFO - Saved array artifacts: results/tables/bgnbd_gg_uci_arrays.npz
+Config: experiments/configs/lstm_base_uci.yaml
+Dataset: uci
+Models: pareto_nbd, bgnbd_gg
+
+--- PARETO_NBD ---
+Metrics for pareto_nbd:
+  freq_rmse: 3.4406
+  freq_mae: 1.1899
+  freq_mape: 11.2972
+  bias_pct: -11.2972
+
+--- BGNBD_GG ---
+Metrics for bgnbd_gg:
+  freq_rmse: 2.1242
+  freq_mae: 1.1595
+  freq_mape: 3.2986
+  bias_pct: 3.2986
+  spend_mae_raw: 542.8294
+  spend_rmse_raw: 2427.0876
+  spend_mae_log: 2.0835
+  spend_rmse_log: 3.2579
+  spend_r2_log: 0.0594
+  spend_bias_pct: -11.2917
+
+=== Summary ===
+Model           Freq RMSE    Freq MAPE    Bias %     Spend MAE raw   Spend R² log  
+----------------------------------------------------------------------------------
+pareto_nbd      3.4406       11.2972      -11.30     nan             nan           
+bgnbd_gg        2.1242       3.2986       3.30       542.8294        0.0594        

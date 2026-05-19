@@ -302,6 +302,10 @@ def main():
         help="Override inference.n_scenarios (smoke/CI use)."
     )
     parser.add_argument(
+        "--batch_size_override", type=int, default=None,
+        help="Override training.batch_size (use to avoid CUDA OOM on large datasets)."
+    )
+    parser.add_argument(
         "--kaggle", action="store_true",
         help=(
             "Enable Kaggle path overrides: raw_dir → /kaggle/input/<dataset_name>/, "
@@ -350,6 +354,8 @@ def main():
         training_cfg["max_epochs"] = args.max_epochs
     if args.n_scenarios is not None:
         config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
+    if args.batch_size_override is not None:
+        training_cfg["batch_size"] = args.batch_size_override
 
     metrics = run_experiment(config, config_path=args.config)
     evaluation_cfg = config.get("evaluation", {})

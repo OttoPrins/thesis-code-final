@@ -13,7 +13,12 @@ from src.evaluation.benchmarks import (
     get_benchmark_model,
     stan_sampler_diagnostics,
 )
-from src.evaluation.calibration import conservative_ratio_factor, fit_aggregate_calibration
+from src.evaluation.calibration import (
+    collect_teacher_forced_validation,
+    conservative_ratio_factor,
+    fit_aggregate_calibration,
+)
+import src.evaluation.compare as compare_module
 from src.evaluation.compare import _filter_metric_files, export_latex_table
 from src.evaluation.metrics import (
     compute_all_metrics,
@@ -35,7 +40,7 @@ from src.utils.final_manifest import (
     manifest_config_hash,
     result_matches_manifest,
 )
-from train import _add_result_validity_checks
+from train import _add_result_validity_checks, _build_repair_config, _failed_training_metrics
 
 
 def test_metrics_json_is_scalar_only_and_arrays_go_to_npz(tmp_path):
@@ -239,6 +244,79 @@ def test_deep_run_validity_checks_flag_mechanical_failures():
     assert "spend total ratio" in metrics["run_invalid_reason"]
 
 
+def _repair_base_config(tmp_path):
+    return {
+        "dataset": {"name": "cdnow"},
+        "model": {"type": "lstm", "joint": True},
+        "training": {
+            "seed": 42,
+            "lr": 1e-3,
+            "batch_size": 128,
+            "max_grad_norm": 1.0,
+        },
+        "inference": {"mode": "sample", "n_scenarios": 20},
+        "output": {"run_name": "lstm_joint_cdnow_v2_seed42_sample", "results_dir": str(tmp_path)},
+    }
+
+
+def test_repair_config_is_bounded_and_separate_from_headline_run(tmp_path):
+    cfg = _repair_base_config(tmp_path)
+    repaired = _build_repair_config(cfg, RuntimeError("CUDA out of memory"))
+
+    assert repaired["training"]["amp_enabled"] is False
+    assert repaired["training"]["lr"] == pytest.approx(5e-4)
+    assert repaired["training"]["max_grad_norm"] == pytest.approx(0.5)
+    assert repaired["training"]["batch_size"] == 64
+    assert repaired["training"]["repair_attempt"] is True
+    assert repaired["output"]["run_name"].endswith("_repair")
+    assert cfg["output"]["run_name"] == "lstm_joint_cdnow_v2_seed42_sample"
+
+
+def test_failed_training_metrics_are_invalid_and_auditable(tmp_path):
+    cfg = _repair_base_config(tmp_path)
+    metrics = _failed_training_metrics(
+        cfg,
+        config_path="experiments/configs/lstm_joint_cdnow_v2.yaml",
+        exc=FloatingPointError("Non-finite gradients in lstm.weight_ih_l0"),
+        repair_attempted=True,
+        repair_error=FloatingPointError("Non-finite training loss: nan"),
+    )
+
+    assert metrics["run_valid"] is False
+    assert metrics["training_failed"] is True
+    assert metrics["repair_attempted"] is True
+    assert metrics["repair_failed"] is True
+    assert "training failed" in metrics["run_invalid_reason"]
+    assert "repair failed" in metrics["run_invalid_reason"]
+
+
+def test_validation_calibration_uses_top_bin_class_values():
+    class ConstantTopBinLSTM(LSTMModel):
+        def __init__(self):
+            super().__init__(max_week=3, max_trans=3, memory_units=4, dense_units=4, joint=False)
+
+        def forward(self, week, trans, hidden=None, **kwargs):
+            B, T = week.shape
+            logits = torch.full((B, T, 4), -20.0, dtype=torch.float32, device=week.device)
+            logits[..., -1] = 20.0
+            return logits, hidden
+
+    batch = {
+        "week": torch.tensor([[0, 1]], dtype=torch.long),
+        "trans": torch.tensor([[0, 0]], dtype=torch.long),
+        "mask": torch.ones((1, 2), dtype=torch.float32),
+        "y_freq": torch.zeros((1, 2), dtype=torch.long),
+    }
+    totals = collect_teacher_forced_validation(
+        ConstantTopBinLSTM(),
+        [batch],
+        device=torch.device("cpu"),
+        class_values=torch.tensor([0.0, 1.0, 2.0, 9.0]),
+    )
+
+    assert totals["freq_pred_total"] == pytest.approx(18.0)
+
+
 def test_comparison_filter_skips_stale_deep_results_without_run_valid(tmp_path):
     stale = tmp_path / "lstm_joint_cdnow_final_seed42_sample_metrics.json"
     stale.write_text(json.dumps({"freq_rmse": 1.0}))
@@ -264,6 +342,34 @@ def test_comparison_filter_skips_stale_deep_results_without_run_valid(tmp_path):
     assert str(valid) in kept
     assert str(bench) in kept
     assert str(valid_gppm) in kept
+
+
+def test_final_filter_requires_deep_arrays_and_checkpoint(tmp_path, monkeypatch):
+    tables = tmp_path / "tables"
+    checkpoints = tmp_path / "checkpoints"
+    tables.mkdir()
+    checkpoints.mkdir()
+    metrics_path = tables / "lstm_base_cdnow_v2_seed42_sample_metrics.json"
+    metrics_path.write_text(json.dumps({
+        "freq_rmse": 1.0,
+        "run_valid": True,
+        "arrays_file": "lstm_base_cdnow_v2_seed42_sample_arrays.npz",
+    }))
+
+    monkeypatch.setattr(compare_module, "load_final_manifest", lambda: {"benchmark_run_names": []})
+    monkeypatch.setattr(
+        compare_module,
+        "result_matches_manifest",
+        lambda *args, **kwargs: (True, "ok"),
+    )
+
+    assert _filter_metric_files([str(metrics_path)], final_only=True) == []
+
+    np.savez(tables / "lstm_base_cdnow_v2_seed42_sample_arrays.npz", x=np.array([1.0]))
+    assert _filter_metric_files([str(metrics_path)], final_only=True) == []
+
+    (checkpoints / "lstm_base_cdnow_v2_seed42_sample.pt").write_bytes(b"checkpoint")
+    assert _filter_metric_files([str(metrics_path)], final_only=True) == [str(metrics_path)]
 
 
 def test_lstm_is_one_layer_seq2seq_with_shared_joint_encoder():
@@ -648,6 +754,65 @@ def test_final_manifest_rejects_hash_and_runtime_overrides(tmp_path):
     bad_scenarios["final_manifest_n_scenarios"] = 1
     ok, reason = result_matches_manifest("toy_cdnow_v1_seed7_sample", bad_scenarios, manifest)
     assert not ok and "scenario" in reason
+
+
+def test_final_manifest_supports_per_config_runtime_overrides(tmp_path):
+    cfg_path = tmp_path / "extension3_lstm_full_dunnhumby.yaml"
+    cfg = {
+        "dataset": {"name": "dunnhumby"},
+        "model": {"type": "lstm"},
+        "training": {"seed": 42, "epochs": 100},
+        "inference": {"mode": "sample", "n_scenarios": 30},
+        "output": {"run_name": "extension3_lstm_full_dunnhumby_final"},
+    }
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    cfg_norm = str(cfg_path).lstrip("./")
+    manifest = {
+        "version": "test-final",
+        "methodology": {"seeds": [42], "inference_primary": "sample"},
+        "runtime_expectations": {
+            "deep_learning": {
+                "inference_mode": "sample",
+                "default": {"epochs": 300, "n_scenarios": 200},
+                "by_config": {cfg_norm: {"epochs": 100, "n_scenarios": 30}},
+            }
+        },
+        "deep_learning_configs": [str(cfg_path)],
+        "deep_learning_config_hashes": {cfg_norm: manifest_config_hash(cfg)},
+        "benchmark_run_names": [],
+    }
+
+    runtime_cfg = yaml.safe_load(yaml.safe_dump(cfg))
+    runtime_cfg["output"]["run_name"] = "extension3_lstm_full_dunnhumby_final_seed42_sample"
+    metrics = attach_manifest_metadata(
+        {},
+        config_path=cfg_path,
+        config=runtime_cfg,
+        run_name="extension3_lstm_full_dunnhumby_final_seed42_sample",
+        manifest_path=tmp_path / "missing_manifest.yaml",
+    )
+    metrics.update({
+        "final_manifest_version": "test-final",
+        "final_manifest_run_name": "extension3_lstm_full_dunnhumby_final_seed42_sample",
+        "final_manifest_config": cfg_norm,
+        "final_manifest_config_hash": manifest_config_hash(runtime_cfg),
+        "final_manifest_seed": 42,
+        "final_manifest_epochs": 100,
+        "final_manifest_inference_mode": "sample",
+        "final_manifest_n_scenarios": 30,
+    })
+
+    ok, reason = result_matches_manifest(
+        "extension3_lstm_full_dunnhumby_final_seed42_sample", metrics, manifest
+    )
+    assert ok, reason
+
+    bad = dict(metrics)
+    bad["final_manifest_epochs"] = 300
+    ok, reason = result_matches_manifest(
+        "extension3_lstm_full_dunnhumby_final_seed42_sample", bad, manifest
+    )
+    assert not ok and "epoch" in reason
 
 
 def test_latex_export_uses_current_log_raw_and_clv_metric_names(tmp_path):

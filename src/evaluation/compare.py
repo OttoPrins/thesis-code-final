@@ -131,6 +131,20 @@ def _filter_metric_files(
     final_only: bool = True,
     include_expected: bool = False,
 ) -> List[str]:
+    def deep_artifacts_present(fpath: str, metrics: dict) -> tuple[bool, str]:
+        stem = _metric_stem(fpath)
+        metrics_path = Path(fpath)
+        arrays_file = metrics.get("arrays_file")
+        if not arrays_file:
+            return False, "deep-learning result lacks arrays_file sidecar"
+        arrays_path = metrics_path.with_name(arrays_file)
+        if not arrays_path.exists():
+            return False, f"array sidecar is missing: {arrays_path.name}"
+        checkpoint_path = metrics_path.parent.parent / "checkpoints" / f"{stem}.pt"
+        if not checkpoint_path.exists():
+            return False, f"checkpoint is missing: {checkpoint_path}"
+        return True, "ok"
+
     def diagnostics_valid(fpath: str) -> bool:
         try:
             with open(fpath) as f:
@@ -202,6 +216,15 @@ def _filter_metric_files(
                 reason,
             )
             continue
+        if stem not in set(manifest.get("benchmark_run_names", [])):
+            artifacts_ok, artifact_reason = deep_artifacts_present(fpath, metrics)
+            if not artifacts_ok:
+                logger.info(
+                    "Skipping %s: %s.",
+                    Path(fpath).name,
+                    artifact_reason,
+                )
+                continue
         out.append(fpath)
     return out
 

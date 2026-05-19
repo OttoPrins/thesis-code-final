@@ -13,6 +13,9 @@ Usage:
 
     # Both inference modes per seed (doubles the run count)
     python run_seeds.py --modes sample expected
+
+    # Smoke/repair dry run with bounded resource override
+    python run_seeds.py --configs lstm_base_cdnow_v2 --max_epochs 1 --n_scenarios 2 --batch_size_override 32 --dry_run
 """
 
 from __future__ import annotations
@@ -95,6 +98,8 @@ def main():
                    help="Override training.epochs (smoke/CI use).")
     p.add_argument("--n_scenarios", type=int, default=None,
                    help="Override inference.n_scenarios (smoke/CI use).")
+    p.add_argument("--batch_size_override", type=int, default=None,
+                   help="Override training.batch_size for all jobs (OOM repair/smoke use).")
     args = p.parse_args()
 
     # Build the full job list and report up front so the user knows what's coming.
@@ -111,7 +116,14 @@ def main():
     print(f"Sweep: {len(jobs)} runs ({len(args.configs)} configs × {len(args.seeds)} seeds × {len(args.modes)} modes)")
     if args.dry_run:
         for cfg, seed, mode in jobs:
-            print(f"  python train.py --config {cfg} --seed_override {seed} --inference_mode {mode}")
+            cmd = f"  python train.py --config {cfg} --seed_override {seed} --inference_mode {mode}"
+            if args.max_epochs is not None:
+                cmd += f" --max_epochs {args.max_epochs}"
+            if args.n_scenarios is not None:
+                cmd += f" --n_scenarios {args.n_scenarios}"
+            if args.batch_size_override is not None:
+                cmd += f" --batch_size_override {args.batch_size_override}"
+            print(cmd)
         return
 
     # Detect available GPUs for parallel dispatch.
@@ -152,6 +164,8 @@ def main():
             cmd += ["--max_epochs", str(args.max_epochs)]
         if args.n_scenarios is not None:
             cmd += ["--n_scenarios", str(args.n_scenarios)]
+        if args.batch_size_override is not None:
+            cmd += ["--batch_size_override", str(args.batch_size_override)]
 
         label = f"{cfg_basename}  seed={seed}  mode={mode}  GPU={gpu_id}"
         pending.append((cfg, seed, mode, cmd, env, label))

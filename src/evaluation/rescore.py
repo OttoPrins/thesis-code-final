@@ -84,20 +84,24 @@ def main() -> None:
     state_dict = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(state_dict)
     joint = model_cfg.get("joint", False)
+    max_trans = model_cfg["max_trans"]
+    top_bin = getattr(inference_ds, "top_bin_value", float(max_trans))
+    class_values = torch.tensor(list(range(max_trans)) + [top_bin], dtype=torch.float32)
 
     temperature = 1.0
     if args.fit_temperature:
         temperature = fit_temperature_from_loader(model, val_loader, device=device)
+    smearing_factor = _compute_val_smearing(model, val_loader, device, joint, scaler if joint else None)
     validation_totals = collect_teacher_forced_validation(
         model,
         val_loader,
         device=device,
         scaler=scaler if joint else None,
         temperature=temperature,
+        class_values=class_values.to(device),
+        smearing_factor=smearing_factor,
     )
     aggregate_cal = fit_aggregate_calibration(validation_totals) if args.fit_aggregate_calibration else None
-
-    smearing_factor = _compute_val_smearing(model, val_loader, device, joint, scaler if joint else None)
 
     if model_cfg["type"] == "lstm":
         results = autoregressive_inference_lstm(
@@ -109,6 +113,7 @@ def main() -> None:
             device=device,
             mode=args.mode,
             temperature=temperature,
+            class_values=class_values,
         )
     else:
         results = autoregressive_inference_transformer(
@@ -121,6 +126,7 @@ def main() -> None:
             use_kv_cache=config.get("inference", {}).get("use_kv_cache", True),
             mode=args.mode,
             temperature=temperature,
+            class_values=class_values,
         )
 
     true_ids = holdout_gt["customer_ids"]

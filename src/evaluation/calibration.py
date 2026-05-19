@@ -75,6 +75,8 @@ def collect_teacher_forced_validation(
     device: torch.device,
     scaler=None,
     temperature: float = 1.0,
+    class_values: torch.Tensor | np.ndarray | None = None,
+    smearing_factor: float | None = None,
 ) -> dict:
     """
     Collect teacher-forced validation predictions for calibration fitting.
@@ -84,6 +86,9 @@ def collect_teacher_forced_validation(
     """
     model.eval()
     temp = max(float(temperature), 1e-6)
+    class_vals = None
+    if class_values is not None:
+        class_vals = torch.as_tensor(class_values, dtype=torch.float32, device=device)
     freq_true_total = 0.0
     freq_pred_total = 0.0
     spend_true_total = 0.0
@@ -140,8 +145,16 @@ def collect_teacher_forced_validation(
 
         freq_logits, spend_mu, _ = _unpack_model_output(model, out)
         probs = torch.softmax(freq_logits / temp, dim=-1)
-        class_vals = torch.arange(probs.size(-1), dtype=probs.dtype, device=device)
-        pred_freq = (probs * class_vals).sum(dim=-1)
+        if class_vals is None:
+            class_vals_batch = torch.arange(probs.size(-1), dtype=probs.dtype, device=device)
+        else:
+            if class_vals.numel() != probs.size(-1):
+                raise ValueError(
+                    f"class_values length {class_vals.numel()} does not match "
+                    f"model classes {probs.size(-1)}"
+                )
+            class_vals_batch = class_vals.to(dtype=probs.dtype)
+        pred_freq = (probs * class_vals_batch).sum(dim=-1)
         freq_true_total += float((y_freq.float() * mask).sum().cpu())
         freq_pred_total += float((pred_freq * mask).sum().cpu())
 
@@ -150,6 +163,8 @@ def collect_teacher_forced_validation(
             pred_activity = ((1.0 - probs[..., 0]) * mask).cpu().numpy().astype(np.float32)
             true_raw = scaler.inverse_transform_spend(y_spend.cpu().numpy()) * active
             pred_raw = scaler.inverse_transform_spend(spend_mu.cpu().numpy()) * pred_activity
+            if smearing_factor is not None:
+                pred_raw = pred_raw * float(smearing_factor)
             spend_true_total += float(np.sum(true_raw))
             spend_pred_total += float(np.sum(pred_raw))
 

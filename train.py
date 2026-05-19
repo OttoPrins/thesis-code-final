@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -33,6 +34,11 @@ from src.evaluation.metrics import (
     compute_smearing_factor,
     mase_scale,
     save_metrics_with_artifacts,
+)
+from src.evaluation.calibration import (
+    collect_teacher_forced_validation,
+    fit_aggregate_calibration,
+    fit_temperature_from_loader,
 )
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
@@ -282,6 +288,180 @@ def _add_result_validity_checks(
     metrics["run_warning"] = "; ".join(warnings)
 
 
+def _model_label(config: dict) -> str:
+    model_cfg = config.get("model", {})
+    model_type = model_cfg.get("type", "unknown")
+    if model_type == "transformer":
+        return "transformer_joint" if model_cfg.get("joint", False) else "transformer_base"
+    if model_type == "lstm":
+        return "lstm_joint" if model_cfg.get("joint", False) else "lstm_base"
+    return str(model_type)
+
+
+def _looks_like_oom(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "out of memory" in msg or "cuda oom" in msg or "cublas" in msg
+
+
+def _is_repairable_training_failure(exc: BaseException) -> bool:
+    """Numerical/resource failures may receive one bounded repair attempt."""
+    if isinstance(exc, FloatingPointError):
+        return True
+    if isinstance(exc, RuntimeError):
+        msg = str(exc).lower()
+        needles = (
+            "non-finite",
+            "nan",
+            "infinite",
+            "out of memory",
+            "cuda error",
+            "cublas",
+            "cudnn",
+            "gradscaler",
+        )
+        return any(needle in msg for needle in needles)
+    return False
+
+
+def _build_repair_config(config: dict, exc: BaseException) -> dict:
+    """
+    Build the one allowed stability repair variant.
+
+    This is deliberately narrow: disable AMP, lower LR to at most 5e-4,
+    tighten gradient clipping to at most 0.5, and halve batch size for OOM-like
+    failures. The repaired run receives its own run name so it cannot masquerade
+    as the strict replication/extension run in final tables.
+    """
+    repaired = copy.deepcopy(config)
+    training_cfg = repaired.setdefault("training", {})
+    output_cfg = repaired.setdefault("output", {})
+    strategies = ["amp_disabled"]
+
+    training_cfg["repair_attempt"] = True
+    training_cfg["amp_enabled"] = False
+
+    current_lr = float(training_cfg.get("lr", 1e-3))
+    fallback_lr = float(training_cfg.get("repair_fallback_lr", 5e-4))
+    if current_lr > fallback_lr:
+        strategies.append(f"lr_{fallback_lr:g}")
+    training_cfg["lr"] = min(current_lr, fallback_lr)
+
+    current_clip = float(training_cfg.get("max_grad_norm", 1.0))
+    fallback_clip = float(training_cfg.get("repair_fallback_max_grad_norm", 0.5))
+    if current_clip > fallback_clip:
+        strategies.append(f"grad_clip_{fallback_clip:g}")
+    training_cfg["max_grad_norm"] = min(current_clip, fallback_clip)
+
+    if _looks_like_oom(exc):
+        batch_size = int(training_cfg.get("batch_size", 256))
+        reduced = max(1, batch_size // 2)
+        if reduced < batch_size:
+            training_cfg["batch_size"] = reduced
+            strategies.append(f"batch_size_{reduced}")
+
+    base_run = output_cfg.get("run_name", "run")
+    if not str(base_run).endswith("_repair"):
+        output_cfg["run_name"] = f"{base_run}_repair"
+
+    training_cfg["repair_strategy"] = "; ".join(strategies)
+    training_cfg["repair_source_failure_type"] = type(exc).__name__
+    training_cfg["repair_source_failure_message"] = str(exc)[:500]
+    return repaired
+
+
+def _failed_training_metrics(
+    config: dict,
+    *,
+    config_path: str,
+    exc: BaseException,
+    repair_attempted: bool = False,
+    repair_error: BaseException | None = None,
+) -> dict:
+    reason = f"training failed: {type(exc).__name__}: {str(exc)[:500]}"
+    metrics = {
+        "model": _model_label(config),
+        "dataset": config.get("dataset", {}).get("name", "unknown"),
+        "run_valid": False,
+        "run_invalid_reason": reason,
+        "run_warning": "",
+        "training_failed": True,
+        "repair_attempted": bool(repair_attempted),
+        "failure_type": type(exc).__name__,
+        "failure_message": str(exc)[:1000],
+    }
+    if repair_error is not None:
+        metrics["repair_failed"] = True
+        metrics["repair_failure_type"] = type(repair_error).__name__
+        metrics["repair_failure_message"] = str(repair_error)[:1000]
+        metrics["run_invalid_reason"] = (
+            f"{reason}; repair failed: {type(repair_error).__name__}: "
+            f"{str(repair_error)[:500]}"
+        )
+    attach_manifest_metadata(
+        metrics,
+        config_path=config_path,
+        config=config,
+        run_name=config.get("output", {}).get("run_name", "run"),
+    )
+    return metrics
+
+
+def _save_metrics_artifact(config: dict, metrics: dict) -> Path:
+    results_dir = Path(config["output"]["results_dir"])
+    tables_dir = results_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = tables_dir / f"{config['output']['run_name']}_metrics.json"
+    save_metrics_with_artifacts(metrics, metrics_path)
+    print(f"Metrics saved: {metrics_path}")
+    return metrics_path
+
+
+def run_experiment_with_repair(
+    config: dict,
+    *,
+    config_path: str = "<in-memory>",
+    write_outputs: bool = True,
+) -> dict:
+    """Run one experiment, then one bounded stability repair if training fails."""
+    try:
+        return run_experiment(config, config_path=config_path, write_outputs=write_outputs)
+    except Exception as exc:
+        repair_enabled = config.get("training", {}).get("repair_on_failure", True)
+        if not repair_enabled or not _is_repairable_training_failure(exc):
+            raise
+
+        print(f"\nTraining failed with a repairable error: {type(exc).__name__}: {exc}")
+        failed = _failed_training_metrics(
+            config,
+            config_path=config_path,
+            exc=exc,
+            repair_attempted=True,
+        )
+        if write_outputs:
+            _save_metrics_artifact(config, failed)
+
+        repaired_config = _build_repair_config(config, exc)
+        strategy = repaired_config["training"].get("repair_strategy", "")
+        print(f"Retrying once as robustness repair ({strategy}) ...")
+        try:
+            return run_experiment(
+                repaired_config,
+                config_path=config_path,
+                write_outputs=write_outputs,
+            )
+        except Exception as repair_exc:
+            failed = _failed_training_metrics(
+                config,
+                config_path=config_path,
+                exc=exc,
+                repair_attempted=True,
+                repair_error=repair_exc,
+            )
+            if write_outputs:
+                _save_metrics_artifact(config, failed)
+            return failed
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train a CLV deep learning model.")
     parser.add_argument("--config", required=True, help="Path to YAML config file.")
@@ -357,7 +537,7 @@ def main():
     if args.batch_size_override is not None:
         training_cfg["batch_size"] = args.batch_size_override
 
-    metrics = run_experiment(config, config_path=args.config)
+    metrics = run_experiment_with_repair(config, config_path=args.config)
     evaluation_cfg = config.get("evaluation", {})
     if not metrics["run_valid"] and evaluation_cfg.get("fail_on_invalid", True):
         print(f"Invalid run: {metrics['run_invalid_reason']}", file=sys.stderr)
@@ -421,7 +601,8 @@ def run_experiment(
     batch_size = training_cfg["batch_size"]
     # Cap at 2 workers per subprocess: with 2 parallel GPU runs (run_seeds.py),
     # 2×2=4 workers stays within Kaggle's 4-core allocation without contention.
-    _n_workers = min(2, os.cpu_count() or 1)
+    _n_workers = int(training_cfg.get("num_workers", min(2, os.cpu_count() or 1)))
+    _n_workers = max(0, _n_workers)
     _pin = device.type == "cuda"
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,
@@ -503,6 +684,7 @@ def run_experiment(
         restore_best_checkpoint=training_cfg.get("restore_best_checkpoint", True),
         spend_loss_normalize=bool(loss_cfg.get("spend_loss_normalize", False)),
         scheduled_sampling=training_cfg.get("scheduled_sampling", None),
+        amp_enabled=bool(training_cfg.get("amp_enabled", True)),
     )
     history = trainer.fit(
         train_loader=train_loader,
@@ -520,17 +702,71 @@ def run_experiment(
         torch.save(model.state_dict(), ckpt_path)
         print(f"\nCheckpoint saved: {ckpt_path}")
 
+    inference_cfg = config.setdefault("inference", {})
+    calibration_cfg = config.setdefault("calibration", {})
+    calibration_metadata: dict[str, float | str] = {}
+
     # Compute smearing factor from validation residuals (joint models only)
     smearing_factor = _compute_val_smearing(model, val_loader, device, joint, scaler if joint else None)
     if smearing_factor is not None:
         print(f"\nDuan's smearing factor (val): {smearing_factor:.4f}")
 
+    temperature = float(inference_cfg.get("temperature", 1.0))
+    if calibration_cfg.get("temperature_scaling", False):
+        temperature = fit_temperature_from_loader(model, val_loader, device=device)
+        inference_cfg["temperature"] = float(temperature)
+        calibration_metadata["calibration_temperature_source"] = "validation_only"
+        calibration_metadata["validation_temperature"] = float(temperature)
+        print(f"Validation-fitted softmax temperature: {temperature:.4f}")
+    else:
+        calibration_metadata["calibration_temperature_source"] = (
+            "config" if "temperature" in inference_cfg else "default"
+        )
+
+    if calibration_cfg.get("aggregate_scaling", False):
+        validation_totals = collect_teacher_forced_validation(
+            model,
+            val_loader,
+            device=device,
+            scaler=scaler if joint else None,
+            temperature=temperature,
+            class_values=class_values.to(device),
+            smearing_factor=smearing_factor,
+        )
+        aggregate_calibration = fit_aggregate_calibration(
+            validation_totals,
+            shrinkage=float(calibration_cfg.get("aggregate_shrinkage", 0.5)),
+            min_factor=float(calibration_cfg.get("min_factor", 0.25)),
+            max_factor=float(calibration_cfg.get("max_factor", 4.0)),
+        )
+        calibration_cfg["freq_factor"] = float(aggregate_calibration.freq_factor)
+        calibration_cfg["spend_factor"] = float(aggregate_calibration.spend_factor)
+        calibration_metadata.update({
+            "calibration_source": "validation_only",
+            "validation_freq_true_total": float(validation_totals["freq_true_total"]),
+            "validation_freq_pred_total": float(validation_totals["freq_pred_total"]),
+            "validation_spend_true_total": float(validation_totals["spend_true_total"]),
+            "validation_spend_pred_total": float(validation_totals["spend_pred_total"]),
+            "validation_freq_calibration_factor": float(aggregate_calibration.freq_factor),
+            "validation_spend_calibration_factor": float(aggregate_calibration.spend_factor),
+        })
+        print(
+            "Validation aggregate calibration: "
+            f"freq_factor={aggregate_calibration.freq_factor:.4f}, "
+            f"spend_factor={aggregate_calibration.spend_factor:.4f}"
+        )
+    else:
+        calibration_metadata["calibration_source"] = (
+            "config"
+            if ("freq_factor" in calibration_cfg or "spend_factor" in calibration_cfg)
+            else "none"
+        )
+
     # Autoregressive inference on holdout
     print("\nRunning autoregressive inference on holdout period ...")
-    inference_cfg = config.get("inference", {})
     n_scenarios = inference_cfg.get("n_scenarios", 30)
     inference_mode = inference_cfg.get("mode", "sample")
-    temperature = float(inference_cfg.get("temperature", 1.0))
+    temperature = float(inference_cfg.get("temperature", temperature))
     print(
         f"  inference mode: {inference_mode}  n_scenarios: {n_scenarios}  "
         f"temperature: {temperature:.4f}"
@@ -629,6 +865,16 @@ def run_experiment(
         **freq_week_kwargs,
         **spend_kwargs,
     )
+    metrics.update(calibration_metadata)
+    if training_cfg.get("repair_attempt", False):
+        metrics["repair_attempted"] = True
+        metrics["repair_strategy"] = training_cfg.get("repair_strategy", "")
+        metrics["repair_source_failure_type"] = training_cfg.get("repair_source_failure_type", "")
+        metrics["training_lr_after_repair"] = float(training_cfg.get("lr", 0.0))
+        metrics["training_max_grad_norm_after_repair"] = float(
+            training_cfg.get("max_grad_norm", 0.0)
+        )
+        metrics["training_amp_enabled_after_repair"] = bool(training_cfg.get("amp_enabled", True))
     attach_manifest_metadata(
         metrics,
         config_path=config_path,

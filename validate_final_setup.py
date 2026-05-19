@@ -54,17 +54,18 @@ def _check_manifest() -> dict:
             )
         _ok(f"{cfg_path}: frozen hash={actual} run={cfg['output']['run_name']}")
     runtime = manifest.get("runtime_expectations", {}).get("deep_learning", {})
-    if runtime.get("epochs") != 100:
-        _fail("final manifest runtime must freeze deep-learning epochs at 100.")
+    default_runtime = runtime.get("default", runtime)
+    if default_runtime.get("epochs") != 300:
+        _fail("final manifest default runtime must freeze deep-learning epochs at 300.")
     if runtime.get("inference_mode") != manifest.get("methodology", {}).get("inference_primary"):
         _fail("final manifest runtime inference_mode must match methodology.inference_primary.")
-    if runtime.get("n_scenarios") != 30:
-        _fail("final manifest runtime must freeze n_scenarios at 30.")
+    if default_runtime.get("n_scenarios") != 200:
+        _fail("final manifest default runtime must freeze n_scenarios at 200.")
     return manifest
 
 
 def _check_cdnow() -> None:
-    cfg = load_config("experiments/configs/lstm_base_cdnow.yaml")
+    cfg = load_config("experiments/configs/lstm_base_cdnow_v2.yaml")
     pipe = CDNOWPipeline()
     pipe._current_dataset_cfg = cfg["dataset"]
     raw = pipe.load_raw(cfg["dataset"].get("raw_dir", "data/raw"))
@@ -85,7 +86,7 @@ def _check_cdnow() -> None:
 
 
 def _check_uci_online_retail_ii() -> None:
-    cfg = load_config("experiments/configs/lstm_base_uci.yaml")
+    cfg = load_config("experiments/configs/lstm_base_uci_v2.yaml")
     pipe = UCIRetailPipeline()
     pipe._current_dataset_cfg = cfg["dataset"]
     raw = pipe.load_raw(cfg["dataset"].get("raw_dir", "data/raw"))
@@ -98,7 +99,7 @@ def _check_uci_online_retail_ii() -> None:
 
 
 def _check_dunnhumby_window() -> None:
-    cfg = load_config("experiments/configs/lstm_base_dunnhumby.yaml")
+    cfg = load_config("experiments/configs/lstm_base_dunnhumby_v2.yaml")
     raw_dir = Path(cfg["dataset"].get("raw_dir", "data/raw/Dunnhumby datasets"))
     path = raw_dir / "transaction_data.csv"
     if not path.exists():

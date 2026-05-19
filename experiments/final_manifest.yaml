@@ -2,9 +2,9 @@
 # Comparison tables should include only run names generated from these configs
 # unless a command explicitly requests exploratory runs.
 
-version: 2026-05-05-final
-results_status: exploratory_outputs_archived
-archive_dir: results/archive/pre_final_20260505
+version: 2026-05-19-validity-protocol
+results_status: pending_regeneration_after_validity_repairs
+archive_dir: results/archive/pre_validity_protocol_20260519
 
 methodology:
   min_active_weeks: 1
@@ -19,23 +19,33 @@ methodology:
 
 runtime_expectations:
   deep_learning:
-    epochs: 100
     inference_mode: sample
-    n_scenarios: 30
+    default:
+      epochs: 300
+      n_scenarios: 200
+    by_config:
+      experiments/configs/extension3_lstm_none_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_lstm_static_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_lstm_full_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_transformer_none_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_transformer_static_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      experiments/configs/extension3_transformer_full_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
 
 deep_learning_configs:
-  - experiments/configs/lstm_base_cdnow.yaml
-  - experiments/configs/lstm_joint_cdnow.yaml
-  - experiments/configs/transformer_joint_cdnow.yaml
-  - experiments/configs/lstm_base_uci.yaml
-  - experiments/configs/lstm_joint_uci.yaml
-  - experiments/configs/transformer_joint_uci.yaml
-  - experiments/configs/lstm_base_tafeng.yaml
-  - experiments/configs/lstm_joint_tafeng.yaml
-  - experiments/configs/transformer_joint_tafeng.yaml
-  - experiments/configs/lstm_base_dunnhumby.yaml
-  - experiments/configs/lstm_joint_dunnhumby.yaml
-  - experiments/configs/transformer_joint_dunnhumby.yaml
+  - experiments/configs/lstm_base_cdnow_v2.yaml
+  - experiments/configs/lstm_joint_cdnow_v2.yaml
+  - experiments/configs/transformer_joint_cdnow_v2.yaml
+  - experiments/configs/lstm_base_uci_v2.yaml
+  - experiments/configs/lstm_joint_uci_v2.yaml
+  - experiments/configs/transformer_joint_uci_v2.yaml
+  - experiments/configs/lstm_base_tafeng_v2.yaml
+  - experiments/configs/lstm_joint_tafeng_v2.yaml
+  - experiments/configs/transformer_joint_tafeng_v2.yaml
+  - experiments/configs/lstm_base_dunnhumby_v2.yaml
+  - experiments/configs/lstm_joint_dunnhumby_v2.yaml
+  - experiments/configs/transformer_joint_dunnhumby_v2.yaml
   - experiments/configs/extension3_lstm_none_dunnhumby.yaml
   - experiments/configs/extension3_lstm_static_dunnhumby.yaml
   - experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml
@@ -46,26 +56,26 @@ deep_learning_configs:
   - experiments/configs/extension3_transformer_full_dunnhumby.yaml
 
 deep_learning_config_hashes:
-  experiments/configs/lstm_base_cdnow.yaml: b875aa811328
-  experiments/configs/lstm_joint_cdnow.yaml: 8edfdc226ec0
-  experiments/configs/transformer_joint_cdnow.yaml: 9f195f0222a1
-  experiments/configs/lstm_base_uci.yaml: 29e661e931c2
-  experiments/configs/lstm_joint_uci.yaml: fb21bd09d925
-  experiments/configs/transformer_joint_uci.yaml: 5a0f999e1739
-  experiments/configs/lstm_base_tafeng.yaml: 9a1c33016529
-  experiments/configs/lstm_joint_tafeng.yaml: b145607af989
-  experiments/configs/transformer_joint_tafeng.yaml: c29b54663a8c
-  experiments/configs/lstm_base_dunnhumby.yaml: 79c1874ce833
-  experiments/configs/lstm_joint_dunnhumby.yaml: c5fc5390dc23
-  experiments/configs/transformer_joint_dunnhumby.yaml: 796764fa4018
-  experiments/configs/extension3_lstm_none_dunnhumby.yaml: ce5fcfe59fc6
-  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 59fafe5f48ce
-  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: 2eccc84ee92a
-  experiments/configs/extension3_lstm_full_dunnhumby.yaml: 3fd344f4dfec
-  experiments/configs/extension3_transformer_none_dunnhumby.yaml: c037e439d7f1
-  experiments/configs/extension3_transformer_static_dunnhumby.yaml: b4e7143b64e6
-  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 9177059b7d59
-  experiments/configs/extension3_transformer_full_dunnhumby.yaml: 7de1275af376
+  experiments/configs/lstm_base_cdnow_v2.yaml: e39f2f5aa69c
+  experiments/configs/lstm_joint_cdnow_v2.yaml: b1a240974d5b
+  experiments/configs/transformer_joint_cdnow_v2.yaml: d7a22b85e39b
+  experiments/configs/lstm_base_uci_v2.yaml: d9fc8b85a1eb
+  experiments/configs/lstm_joint_uci_v2.yaml: 096b75255970
+  experiments/configs/transformer_joint_uci_v2.yaml: f38bd889bbf7
+  experiments/configs/lstm_base_tafeng_v2.yaml: 4c68c45a1318
+  experiments/configs/lstm_joint_tafeng_v2.yaml: f7695b59363e
+  experiments/configs/transformer_joint_tafeng_v2.yaml: 758c3979a268
+  experiments/configs/lstm_base_dunnhumby_v2.yaml: 5434961310fa
+  experiments/configs/lstm_joint_dunnhumby_v2.yaml: 15e2a3e85af2
+  experiments/configs/transformer_joint_dunnhumby_v2.yaml: a984ee30201b
+  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 73313bce0f7c
+  experiments/configs/extension3_lstm_static_dunnhumby.yaml: db3b43f30cf2
+  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: 97dcfbc4e49c
+  experiments/configs/extension3_lstm_full_dunnhumby.yaml: b4faa971ab7d
+  experiments/configs/extension3_transformer_none_dunnhumby.yaml: a243f3c959bc
+  experiments/configs/extension3_transformer_static_dunnhumby.yaml: 2f53ee1aa6e9
+  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 84e58a2ddbe7
+  experiments/configs/extension3_transformer_full_dunnhumby.yaml: dfe0819adeea
 
 benchmark_run_names:
   - pareto_nbd_cdnow

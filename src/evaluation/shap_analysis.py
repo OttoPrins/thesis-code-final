@@ -84,19 +84,28 @@ class _CovariateShapWrapper(nn.Module):
             self.seed_delta_t.expand(B, -1)
             if self.seed_delta_t is not None else None
         )
+        state_features = None
+        if delta_t is not None and getattr(self.model, "state_feature_dim", 0) > 0:
+            state_features = delta_t.unsqueeze(-1)
 
         joint = getattr(self.model, "joint", False)
         if isinstance(self.model, LSTMModel):
             if joint:
-                logits, log_spend, _ = self.model(
+                out = self.model(
                     week, trans,
                     spend=spend,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
+                if len(out) == 4:
+                    logits, log_spend, _, _ = out
+                else:
+                    logits, log_spend, _ = out
             else:
                 logits, _ = self.model(
                     week, trans,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                 )
@@ -104,16 +113,22 @@ class _CovariateShapWrapper(nn.Module):
         else:
             # Transformer
             if joint:
-                logits, log_spend = self.model(
+                out = self.model(
                     week, trans,
                     spend=spend,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                     delta_t=delta_t,
                 )
+                if len(out) == 3:
+                    logits, log_spend, _ = out
+                else:
+                    logits, log_spend = out
             else:
                 logits = self.model(
                     week, trans,
+                    state_features=state_features,
                     static_covariates=static_cov,
                     dynamic_covariates=dynamic_cov,
                     delta_t=delta_t,

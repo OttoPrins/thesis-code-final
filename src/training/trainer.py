@@ -18,6 +18,8 @@ Loss:
     - Joint: Kendall homoscedastic uncertainty weighting of CE + MSE
 """
 
+from contextlib import nullcontext
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -54,6 +56,7 @@ class Trainer:
         restore_best_checkpoint: bool = True,
         spend_loss_normalize: bool = False,
         scheduled_sampling: dict | None = None,
+        amp_enabled: bool = True,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -82,9 +85,10 @@ class Trainer:
         self.scheduled_sampling = scheduled_sampling
         self._total_epochs: int = 1
         # Automatic mixed precision: uses FP16 Tensor Cores on T4/A100 for ~1.5x
-        # speedup. GradScaler handles scale-overflow automatically (skips the step
-        # and reduces scale). Disabled on CPU/MPS where AMP has no benefit.
-        self.scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+        # speedup. Config-gated so numerical repair runs can fall back to FP32.
+        # Disabled on CPU/MPS where AMP has no benefit.
+        self.amp_enabled = bool(amp_enabled and device.type == "cuda")
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 
     def _named_optimized_parameters(self):
         """Yield trainable parameters owned by the optimizer path."""
@@ -462,10 +466,12 @@ class Trainer:
 
         for batch in dataloader:
             self.optimizer.zero_grad()
-            with torch.amp.autocast(
-                device_type=self.device.type,
-                enabled=self.device.type == "cuda",
-            ):
+            amp_context = (
+                torch.amp.autocast(device_type="cuda", enabled=True)
+                if self.amp_enabled
+                else nullcontext()
+            )
+            with amp_context:
                 loss, metrics = self._compute_loss(batch)
             self._assert_finite_loss(loss, "training")
             self.scaler.scale(loss).backward()

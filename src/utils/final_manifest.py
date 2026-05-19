@@ -67,10 +67,24 @@ def expected_config_hashes(manifest: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _runtime_expectations(manifest: dict[str, Any]) -> dict[str, Any]:
+def _runtime_expectations(
+    manifest: dict[str, Any],
+    cfg_norm: str | None = None,
+) -> dict[str, Any]:
     runtime = manifest.get("runtime_expectations", {})
     if "deep_learning" in runtime:
-        return runtime.get("deep_learning", {})
+        deep = runtime.get("deep_learning", {}) or {}
+        if "default" in deep or "by_config" in deep:
+            base = {
+                k: v for k, v in deep.items()
+                if k not in {"default", "by_config"}
+            }
+            base.update(deep.get("default", {}) or {})
+            if cfg_norm is not None:
+                overrides = deep.get("by_config", {}) or {}
+                base.update(overrides.get(cfg_norm, {}) or {})
+            return base
+        return deep
     return runtime
 
 
@@ -174,7 +188,7 @@ def result_matches_manifest(
     if metrics.get("final_manifest_seed") not in seeds:
         return False, "seed is not in frozen seed sweep"
 
-    runtime = _runtime_expectations(manifest)
+    runtime = _runtime_expectations(manifest, cfg_norm)
     expected_mode = runtime.get(
         "inference_mode",
         manifest.get("methodology", {}).get("inference_primary", "sample"),

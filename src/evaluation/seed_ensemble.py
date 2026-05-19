@@ -68,31 +68,37 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
     pipeline = PIPELINES[dataset_cfg["name"]]()
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
     batch_size = training_cfg["batch_size"]
+    n_workers = int(training_cfg.get("num_workers", 2))
     _pin = device.type == "cuda"
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=2, pin_memory=_pin, persistent_workers=True,
+        num_workers=n_workers, pin_memory=_pin, persistent_workers=(n_workers > 0),
     )
     inference_loader = DataLoader(
         inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=2, pin_memory=_pin, persistent_workers=True,
+        num_workers=n_workers, pin_memory=_pin, persistent_workers=(n_workers > 0),
     )
 
     model = build_model(config).to(device)
     model.load_state_dict(torch.load(checkpoint, map_location=device))
     joint = model_cfg.get("joint", False)
+    max_trans = model_cfg["max_trans"]
+    top_bin = getattr(inference_ds, "top_bin_value", float(max_trans))
+    class_values = torch.tensor(list(range(max_trans)) + [top_bin], dtype=torch.float32)
 
     temperature = 1.0
     if fit_temperature:
         temperature = fit_temperature_from_loader(model, val_loader, device=device)
-    validation_totals = collect_teacher_forced_validation(
-        model, val_loader, device=device,
-        scaler=scaler if joint else None, temperature=temperature,
-    )
-    aggregate_cal = fit_aggregate_calibration(validation_totals) if fit_aggregate else None
     smearing_factor = _compute_val_smearing(
         model, val_loader, device, joint, scaler if joint else None
     )
+    validation_totals = collect_teacher_forced_validation(
+        model, val_loader, device=device,
+        scaler=scaler if joint else None, temperature=temperature,
+        class_values=class_values.to(device),
+        smearing_factor=smearing_factor,
+    )
+    aggregate_cal = fit_aggregate_calibration(validation_totals) if fit_aggregate else None
 
     if model_cfg["type"] == "lstm":
         results = autoregressive_inference_lstm(
@@ -100,6 +106,7 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
             holdout_weeks=dataset_cfg["holdout_weeks"],
             calibration_weeks=dataset_cfg["calibration_weeks"],
             n_scenarios=n_scenarios, device=device, mode=mode, temperature=temperature,
+            class_values=class_values,
         )
     else:
         results = autoregressive_inference_transformer(
@@ -109,6 +116,7 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
             n_scenarios=n_scenarios, device=device,
             use_kv_cache=config.get("inference", {}).get("use_kv_cache", True),
             mode=mode, temperature=temperature,
+            class_values=class_values,
         )
     return (results, holdout_gt, scaler, inference_ds, smearing_factor,
             float(temperature), aggregate_cal)

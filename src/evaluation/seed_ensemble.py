@@ -68,9 +68,14 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
     pipeline = PIPELINES[dataset_cfg["name"]]()
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
     batch_size = training_cfg["batch_size"]
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    _pin = device.type == "cuda"
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
+        num_workers=2, pin_memory=_pin, persistent_workers=True,
+    )
     inference_loader = DataLoader(
-        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
+        num_workers=2, pin_memory=_pin, persistent_workers=True,
     )
 
     model = build_model(config).to(device)

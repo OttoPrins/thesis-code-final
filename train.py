@@ -413,14 +413,21 @@ def run_experiment(
     print(f"  top-bin decode: class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})")
 
     batch_size = training_cfg["batch_size"]
+    # Cap at 2 workers per subprocess: with 2 parallel GPU runs (run_seeds.py),
+    # 2×2=4 workers stays within Kaggle's 4-core allocation without contention.
+    _n_workers = min(2, os.cpu_count() or 1)
+    _pin = device.type == "cuda"
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
+        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,
+        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
     )
     val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
+        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
     )
     inference_loader = DataLoader(
-        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
+        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
     )
 
     # Model

@@ -81,6 +81,10 @@ class Trainer:
         # config-gated, default OFF (preserves paper-faithful teacher forcing).
         self.scheduled_sampling = scheduled_sampling
         self._total_epochs: int = 1
+        # Automatic mixed precision: uses FP16 Tensor Cores on T4/A100 for ~1.5x
+        # speedup. GradScaler handles scale-overflow automatically (skips the step
+        # and reduces scale). Disabled on CPU/MPS where AMP has no benefit.
+        self.scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
     def _named_optimized_parameters(self):
         """Yield trainable parameters owned by the optimizer path."""
@@ -458,9 +462,16 @@ class Trainer:
 
         for batch in dataloader:
             self.optimizer.zero_grad()
-            loss, metrics = self._compute_loss(batch)
+            with torch.amp.autocast(
+                device_type=self.device.type,
+                enabled=self.device.type == "cuda",
+            ):
+                loss, metrics = self._compute_loss(batch)
             self._assert_finite_loss(loss, "training")
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            # Unscale before gradient checks and clipping so they operate on the
+            # true gradient magnitudes, not the AMP-scaled values.
+            self.scaler.unscale_(self.optimizer)
             self._assert_finite_gradients()
             if self.max_grad_norm > 0:
                 grad_norm = nn.utils.clip_grad_norm_(
@@ -470,7 +481,8 @@ class Trainer:
                     raise FloatingPointError(
                         f"Non-finite gradient norm before clipping: {grad_norm.item()}"
                     )
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             if self.scheduler is not None:
                 self.scheduler.step()
 

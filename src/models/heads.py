@@ -15,6 +15,40 @@ TransformerModel inline the equivalent `nn.Linear` for clarity.
 import torch
 import torch.nn as nn
 
+SPEND_HEAD_INIT_STD = 0.01
+
+
+def init_spend_head(module: nn.Module, std: float = SPEND_HEAD_INIT_STD) -> None:
+    """Small-output initialization for auxiliary spend regression heads."""
+    linears = [m for m in module.modules() if isinstance(m, nn.Linear)]
+    if not linears:
+        raise TypeError("Spend head must contain at least one nn.Linear layer")
+    output = linears[-1]
+    nn.init.normal_(output.weight, std=std)
+    if output.bias is not None:
+        nn.init.zeros_(output.bias)
+
+
+def make_spend_head(
+    input_dim: int,
+    output_dim: int = 1,
+    hidden_dim: int | None = None,
+) -> nn.Module:
+    """Build a spend head, optionally with one hidden layer, and initialize output."""
+    if hidden_dim is None:
+        head: nn.Module = nn.Linear(input_dim, output_dim)
+    else:
+        hidden_dim = int(hidden_dim)
+        if hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive when provided")
+        head = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+    init_spend_head(head)
+    return head
+
 
 class FrequencyHead(nn.Module):
     """
@@ -45,6 +79,7 @@ class SpendHead(nn.Module):
     def __init__(self, input_dim: int):
         super().__init__()
         self.fc = nn.Linear(input_dim, 1)
+        init_spend_head(self.fc)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

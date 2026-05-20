@@ -2,8 +2,8 @@
 # Comparison tables should include only run names generated from these configs
 # unless a command explicitly requests exploratory runs.
 
-version: 2026-05-19-validity-protocol
-results_status: pending_regeneration_after_validity_repairs
+version: 2026-05-20-results-recovery-protocol
+results_status: pending_regeneration_after_manifest_hash_and_extension3_repairs
 archive_dir: results/archive/pre_validity_protocol_20260519
 
 methodology:
@@ -68,14 +68,14 @@ deep_learning_config_hashes:
   experiments/configs/lstm_base_dunnhumby_v2.yaml: 5434961310fa
   experiments/configs/lstm_joint_dunnhumby_v2.yaml: 15e2a3e85af2
   experiments/configs/transformer_joint_dunnhumby_v2.yaml: a984ee30201b
-  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 73313bce0f7c
-  experiments/configs/extension3_lstm_static_dunnhumby.yaml: db3b43f30cf2
-  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: 97dcfbc4e49c
-  experiments/configs/extension3_lstm_full_dunnhumby.yaml: b4faa971ab7d
-  experiments/configs/extension3_transformer_none_dunnhumby.yaml: a243f3c959bc
-  experiments/configs/extension3_transformer_static_dunnhumby.yaml: 2f53ee1aa6e9
-  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 84e58a2ddbe7
-  experiments/configs/extension3_transformer_full_dunnhumby.yaml: dfe0819adeea
+  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 5d81fea4468c
+  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 394c75a8d126
+  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: fcd2dcfb7eb4
+  experiments/configs/extension3_lstm_full_dunnhumby.yaml: d1d644a74c36
+  experiments/configs/extension3_transformer_none_dunnhumby.yaml: 9494d9efe417
+  experiments/configs/extension3_transformer_static_dunnhumby.yaml: 67ae576f5b90
+  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: f2c6e5111150
+  experiments/configs/extension3_transformer_full_dunnhumby.yaml: 6d2f8cb564a4
 
 benchmark_run_names:
   - pareto_nbd_cdnow

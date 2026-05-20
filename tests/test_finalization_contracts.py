@@ -19,7 +19,12 @@ from src.evaluation.calibration import (
     fit_aggregate_calibration,
 )
 import src.evaluation.compare as compare_module
-from src.evaluation.compare import _filter_metric_files, export_latex_table
+from src.evaluation.compare import (
+    _filter_metric_files,
+    export_latex_table,
+    parse_run_name,
+    protocol_variant_from_stem,
+)
 from src.evaluation.metrics import (
     compute_all_metrics,
     mase,
@@ -30,6 +35,8 @@ from src.evaluation.metrics import (
     save_metrics_with_artifacts,
     split_metric_artifacts,
 )
+from src.evaluation.validate_pipeline import validate_pipeline_inputs
+from src.models.heads import SpendHead
 from src.models.losses import KendallMultiTaskLoss
 from src.models import LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
@@ -372,6 +379,42 @@ def test_final_filter_requires_deep_arrays_and_checkpoint(tmp_path, monkeypatch)
     assert _filter_metric_files([str(metrics_path)], final_only=True) == [str(metrics_path)]
 
 
+def test_repair_run_parsing_and_filtering_stays_separate(tmp_path):
+    strict = tmp_path / "transformer_joint_tafeng_v2_seed42_sample_metrics.json"
+    strict.write_text(json.dumps({"freq_rmse": 1.0, "run_valid": True}))
+    repaired = tmp_path / "transformer_joint_tafeng_v2_seed42_sample_repair_metrics.json"
+    repaired.write_text(json.dumps({
+        "freq_rmse": 0.9,
+        "run_valid": True,
+        "repair_attempted": True,
+    }))
+    bad_repair = tmp_path / "lstm_joint_tafeng_v2_seed42_sample_repair_metrics.json"
+    bad_repair.write_text(json.dumps({"freq_rmse": 0.8, "run_valid": True}))
+
+    assert parse_run_name("transformer_joint_tafeng_v2_seed42_sample_repair") == (
+        "transformer_joint",
+        "tafeng",
+        "v2",
+        42,
+        "sample",
+    )
+    assert protocol_variant_from_stem("transformer_joint_tafeng_v2_seed42_sample_repair") == "stability_repair"
+
+    strict_kept = _filter_metric_files(
+        [str(strict), str(repaired), str(bad_repair)],
+        final_only=False,
+        protocol_variant="strict",
+    )
+    repaired_kept = _filter_metric_files(
+        [str(strict), str(repaired), str(bad_repair)],
+        final_only=False,
+        protocol_variant="repaired",
+    )
+
+    assert strict_kept == [str(strict)]
+    assert repaired_kept == [str(repaired)]
+
+
 def test_lstm_is_one_layer_seq2seq_with_shared_joint_encoder():
     torch.manual_seed(0)
     model = LSTMModel(max_week=51, max_trans=3, memory_units=8, dense_units=8, joint=True)
@@ -521,6 +564,49 @@ def test_hurdle_spend_loss_ignores_inactive_targets():
     assert loss.item() == pytest.approx(0.0, abs=1e-6)
 
 
+def _last_linear(module: nn.Module) -> nn.Linear:
+    linears = [m for m in module.modules() if isinstance(m, nn.Linear)]
+    assert linears
+    return linears[-1]
+
+
+def test_spend_head_uses_small_output_initialization():
+    torch.manual_seed(0)
+    head = SpendHead(4096)
+    assert float(head.fc.weight.std()) == pytest.approx(0.01, rel=0.08)
+    assert torch.count_nonzero(head.fc.bias).item() == 0
+
+
+def test_live_model_spend_heads_use_small_output_initialization():
+    torch.manual_seed(0)
+    lstm = LSTMModel(
+        max_week=51,
+        max_trans=3,
+        memory_units=8,
+        dense_units=1024,
+        joint=True,
+        spend_head="hurdle_lognormal",
+    )
+    lstm_out = _last_linear(lstm.spend_head)
+    assert float(lstm_out.weight.std()) == pytest.approx(0.01, rel=0.12)
+    assert torch.count_nonzero(lstm_out.bias).item() == 0
+
+    transformer = TransformerModel(
+        max_week=51,
+        max_trans=3,
+        d_model=512,
+        n_heads=8,
+        n_layers=1,
+        d_ff=64,
+        dropout=0.0,
+        time2vec_dim=4,
+        joint=True,
+    )
+    transformer_out = _last_linear(transformer.spend_head)
+    assert float(transformer_out.weight.std()) == pytest.approx(0.01, rel=0.15)
+    assert torch.count_nonzero(transformer_out.bias).item() == 0
+
+
 def test_scheduled_sampling_forward_equals_teacher_forcing_at_zero_prob():
     """At ε=0 the stepwise SS unroll must equal the vectorized teacher-forced
     forward (LSTM recurrence equivalence) — guarantees SS adds no bias when off."""
@@ -611,6 +697,144 @@ def test_scheduled_sampling_joint_fit_is_finite_end_to_end():
     assert all(np.isfinite(history["train_loss"]))
     assert all(np.isfinite(history["val_loss"]))
     assert len(history["train_loss"]) == 4
+
+
+def test_trainer_skips_nonfinite_training_losses_until_limit(tmp_path):
+    class OneParamModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor([0.0]))
+
+    class ScriptedLossTrainer(Trainer):
+        def __init__(self, *args, losses, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.losses = list(losses)
+
+        def _compute_loss(self, batch):
+            value = self.losses.pop(0)
+            loss = self.model.weight.sum() * 0 + torch.tensor(value)
+            return loss, {"freq_loss": float(value)}
+
+    model = OneParamModel()
+    trainer = ScriptedLossTrainer(
+        model=model,
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        device=torch.device("cpu"),
+        joint=False,
+        losses=[float("nan"), float("nan"), 1.0],
+        dataset_name="cdnow",
+        run_id="nan_test",
+        checkpoint_dir=tmp_path,
+    )
+    metrics = trainer.train_epoch([object(), object(), object()])
+    assert metrics["freq_loss"] == pytest.approx(1.0)
+    assert trainer._nan_count == 2
+
+
+def test_trainer_aborts_after_six_nonfinite_losses_and_saves_checkpoint(tmp_path):
+    class OneParamModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor([0.0]))
+
+    class NaNTrainer(Trainer):
+        def _compute_loss(self, batch):
+            loss = self.model.weight.sum() * 0 + torch.tensor(float("nan"))
+            return loss, {"freq_loss": float("nan")}
+
+    model = OneParamModel()
+    trainer = NaNTrainer(
+        model=model,
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        device=torch.device("cpu"),
+        joint=False,
+        dataset_name="cdnow",
+        run_id="abort_test",
+        checkpoint_dir=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match=">5 NaN losses"):
+        trainer.train_epoch([object()] * 6)
+    assert (tmp_path / "last_valid_cdnow_abort_test.pt").exists()
+
+
+def _validation_gate_batch(y_spend=None):
+    return {
+        "week": torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.long),
+        "trans": torch.tensor([[0, 1, 0], [1, 0, 2]], dtype=torch.long),
+        "spend": torch.zeros((2, 3), dtype=torch.float32),
+        "dynamic_covariates": torch.zeros((2, 5, 1), dtype=torch.float32),
+        "y_spend": (
+            y_spend
+            if y_spend is not None
+            else torch.zeros((2, 3), dtype=torch.float32)
+        ),
+    }
+
+
+def test_validate_pipeline_inputs_rejects_bad_inputs_and_outputs(tmp_path):
+    model = LSTMModel(
+        max_week=51, max_trans=3, memory_units=4, dense_units=4, joint=True,
+        dynamic_cov_dim=1,
+    )
+    ckpt = tmp_path / "model.pt"
+    torch.save(model.state_dict(), ckpt)
+    config = {"model": {"type": "lstm", "joint": True}}
+
+    assert validate_pipeline_inputs(
+        model, [_validation_gate_batch()], config, ckpt, torch.device("cpu")
+    )
+
+    bad_spend = torch.zeros((2, 3), dtype=torch.float32)
+    bad_spend[0, 0] = float("nan")
+    with pytest.raises(ValueError, match="Non-finite spend targets"):
+        validate_pipeline_inputs(
+            model, [_validation_gate_batch(bad_spend)], config, ckpt, torch.device("cpu")
+        )
+
+    with pytest.raises(ValueError, match="Checkpoint does not exist"):
+        validate_pipeline_inputs(
+            model, [_validation_gate_batch()], config, tmp_path / "missing.pt", torch.device("cpu")
+        )
+
+    class BadSoftmaxLSTM(LSTMModel):
+        def forward(self, week, trans, hidden=None, **kwargs):
+            b, t = week.shape
+            logits = torch.full((b, t, self.max_trans + 1), float("nan"))
+            return logits, torch.zeros((b, t)), hidden
+
+    bad_softmax = BadSoftmaxLSTM(
+        max_week=51, max_trans=3, memory_units=4, dense_units=4, joint=True
+    )
+    bad_softmax_ckpt = tmp_path / "bad_softmax.pt"
+    torch.save(bad_softmax.state_dict(), bad_softmax_ckpt)
+    with pytest.raises(ValueError, match="Softmax sanity check failed"):
+        validate_pipeline_inputs(
+            bad_softmax,
+            [_validation_gate_batch()],
+            config,
+            bad_softmax_ckpt,
+            torch.device("cpu"),
+        )
+
+    class BadSpendLSTM(LSTMModel):
+        def forward(self, week, trans, hidden=None, **kwargs):
+            b, t = week.shape
+            logits = torch.zeros((b, t, self.max_trans + 1))
+            return logits, torch.full((b, t), float("nan")), hidden
+
+    bad_spend_model = BadSpendLSTM(
+        max_week=51, max_trans=3, memory_units=4, dense_units=4, joint=True
+    )
+    bad_spend_ckpt = tmp_path / "bad_spend.pt"
+    torch.save(bad_spend_model.state_dict(), bad_spend_ckpt)
+    with pytest.raises(ValueError, match="Non-finite regression head output"):
+        validate_pipeline_inputs(
+            bad_spend_model,
+            [_validation_gate_batch()],
+            config,
+            bad_spend_ckpt,
+            torch.device("cpu"),
+        )
 
 
 def test_hpo_objective_penalizes_invalid_and_degenerate_runs():
@@ -754,6 +978,56 @@ def test_final_manifest_rejects_hash_and_runtime_overrides(tmp_path):
     bad_scenarios["final_manifest_n_scenarios"] = 1
     ok, reason = result_matches_manifest("toy_cdnow_v1_seed7_sample", bad_scenarios, manifest)
     assert not ok and "scenario" in reason
+
+
+def test_final_manifest_hash_uses_frozen_config_not_runtime_mutations(tmp_path):
+    cfg_path = tmp_path / "toy_cdnow.yaml"
+    frozen_cfg = {
+        "dataset": {"name": "cdnow", "raw_dir": "data/raw"},
+        "model": {"type": "lstm", "max_trans": 3},
+        "training": {"seed": 42, "epochs": 300},
+        "inference": {"mode": "sample", "n_scenarios": 200},
+        "output": {"run_name": "toy_cdnow_v2", "results_dir": "results"},
+    }
+    cfg_path.write_text(yaml.safe_dump(frozen_cfg))
+    cfg_norm = str(cfg_path).lstrip("./")
+    manifest = {
+        "version": "test-final",
+        "methodology": {"seeds": [42], "inference_primary": "sample"},
+        "runtime_expectations": {
+            "deep_learning": {
+                "epochs": 300,
+                "inference_mode": "sample",
+                "n_scenarios": 200,
+            }
+        },
+        "deep_learning_configs": [str(cfg_path)],
+        "deep_learning_config_hashes": {cfg_norm: manifest_config_hash(frozen_cfg)},
+        "benchmark_run_names": [],
+    }
+    manifest_path = tmp_path / "final_manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+
+    runtime_cfg = yaml.safe_load(yaml.safe_dump(frozen_cfg))
+    runtime_cfg["dataset"]["raw_dir"] = "/kaggle/working/input/cdnow-dataset"
+    runtime_cfg["model"]["max_trans"] = 7
+    runtime_cfg["output"]["run_name"] = "toy_cdnow_v2_seed42_sample"
+    runtime_cfg["output"]["results_dir"] = "/kaggle/working/results"
+    runtime_cfg["calibration"] = {"freq_factor": 0.9, "spend_factor": 1.1}
+
+    metrics = attach_manifest_metadata(
+        {},
+        config_path=cfg_path,
+        config=runtime_cfg,
+        run_name="toy_cdnow_v2_seed42_sample",
+        manifest_path=manifest_path,
+        manifest_config=frozen_cfg,
+    )
+
+    assert metrics["final_manifest_config_hash"] == manifest_config_hash(frozen_cfg)
+    assert metrics["final_manifest_actual_config_hash"] != metrics["final_manifest_config_hash"]
+    ok, reason = result_matches_manifest("toy_cdnow_v2_seed42_sample", metrics, manifest)
+    assert ok, reason
 
 
 def test_final_manifest_supports_per_config_runtime_overrides(tmp_path):

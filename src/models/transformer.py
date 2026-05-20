@@ -47,6 +47,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.models.heads import make_spend_head
+
 
 class Time2Vec(nn.Module):
     """
@@ -280,6 +282,7 @@ class TransformerModel(nn.Module):
         cov_emb_dim: int = 8,
         state_feature_dim: int = 0,
         spend_head: str = "regression",
+        regression_head_hidden: int | None = None,
     ):
         super().__init__()
         self.joint = joint
@@ -331,7 +334,11 @@ class TransformerModel(nn.Module):
         self.freq_head = nn.Linear(d_model, n_classes)
         if joint:
             spend_out_dim = 2 if spend_head == "hurdle_lognormal" else 1
-            self.spend_head = nn.Linear(d_model, spend_out_dim)
+            self.spend_head = make_spend_head(
+                d_model,
+                spend_out_dim,
+                hidden_dim=regression_head_hidden,
+            )
 
     def forward(
         self,

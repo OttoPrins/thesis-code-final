@@ -1,0 +1,10 @@
+# Parameter Governance TODOs
+
+- replication.yaml: batch_size=256 — justify from Valendin repo/code, empirical runtime constraints, or sensitivity evidence.
+- replication.yaml: dropout_rate=0.2 — verify against Valendin paper/repo or document as thesis implementation choice.
+- sensitivity.yaml: spend_log_transform — complete independent sweep and record chosen default.
+- sensitivity.yaml: regression_head_hidden — complete independent sweep and record chosen default.
+- sensitivity.yaml: kendall_warmup_epochs — complete independent sweep and record chosen default.
+- sensitivity.yaml: early_stopping_patience — complete independent sweep and record chosen default.
+- sensitivity.yaml: max_grad_norm — complete independent sweep and record chosen default.
+- sensitivity.yaml: scheduled_sampling — complete independent sweep and record chosen default.

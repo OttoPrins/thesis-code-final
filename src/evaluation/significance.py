@@ -38,6 +38,7 @@ import numpy as np
 
 from src.evaluation.metrics import metrics_arrays_path
 from src.utils.final_manifest import load_final_manifest, result_matches_manifest
+from src.evaluation.compare import protocol_variant_from_stem
 
 
 # Map CLI metric names to JSON keys
@@ -125,6 +126,7 @@ def _select_metrics_file(
     run_prefix: str,
     seed_filter: Optional[int] = None,
     mode_filter: Optional[str] = None,
+    protocol_variant: str = "strict",
 ) -> Optional[Path]:
     """
     Find the most recent metrics JSON for a run prefix.
@@ -137,6 +139,16 @@ def _select_metrics_file(
     candidates = sorted(metrics_dir.glob(f"{run_prefix}*_metrics.json"))
     if not candidates:
         return None
+    if protocol_variant not in {"strict", "repaired", "all"}:
+        raise ValueError("protocol_variant must be one of: strict, repaired, all")
+    if protocol_variant != "all":
+        expected_variant = "stability_repair" if protocol_variant == "repaired" else "strict"
+        candidates = [
+            path for path in candidates
+            if protocol_variant_from_stem(path.stem.removesuffix("_metrics")) == expected_variant
+        ]
+        if not candidates:
+            return None
     manifest = load_final_manifest()
     if manifest is not None:
         final_candidates = []
@@ -152,6 +164,7 @@ def _select_metrics_file(
                 metrics,
                 manifest,
                 include_expected=False,
+                include_repaired=protocol_variant in {"repaired", "all"},
             )
             if ok:
                 final_candidates.append(path)
@@ -172,7 +185,7 @@ def _select_metrics_file(
     if mode_filter is not None:
         mode_matched = [
             path for path in candidates
-            if path.stem.removesuffix("_metrics").endswith(f"_{mode_filter}")
+            if path.stem.removesuffix("_metrics").removesuffix("_repair").endswith(f"_{mode_filter}")
         ]
         if mode_matched:
             candidates = mode_matched
@@ -207,6 +220,7 @@ def run_significance_tests(
     seed: int = 42,
     seed_filter: Optional[int] = None,
     mode_filter: Optional[str] = None,
+    protocol_variant: str = "strict",
 ) -> list[dict]:
     """
     Run paired bootstrap for all (model_a, model_b, metric) combinations.
@@ -223,8 +237,12 @@ def run_significance_tests(
     """
     results = []
     for (prefix_a, prefix_b) in pairs:
-        path_a = _select_metrics_file(metrics_dir, prefix_a, seed_filter, mode_filter)
-        path_b = _select_metrics_file(metrics_dir, prefix_b, seed_filter, mode_filter)
+        path_a = _select_metrics_file(
+            metrics_dir, prefix_a, seed_filter, mode_filter, protocol_variant
+        )
+        path_b = _select_metrics_file(
+            metrics_dir, prefix_b, seed_filter, mode_filter, protocol_variant
+        )
 
         if path_a is None:
             print(f"[significance] WARNING: no metrics file for {prefix_a!r} — skipping")
@@ -319,6 +337,12 @@ def main():
         ),
     )
     parser.add_argument(
+        "--protocol_variant",
+        choices=["strict", "repaired", "all"],
+        default="strict",
+        help="Select strict, stability-repair, or all manifest-valid files.",
+    )
+    parser.add_argument(
         "--out", type=Path, default=None,
         help="Output CSV path. Defaults to <metrics_dir>/significance_tests.csv"
     )
@@ -342,6 +366,7 @@ def main():
         seed=args.seed,
         seed_filter=args.seed_filter,
         mode_filter=args.mode_filter,
+        protocol_variant=args.protocol_variant,
     )
     _save_csv(results, out_path)
 

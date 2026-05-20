@@ -19,6 +19,8 @@ Loss:
 """
 
 from contextlib import nullcontext
+from pathlib import Path
+import re
 
 import torch
 import torch.nn as nn
@@ -57,6 +59,9 @@ class Trainer:
         spend_loss_normalize: bool = False,
         scheduled_sampling: dict | None = None,
         amp_enabled: bool = True,
+        dataset_name: str = "dataset",
+        run_id: str = "run",
+        checkpoint_dir: str | Path | None = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -89,6 +94,10 @@ class Trainer:
         # Disabled on CPU/MPS where AMP has no benefit.
         self.amp_enabled = bool(amp_enabled and device.type == "cuda")
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+        self._nan_count: int = 0
+        self.dataset_name = dataset_name
+        self.run_id = run_id
+        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir is not None else Path("results/checkpoints")
 
     def _named_optimized_parameters(self):
         """Yield trainable parameters owned by the optimizer path."""
@@ -120,6 +129,18 @@ class Trainer:
     def _assert_finite_loss(loss: torch.Tensor, stage: str) -> None:
         if not torch.isfinite(loss).item():
             raise FloatingPointError(f"Non-finite {stage} loss: {loss.item()}")
+
+    @staticmethod
+    def _safe_token(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_") or "run"
+
+    def _save_last_valid_checkpoint(self) -> Path:
+        dataset = self._safe_token(self.dataset_name)
+        run = self._safe_token(self.run_id)
+        path = self.checkpoint_dir / f"last_valid_{dataset}_{run}.pt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.model.state_dict(), path)
+        return path
 
     def _assert_finite_gradients(self) -> None:
         bad_params = []
@@ -461,10 +482,11 @@ class Trainer:
     def train_epoch(self, dataloader) -> dict:
         """One training epoch. Returns average metrics dict."""
         self.model.train()
+        self._nan_count = 0
         totals = {}
         n_batches = 0
 
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             self.optimizer.zero_grad()
             amp_context = (
                 torch.amp.autocast(device_type="cuda", enabled=True)
@@ -473,7 +495,21 @@ class Trainer:
             )
             with amp_context:
                 loss, metrics = self._compute_loss(batch)
-            self._assert_finite_loss(loss, "training")
+            if not torch.isfinite(loss).item():
+                self.optimizer.zero_grad()
+                self._nan_count += 1
+                print(
+                    "WARNING: non-finite training loss "
+                    f"at epoch {self.current_epoch + 1}, batch {batch_idx}; "
+                    f"strike {self._nan_count}/5. Skipping batch."
+                )
+                if self._nan_count > 5:
+                    path = self._save_last_valid_checkpoint()
+                    raise RuntimeError(
+                        f"Training aborted: >5 NaN losses in epoch {self.current_epoch + 1}. "
+                        f"Last valid checkpoint saved to {path}."
+                    )
+                continue
             self.scaler.scale(loss).backward()
             # Unscale before gradient checks and clipping so they operate on the
             # true gradient magnitudes, not the AMP-scaled values.
@@ -496,6 +532,12 @@ class Trainer:
                 totals[k] = totals.get(k, 0.0) + v
             n_batches += 1
 
+        if n_batches == 0:
+            path = self._save_last_valid_checkpoint()
+            raise RuntimeError(
+                f"Training aborted: no finite training batches in epoch {self.current_epoch + 1}. "
+                f"Last valid checkpoint saved to {path}."
+            )
         return {k: v / n_batches for k, v in totals.items()}
 
     def validate(self, dataloader) -> dict:

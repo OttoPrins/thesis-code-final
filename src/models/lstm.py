@@ -33,6 +33,8 @@ import torch
 import torch.nn as nn
 import math
 
+from src.models.heads import make_spend_head
+
 
 def embedding_size(max_val: int) -> int:
     """Heuristic from Valendin et al. repo: int(max_val ** 0.5) + 1."""
@@ -64,6 +66,7 @@ class LSTMModel(nn.Module):
                           the shared encoder for v2 joint models.
         spend_head:       "regression" for the original scalar spend head, or
                           "hurdle_lognormal" for v2 spend_mu/spend_log_var output.
+        regression_head_hidden: Optional hidden size for a one-hidden-layer spend head.
     """
 
     def __init__(
@@ -79,6 +82,7 @@ class LSTMModel(nn.Module):
         cov_emb_dim: int = 8,
         state_feature_dim: int = 0,
         spend_head: str = "regression",
+        regression_head_hidden: int | None = None,
     ):
         super().__init__()
         self.joint = joint
@@ -142,7 +146,11 @@ class LSTMModel(nn.Module):
         # Spend head (Extension 1 only): scalar regression
         if joint:
             spend_out_dim = 2 if spend_head == "hurdle_lognormal" else 1
-            self.spend_head = nn.Linear(dense_units, spend_out_dim)
+            self.spend_head = make_spend_head(
+                dense_units,
+                spend_out_dim,
+                hidden_dim=regression_head_hidden,
+            )
 
     def forward(
         self,

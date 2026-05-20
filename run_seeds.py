@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import os
+import selectors
 import subprocess
 import sys
 import time
@@ -62,6 +63,12 @@ DEFAULT_CONFIGS = [
 DEFAULT_SEEDS = [42, 7, 123]
 
 
+def _default_results_dir() -> Path:
+    if os.environ.get("KAGGLE_ENV", "0") == "1":
+        return Path("/kaggle/working/results")
+    return Path("results")
+
+
 def _existing_metrics_are_final_valid(path: Path) -> bool:
     """Return True only when an existing metrics file passes the final manifest gate."""
     if not path.exists():
@@ -75,9 +82,14 @@ def _existing_metrics_are_final_valid(path: Path) -> bool:
     except Exception:
         return False
     stem = path.stem.removesuffix("_metrics")
-    ok, reason = result_matches_manifest(stem, metrics, manifest)
+    ok, reason = result_matches_manifest(
+        stem,
+        metrics,
+        manifest,
+        include_repaired=stem.endswith("_repair"),
+    )
     if not ok:
-        print(f"  [rerun] {path} exists but is not final-valid: {reason}")
+        print(f"  [rerun] {path} exists but is not final-valid: {reason}", flush=True)
     return ok
 
 
@@ -100,6 +112,10 @@ def main():
                    help="Override inference.n_scenarios (smoke/CI use).")
     p.add_argument("--batch_size_override", type=int, default=None,
                    help="Override training.batch_size for all jobs (OOM repair/smoke use).")
+    p.add_argument("--heartbeat_interval", type=int, default=60,
+                   help="Seconds between heartbeat lines for quiet subprocesses. Use 0 to disable.")
+    p.add_argument("--logs_dir", default=None,
+                   help="Directory for per-run subprocess logs. Default: <results_dir>/logs.")
     args = p.parse_args()
 
     # Build the full job list and report up front so the user knows what's coming.
@@ -107,23 +123,27 @@ def main():
     for cfg_name in args.configs:
         cfg_path = CONFIGS_DIR / f"{cfg_name}.yaml"
         if not cfg_path.exists():
-            print(f"WARN: config not found: {cfg_path}", file=sys.stderr)
+            print(f"WARN: config not found: {cfg_path}", file=sys.stderr, flush=True)
             continue
         for seed in args.seeds:
             for mode in args.modes:
                 jobs.append((str(cfg_path), seed, mode))
 
-    print(f"Sweep: {len(jobs)} runs ({len(args.configs)} configs × {len(args.seeds)} seeds × {len(args.modes)} modes)")
+    print(
+        f"Sweep: {len(jobs)} runs "
+        f"({len(args.configs)} configs × {len(args.seeds)} seeds × {len(args.modes)} modes)",
+        flush=True,
+    )
     if args.dry_run:
         for cfg, seed, mode in jobs:
-            cmd = f"  python train.py --config {cfg} --seed_override {seed} --inference_mode {mode}"
+            cmd = f"  {sys.executable} -u train.py --config {cfg} --seed_override {seed} --inference_mode {mode}"
             if args.max_epochs is not None:
                 cmd += f" --max_epochs {args.max_epochs}"
             if args.n_scenarios is not None:
                 cmd += f" --n_scenarios {args.n_scenarios}"
             if args.batch_size_override is not None:
                 cmd += f" --batch_size_override {args.batch_size_override}"
-            print(cmd)
+            print(cmd, flush=True)
         return
 
     # Detect available GPUs for parallel dispatch.
@@ -138,24 +158,33 @@ def main():
     # to avoid file-read races and interleaved stdout).
     import yaml as _yaml
     t0 = time.time()
-    pending = []  # list of (cfg, seed, mode, cmd, env, label)
+    pending = []  # list of (cfg, seed, mode, cmd, env, label, run_name)
     for i, (cfg, seed, mode) in enumerate(jobs):
         cfg_basename = Path(cfg).stem
         with open(cfg) as _f:
             _cfg_yaml = _yaml.safe_load(_f)
         base_run_name = _cfg_yaml.get("output", {}).get("run_name", cfg_basename)
         run_name = f"{base_run_name}_seed{seed}_{mode}"
-        expected_metrics = Path("results/tables") / f"{run_name}_metrics.json"
-        if args.skip_existing and _existing_metrics_are_final_valid(expected_metrics):
-            print(f"  [skip] {expected_metrics} already exists and is final-valid")
-            continue
+        expected_metrics = _default_results_dir() / "tables" / f"{run_name}_metrics.json"
+        if args.skip_existing:
+            if _existing_metrics_are_final_valid(expected_metrics):
+                print(f"  [skip] {expected_metrics} already exists and is final-valid", flush=True)
+                continue
+            repair_metrics = expected_metrics.with_name(f"{run_name}_repair_metrics.json")
+            if _existing_metrics_are_final_valid(repair_metrics):
+                print(
+                    f"  [skip] {repair_metrics} already exists and is final-valid repair",
+                    flush=True,
+                )
+                continue
 
         gpu_id = i % n_parallel
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        env["PYTHONUNBUFFERED"] = "1"
 
         cmd = [
-            sys.executable, "train.py",
+            sys.executable, "-u", "train.py",
             "--config", cfg,
             "--seed_override", str(seed),
             "--inference_mode", mode,
@@ -168,30 +197,77 @@ def main():
             cmd += ["--batch_size_override", str(args.batch_size_override)]
 
         label = f"{cfg_basename}  seed={seed}  mode={mode}  GPU={gpu_id}"
-        pending.append((cfg, seed, mode, cmd, env, label))
+        pending.append((cfg, seed, mode, cmd, env, label, run_name))
 
-    print(f"Running {len(pending)} job(s) with {n_parallel} parallel worker(s)")
+    print(f"Running {len(pending)} job(s) with {n_parallel} parallel worker(s)", flush=True)
 
     failures = []
 
+    logs_dir = Path(args.logs_dir) if args.logs_dir else _default_results_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
     def _run_one(job):
-        cfg, seed, mode, cmd, env, label = job
+        cfg, seed, mode, cmd, env, label, run_name = job
         elapsed_min = (time.time() - t0) / 60
-        print(f"\n[t={elapsed_min:.1f}min]  {label}")
-        result = subprocess.run(cmd, env=env)
-        return cfg, seed, mode, result.returncode
+        log_path = logs_dir / f"{run_name}.log"
+        print(f"\n[t={elapsed_min:.1f}min]  {label}  log={log_path}", flush=True)
+
+        started = time.time()
+        latest_line = "(no output yet)"
+        heartbeat_interval = max(0, int(args.heartbeat_interval))
+        with open(log_path, "w", buffering=1) as log_f:
+            process = subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            selector = selectors.DefaultSelector()
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                timeout = heartbeat_interval if heartbeat_interval > 0 else None
+                events = selector.select(timeout=timeout)
+                if events:
+                    line = process.stdout.readline()
+                    if line:
+                        latest_line = line.rstrip()
+                        log_f.write(line)
+                        print(line, end="", flush=True)
+                    elif process.poll() is not None:
+                        break
+                else:
+                    if process.poll() is not None:
+                        break
+                    run_min = (time.time() - started) / 60
+                    total_min = (time.time() - t0) / 60
+                    print(
+                        f"[heartbeat t={total_min:.1f}min run={run_min:.1f}min] "
+                        f"{label} still running; latest: {latest_line}",
+                        flush=True,
+                    )
+            selector.unregister(process.stdout)
+            # Drain any buffered tail after process exit.
+            tail = process.stdout.read()
+            if tail:
+                log_f.write(tail)
+                print(tail, end="", flush=True)
+            rc = process.wait()
+        return cfg, seed, mode, rc
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
         for cfg, seed, mode, rc in executor.map(_run_one, pending):
             if rc != 0:
                 failures.append((cfg, seed, mode, rc))
-                print(f"  FAILED: {Path(cfg).stem} seed={seed} mode={mode} (exit {rc})")
+                print(f"  FAILED: {Path(cfg).stem} seed={seed} mode={mode} (exit {rc})", flush=True)
 
-    print(f"\n=== Sweep complete in {(time.time()-t0)/60:.1f} min ===")
+    print(f"\n=== Sweep complete in {(time.time()-t0)/60:.1f} min ===", flush=True)
     if failures:
-        print(f"FAILURES ({len(failures)}):")
+        print(f"FAILURES ({len(failures)}):", flush=True)
         for cfg, seed, mode, code in failures:
-            print(f"  {cfg} seed={seed} mode={mode} exit={code}")
+            print(f"  {cfg} seed={seed} mode={mode} exit={code}", flush=True)
         sys.exit(1)
 
 

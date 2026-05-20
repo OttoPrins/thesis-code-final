@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 #   <model>_<dataset>_v<N>_seed<S>
 #   <model>_<dataset>_v<N>
 #   <model>_<dataset>
+#   Any of the above may end in _repair for the bounded stability-repair variant.
 # where <model> ∈ {lstm_base, lstm_joint, transformer_joint, extension3, ...}
 # and <dataset> ∈ {cdnow, uci, tafeng, dunnhumby}
 _DATASETS = ("cdnow", "uci", "tafeng", "dunnhumby")
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
 _VERSION_RE = re.compile(r"_(v\d+|final)$")
+_REPAIR_SUFFIX = "_repair"
 
 # Canonical model order for table rows
 _MODEL_ORDER = [
@@ -84,6 +86,15 @@ def _sort_key(model_name: str) -> int:
         return len(_MODEL_ORDER)
 
 
+def protocol_variant_from_stem(stem: str) -> str:
+    """Return the empirical protocol variant encoded in a metrics stem."""
+    return "stability_repair" if stem.endswith(_REPAIR_SUFFIX) else "strict"
+
+
+def _strip_variant_suffix(stem: str) -> str:
+    return stem.removesuffix(_REPAIR_SUFFIX)
+
+
 def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], Optional[str]]:
     """
     Decompose a run_name like 'lstm_joint_cdnow_v2_seed42_expected' into
@@ -95,7 +106,7 @@ def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], O
         3. trailing _v<N>
         4. trailing _<dataset>
     """
-    s = stem
+    s = _strip_variant_suffix(stem)
     mode = None
     m = _MODE_RE.search(s)
     if m:
@@ -130,7 +141,19 @@ def _filter_metric_files(
     *,
     final_only: bool = True,
     include_expected: bool = False,
+    protocol_variant: str = "strict",
 ) -> List[str]:
+    if protocol_variant not in {"strict", "repaired", "all"}:
+        raise ValueError("protocol_variant must be one of: strict, repaired, all")
+
+    def variant_allowed(stem: str) -> bool:
+        variant = protocol_variant_from_stem(stem)
+        if protocol_variant == "strict":
+            return variant == "strict"
+        if protocol_variant == "repaired":
+            return variant == "stability_repair"
+        return True
+
     def deep_artifacts_present(fpath: str, metrics: dict) -> tuple[bool, str]:
         stem = _metric_stem(fpath)
         metrics_path = Path(fpath)
@@ -157,7 +180,20 @@ def _filter_metric_files(
                 Path(fpath).name,
             )
             return False
+        if metrics.get("diagnostic_only") is True:
+            logger.info(
+                "Skipping %s: diagnostic-only run.",
+                Path(fpath).name,
+            )
+            return False
         stem = _metric_stem(fpath)
+        if not variant_allowed(stem):
+            logger.info(
+                "Skipping %s: protocol variant is not %s.",
+                Path(fpath).name,
+                protocol_variant,
+            )
+            return False
         is_gppm = metrics.get("model") == "gppm" or stem.startswith("gppm_")
         if is_gppm and metrics.get("benchmark_valid") is not True:
             logger.info(
@@ -179,6 +215,16 @@ def _filter_metric_files(
         if not is_benchmark and metrics.get("run_valid") is not True:
             logger.info(
                 "Skipping %s: deep-learning result lacks run_valid=True; regenerate after repairs.",
+                Path(fpath).name,
+            )
+            return False
+        if (
+            protocol_variant_from_stem(stem) == "stability_repair"
+            and not is_benchmark
+            and metrics.get("repair_attempted") is not True
+        ):
+            logger.info(
+                "Skipping %s: repair stem lacks repair_attempted=True.",
                 Path(fpath).name,
             )
             return False
@@ -208,6 +254,7 @@ def _filter_metric_files(
             manifest,
             include_expected=include_expected,
             include_unseeded=True,
+            include_repaired=protocol_variant in {"repaired", "all"},
         )
         if not ok:
             logger.info(
@@ -235,6 +282,7 @@ def build_comparison_table(
     *,
     final_only: bool = True,
     include_expected: bool = False,
+    protocol_variant: str = "strict",
 ) -> pd.DataFrame:
     """
     Read all *_{dataset}*_metrics.json files and assemble a comparison DataFrame.
@@ -264,6 +312,7 @@ def build_comparison_table(
         metrics_files,
         final_only=final_only,
         include_expected=include_expected,
+        protocol_variant=protocol_variant,
     )
 
     if not metrics_files:
@@ -282,10 +331,12 @@ def build_comparison_table(
         else:
             stem = Path(metrics_file).stem.removesuffix("_metrics")
             model_name, _, _, _, _ = parse_run_name(stem)
+        stem = Path(metrics_file).stem.removesuffix("_metrics")
 
         row = {
             "model": model_name,
             "dataset": dataset,
+            "protocol_variant": protocol_variant_from_stem(stem),
             "freq_rmse":       metrics.get("freq_rmse", np.nan),
             "freq_mae":        metrics.get("freq_mae", np.nan),
             "freq_mape":       metrics.get("freq_mape", np.nan),
@@ -327,6 +378,7 @@ def build_all_comparison_tables(
     *,
     final_only: bool = True,
     include_expected: bool = False,
+    protocol_variant: str = "strict",
 ) -> Dict[str, pd.DataFrame]:
     """Build comparison tables for all datasets (or specified subset)."""
     if datasets is None:
@@ -340,6 +392,7 @@ def build_all_comparison_tables(
             dataset,
             final_only=final_only,
             include_expected=include_expected,
+            protocol_variant=protocol_variant,
         )
         if not df.empty:
             tables[dataset] = df
@@ -351,6 +404,7 @@ def aggregate_all_results(
     *,
     final_only: bool = True,
     include_expected: bool = False,
+    protocol_variant: str = "strict",
 ) -> pd.DataFrame:
     """
     Scan results/tables/ for all *_metrics.json files and compile into one DataFrame.
@@ -375,6 +429,7 @@ def aggregate_all_results(
         all_files,
         final_only=final_only,
         include_expected=include_expected,
+        protocol_variant=protocol_variant,
     )
 
     if not all_files:
@@ -400,6 +455,7 @@ def aggregate_all_results(
             "version": version,
             "seed": seed,
             "mode": mode,
+            "protocol_variant": protocol_variant_from_stem(stem),
         }
         row.update({
             k: v for k, v in metrics.items()
@@ -411,6 +467,79 @@ def aggregate_all_results(
     df["_sort"] = df["model"].apply(_sort_key)
     df = df.sort_values(["dataset", "_sort"]).drop("_sort", axis=1).reset_index(drop=True)
     return df
+
+
+def build_failure_appendix(
+    results_dir: str = "results/",
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+) -> pd.DataFrame:
+    """Collect invalid/failure metrics for transparent appendix reporting."""
+    tables_dir = Path(results_dir) / "tables"
+    if not tables_dir.exists():
+        return pd.DataFrame()
+
+    import glob as _glob
+    all_files = sorted(_glob.glob(str(tables_dir / "*_metrics.json")))
+    all_files = [f for f in all_files if not Path(f).name.startswith("comparison_")]
+    manifest = load_final_manifest() if final_only else None
+
+    rows = []
+    for fpath in all_files:
+        try:
+            with open(fpath) as f:
+                metrics = json.load(f)
+        except Exception:
+            continue
+        if metrics.get("diagnostic_only") is True:
+            continue
+        if metrics.get("run_valid") is not False and metrics.get("training_failed") is not True:
+            continue
+
+        stem = _metric_stem(fpath)
+        if manifest is not None:
+            ok, _ = result_matches_manifest(
+                stem,
+                metrics,
+                manifest,
+                include_expected=include_expected,
+                include_repaired=True,
+            )
+            if not ok:
+                continue
+
+        canonical_model, dataset, version, seed, mode = parse_run_name(stem)
+        if "dataset" in metrics:
+            dataset = metrics["dataset"]
+        if "model" in metrics:
+            canonical_model = metrics["model"]
+
+        rows.append({
+            "run_name": stem,
+            "model": canonical_model,
+            "dataset": dataset,
+            "version": version,
+            "seed": seed,
+            "mode": mode,
+            "protocol_variant": protocol_variant_from_stem(stem),
+            "run_valid": metrics.get("run_valid"),
+            "training_failed": metrics.get("training_failed", False),
+            "failure_type": metrics.get("failure_type", ""),
+            "failure_message": metrics.get("failure_message", ""),
+            "repair_attempted": metrics.get("repair_attempted", False),
+            "repair_failed": metrics.get("repair_failed", False),
+            "repair_failure_type": metrics.get("repair_failure_type", ""),
+            "run_invalid_reason": metrics.get("run_invalid_reason", ""),
+            "final_manifest_version": metrics.get("final_manifest_version", ""),
+            "final_manifest_config": metrics.get("final_manifest_config", ""),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["_sort"] = df["model"].apply(_sort_key)
+    return df.sort_values(["dataset", "_sort", "run_name"]).drop("_sort", axis=1).reset_index(drop=True)
 
 
 def aggregate_seeds(
@@ -443,6 +572,8 @@ def aggregate_seeds(
         ]
 
     group_keys = ["model", "dataset", "mode", "version"]
+    if "protocol_variant" in df.columns:
+        group_keys.append("protocol_variant")
     rows = []
     # Use dropna=False so benchmark rows (mode/version/seed all NaN) still group.
     for keys, sub in df.groupby(group_keys, dropna=False):
@@ -643,6 +774,15 @@ if __name__ == "__main__":
                         help="Include non-manifest or pre-final metrics files")
     parser.add_argument("--include_expected", action="store_true",
                         help="Include expected-mode diagnostic runs")
+    parser.add_argument(
+        "--protocol_variant",
+        choices=["strict", "repaired", "all"],
+        default="strict",
+        help=(
+            "Which deep-learning protocol variant to aggregate. Default strict "
+            "excludes bounded stability-repair runs."
+        ),
+    )
     parser.add_argument("--all", action="store_true", help="Run all output types")
     args = parser.parse_args()
 
@@ -653,7 +793,37 @@ if __name__ == "__main__":
         args.results_dir,
         final_only=not args.include_exploratory,
         include_expected=args.include_expected,
+        protocol_variant=args.protocol_variant,
     )
+    strict_df = aggregate_all_results(
+        args.results_dir,
+        final_only=not args.include_exploratory,
+        include_expected=args.include_expected,
+        protocol_variant="strict",
+    )
+    repaired_df = aggregate_all_results(
+        args.results_dir,
+        final_only=not args.include_exploratory,
+        include_expected=args.include_expected,
+        protocol_variant="repaired",
+    )
+    failure_df = build_failure_appendix(
+        args.results_dir,
+        final_only=not args.include_exploratory,
+        include_expected=args.include_expected,
+    )
+
+    tables_dir = Path(args.results_dir) / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    strict_path = tables_dir / "comparison_strict.csv"
+    repaired_path = tables_dir / "comparison_repaired.csv"
+    failure_path = tables_dir / "failure_appendix.csv"
+    strict_df.to_csv(strict_path, index=False)
+    repaired_df.to_csv(repaired_path, index=False)
+    failure_df.to_csv(failure_path, index=False)
+    print(f"Saved: {strict_path}")
+    print(f"Saved: {repaired_path}")
+    print(f"Saved: {failure_path}")
 
     if df.empty:
         print("No results found. Run train.py experiments first.")
@@ -661,20 +831,28 @@ if __name__ == "__main__":
         print(f"Aggregated {len(df)} model results.")
 
         if do_all or args.latex:
-            export_latex_table(df, out_path="results/tables/comparison_all.tex")
+            export_latex_table(df, out_path=tables_dir / "comparison_all.tex")
 
         if do_all or args.plots:
-            plot_model_comparison_bars(df)
+            plot_model_comparison_bars(df, out_dir=str(Path(args.results_dir) / "plots"))
 
         if do_all or args.weights:
-            plot_kendall_weight_evolution(results_dir=args.results_dir)
+            plot_kendall_weight_evolution(
+                results_dir=args.results_dir,
+                out_dir=str(Path(args.results_dir) / "plots"),
+            )
 
         if do_all or args.seeds:
-            seeds_df = aggregate_seeds(df)
-            out_path = Path(args.results_dir) / "tables" / "comparison_seeds.csv"
+            seed_source = pd.concat(
+                [x for x in (strict_df, repaired_df) if not x.empty],
+                ignore_index=True,
+            ) if (not strict_df.empty or not repaired_df.empty) else df
+            seeds_df = aggregate_seeds(seed_source)
+            out_path = tables_dir / "comparison_seeds.csv"
             seeds_df.to_csv(out_path, index=False)
             print(f"Saved: {out_path}")
 
         # Always save the aggregated CSV
-        df.to_csv(Path(args.results_dir) / "tables" / "comparison_all.csv", index=False)
-        print(f"Saved: {Path(args.results_dir) / 'tables' / 'comparison_all.csv'}")
+        comparison_path = tables_dir / "comparison_all.csv"
+        df.to_csv(comparison_path, index=False)
+        print(f"Saved: {comparison_path}")

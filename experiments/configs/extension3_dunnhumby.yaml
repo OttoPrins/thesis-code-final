@@ -10,8 +10,13 @@ dataset:
   min_active_weeks: 1  # keep the long tail; BTYD-style churn requires one-time buyers
   val_fraction: 0.1
   freq_cap: auto           # 99th-pct cap from calibration
+  spend_scaler: robust
   include_covariates: true   # triggers DunnhumbyPipeline.build_covariates()
   covariate_mode: full
+
+validation:
+  mode: rolling_origin
+  origins: [[72, 4], [76, 4]]
 
 covariates:
   demographics:
@@ -27,24 +32,37 @@ model:
   max_trans: 3           # placeholder; pipeline overrides from freq_cap=auto
   hidden_size: 128
   num_layers: 1
-  dropout: 0.2
+  dropout: 0.1
   joint: true
+  spend_head: hurdle_lognormal
+  state_feature_dim: 1
   static_cov_dim: 2      # income, household_size (constant per customer)
   dynamic_cov_dim: 2     # coupon_redemptions_per_week, campaign_active_flag
   cov_emb_dim: 8
 
 training:
   epochs: 100
-  batch_size: 128        # smaller dataset
+  max_epochs: 100
+  batch_size: 256
   lr: 0.001
+  optimizer: adamw
   weight_decay: 0.0001
-  early_stopping_patience: 5   # matches Valendin et al. repo (patience=5)
+  early_stopping_patience: 20
+  restore_best_checkpoint: true
+  max_grad_norm: 1.0
+  scheduler: {type: cosine, warmup_fraction: 0.05}
   seed: 42
 
 loss:
   type: kendall
   n_tasks: 2
   warmup_epochs: 5
+  spend_loss: nll
+  freq_logvar_max: 2.0
+
+calibration:
+  temperature_scaling: true
+  aggregate_scaling: true
 
 ablation:
   method: shap
@@ -62,4 +80,4 @@ inference:
   use_kv_cache: true
 
 evaluation:
-  weekly_discount_rate: 0.0  # short holdout — discounting negligible
+  weekly_discount_rate: 0.0018

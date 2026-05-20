@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import math
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,7 @@ from src.evaluation.calibration import (
     fit_aggregate_calibration,
     fit_temperature_from_loader,
 )
+from src.evaluation.validate_pipeline import validate_pipeline_inputs
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
 from src.training.inference import (
@@ -166,6 +168,7 @@ def build_model(config: dict) -> torch.nn.Module:
     cov_emb_dim = model_cfg.get("cov_emb_dim", 8)
     state_feature_dim = model_cfg.get("state_feature_dim", 0)
     spend_head = model_cfg.get("spend_head", "regression")
+    regression_head_hidden = model_cfg.get("regression_head_hidden", None)
 
     if model_type == "lstm":
         return LSTMModel(
@@ -180,6 +183,7 @@ def build_model(config: dict) -> torch.nn.Module:
             cov_emb_dim=cov_emb_dim,
             state_feature_dim=state_feature_dim,
             spend_head=spend_head,
+            regression_head_hidden=regression_head_hidden,
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -197,9 +201,24 @@ def build_model(config: dict) -> torch.nn.Module:
             cov_emb_dim=cov_emb_dim,
             state_feature_dim=state_feature_dim,
             spend_head=spend_head,
+            regression_head_hidden=regression_head_hidden,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
+
+
+def _count_zero_calibration_customers(dataset) -> int | None:
+    seed_trans = getattr(dataset, "seed_trans", None)
+    if seed_trans is not None:
+        return int((seed_trans.sum(dim=1) == 0).sum().item())
+
+    trans = getattr(dataset, "trans", None)
+    y_freq = getattr(dataset, "y_freq", None)
+    if trans is not None and y_freq is not None:
+        zero_input = trans.sum(dim=1) == 0
+        zero_target = y_freq.sum(dim=1) == 0
+        return int((zero_input & zero_target).sum().item())
+    return None
 
 
 def _add_result_validity_checks(
@@ -376,6 +395,7 @@ def _failed_training_metrics(
     exc: BaseException,
     repair_attempted: bool = False,
     repair_error: BaseException | None = None,
+    manifest_config: dict | None = None,
 ) -> dict:
     reason = f"training failed: {type(exc).__name__}: {str(exc)[:500]}"
     metrics = {
@@ -402,6 +422,7 @@ def _failed_training_metrics(
         config_path=config_path,
         config=config,
         run_name=config.get("output", {}).get("run_name", "run"),
+        manifest_config=manifest_config,
     )
     return metrics
 
@@ -421,10 +442,16 @@ def run_experiment_with_repair(
     *,
     config_path: str = "<in-memory>",
     write_outputs: bool = True,
+    manifest_config: dict | None = None,
 ) -> dict:
     """Run one experiment, then one bounded stability repair if training fails."""
     try:
-        return run_experiment(config, config_path=config_path, write_outputs=write_outputs)
+        return run_experiment(
+            config,
+            config_path=config_path,
+            write_outputs=write_outputs,
+            manifest_config=manifest_config,
+        )
     except Exception as exc:
         repair_enabled = config.get("training", {}).get("repair_on_failure", True)
         if not repair_enabled or not _is_repairable_training_failure(exc):
@@ -436,6 +463,7 @@ def run_experiment_with_repair(
             config_path=config_path,
             exc=exc,
             repair_attempted=True,
+            manifest_config=manifest_config,
         )
         if write_outputs:
             _save_metrics_artifact(config, failed)
@@ -448,6 +476,7 @@ def run_experiment_with_repair(
                 repaired_config,
                 config_path=config_path,
                 write_outputs=write_outputs,
+                manifest_config=manifest_config,
             )
         except Exception as repair_exc:
             failed = _failed_training_metrics(
@@ -456,6 +485,7 @@ def run_experiment_with_repair(
                 exc=exc,
                 repair_attempted=True,
                 repair_error=repair_exc,
+                manifest_config=manifest_config,
             )
             if write_outputs:
                 _save_metrics_artifact(config, failed)
@@ -504,9 +534,17 @@ def main():
             "Example: --kaggle-data-root /kaggle/input/my-combined-dataset"
         ),
     )
+    parser.add_argument(
+        "--diagnostic_only", action="store_true",
+        help=(
+            "Mark this run as a diagnostic/smoke run and append a diagnostic "
+            "suffix so it cannot be mistaken for a final manifest run."
+        ),
+    )
     args = parser.parse_args()
 
-    config = load_config(args.config)
+    manifest_config = load_config(args.config)
+    config = copy.deepcopy(manifest_config)
 
     # ── Kaggle environment overrides ──────────────────────────────────────────
     # Activated by --kaggle flag OR KAGGLE_ENV=1 env var (the env var form lets
@@ -536,8 +574,15 @@ def main():
         config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
     if args.batch_size_override is not None:
         training_cfg["batch_size"] = args.batch_size_override
+    if args.diagnostic_only:
+        output_cfg["run_name"] = f"{output_cfg['run_name']}_diagnostic"
+        config.setdefault("evaluation", {})["diagnostic_only"] = True
 
-    metrics = run_experiment_with_repair(config, config_path=args.config)
+    metrics = run_experiment_with_repair(
+        config,
+        config_path=args.config,
+        manifest_config=manifest_config,
+    )
     evaluation_cfg = config.get("evaluation", {})
     if not metrics["run_valid"] and evaluation_cfg.get("fail_on_invalid", True):
         print(f"Invalid run: {metrics['run_invalid_reason']}", file=sys.stderr)
@@ -549,6 +594,7 @@ def run_experiment(
     *,
     config_path: str = "<in-memory>",
     write_outputs: bool = True,
+    manifest_config: dict | None = None,
 ) -> dict:
     """Programmatic training + holdout inference. Returns the metrics dict.
 
@@ -587,6 +633,12 @@ def run_experiment(
     pipeline = PIPELINES[dataset_name]()
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
     print(f"  Train customers: {len(train_ds)}, Val: {len(val_ds)}, Inference: {len(inference_ds)}")
+    n_zero = _count_zero_calibration_customers(inference_ds)
+    if n_zero is not None:
+        print(
+            f"[{dataset_name}] Customers with 0 calibration transactions: "
+            f"{n_zero} / {len(inference_ds)}"
+        )
 
     # Build class_values for top-bin decode correction (A2).
     # pipeline.run() updates model_cfg["max_trans"] from calibration data, so this
@@ -685,6 +737,9 @@ def run_experiment(
         spend_loss_normalize=bool(loss_cfg.get("spend_loss_normalize", False)),
         scheduled_sampling=training_cfg.get("scheduled_sampling", None),
         amp_enabled=bool(training_cfg.get("amp_enabled", True)),
+        dataset_name=dataset_name,
+        run_id=output_cfg["run_name"],
+        checkpoint_dir=Path(output_cfg["results_dir"]) / "checkpoints",
     )
     history = trainer.fit(
         train_loader=train_loader,
@@ -695,12 +750,17 @@ def run_experiment(
 
     # Save checkpoint
     results_dir = Path(output_cfg["results_dir"])
+    temp_ckpt_dir = None
     if write_outputs and output_cfg.get("save_checkpoint", True):
         ckpt_dir = results_dir / "checkpoints"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         ckpt_path = ckpt_dir / f"{output_cfg['run_name']}.pt"
         torch.save(model.state_dict(), ckpt_path)
         print(f"\nCheckpoint saved: {ckpt_path}")
+    else:
+        temp_ckpt_dir = tempfile.TemporaryDirectory()
+        ckpt_path = Path(temp_ckpt_dir.name) / f"{output_cfg['run_name']}.pt"
+        torch.save(model.state_dict(), ckpt_path)
 
     inference_cfg = config.setdefault("inference", {})
     calibration_cfg = config.setdefault("calibration", {})
@@ -761,6 +821,18 @@ def run_experiment(
             if ("freq_factor" in calibration_cfg or "spend_factor" in calibration_cfg)
             else "none"
         )
+
+    try:
+        validate_pipeline_inputs(
+            model=model,
+            dataloader=inference_loader,
+            config=config,
+            checkpoint_path=ckpt_path,
+            device=device,
+        )
+    finally:
+        if temp_ckpt_dir is not None:
+            temp_ckpt_dir.cleanup()
 
     # Autoregressive inference on holdout
     print("\nRunning autoregressive inference on holdout period ...")
@@ -866,6 +938,8 @@ def run_experiment(
         **spend_kwargs,
     )
     metrics.update(calibration_metadata)
+    if evaluation_cfg.get("diagnostic_only", False):
+        metrics["diagnostic_only"] = True
     if training_cfg.get("repair_attempt", False):
         metrics["repair_attempted"] = True
         metrics["repair_strategy"] = training_cfg.get("repair_strategy", "")
@@ -880,6 +954,7 @@ def run_experiment(
         config_path=config_path,
         config=config,
         run_name=output_cfg["run_name"],
+        manifest_config=manifest_config,
     )
     _add_result_validity_checks(
         metrics,

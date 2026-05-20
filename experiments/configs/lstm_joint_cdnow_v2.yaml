@@ -8,6 +8,7 @@ dataset:
   min_active_weeks: 1
   prefer_sample_file: true
   val_fraction: 0.1
+  split_seed: 42
   freq_bins: [0, 1, 2, 3]
   spend_scaler: robust
 

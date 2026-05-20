@@ -11,36 +11,7 @@ Loading dataset: uci ...
 Model: lstm — 98,262 parameters
 
 Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
-  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
-[Kendall] log_vars frozen for 5 warm-up epochs.
-Epoch   1/300 — train_loss: 1.0392  val_loss: 0.9954  freq: 1.5707  spend: 0.4202  w_freq: 0.500  w_spend: 0.500
-Epoch   2/300 — train_loss: 0.9461  val_loss: 0.8542  freq: 1.2907  spend: 0.4177  w_freq: 0.500  w_spend: 0.500
-Epoch   3/300 — train_loss: 0.7385  val_loss: 0.5533  freq: 0.6987  spend: 0.4080  w_freq: 0.500  w_spend: 0.500
-Epoch   4/300 — train_loss: 0.4462  val_loss: 0.3633  freq: 0.3141  spend: 0.4125  w_freq: 0.500  w_spend: 0.500
-Epoch   5/300 — train_loss: 0.3649  val_loss: 0.3443  freq: 0.2811  spend: 0.4075  w_freq: 0.500  w_spend: 0.500
-[Kendall] log_vars unfrozen at epoch 6.
-Epoch   6/300 — train_loss: 0.3487  val_loss: 0.3331  freq: 0.2705  spend: 0.4044  w_freq: 0.502  w_spend: 0.501
-Epoch   7/300 — train_loss: 0.3522  val_loss: 0.3214  freq: 0.2652  spend: 0.3968  w_freq: 0.505  w_spend: 0.505
-Epoch   8/300 — train_loss: 0.3263  val_loss: 0.3165  freq: 0.2626  spend: 0.4011  w_freq: 0.509  w_spend: 0.509
-Epoch   9/300 — train_loss: 0.3021  val_loss: 0.2742  freq: 0.2584  spend: 0.3365  w_freq: 0.514  w_spend: 0.514
-Epoch  10/300 — train_loss: 0.2604  val_loss: 0.2208  freq: 0.2575  spend: 0.2497  w_freq: 0.520  w_spend: 0.519
-
-Training failed with a repairable error: FloatingPointError: Non-finite gradients in lstm.weight_ih_l0
-Metrics saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_metrics.json
-Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
-Config: experiments/configs/lstm_joint_uci_v2.yaml
-Run: lstm_joint_uci_v2_seed42_sample_repair
-Device: cuda
-Loading dataset: uci ...
-[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
-  Train customers: 4437, Val: 493, Inference: 4930
-[uci] Customers with 0 calibration transactions: 0 / 4930
-  top-bin decode: class_values[-1] = 5.515 (max_trans = 4)
-Model: lstm — 98,262 parameters
-
-Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+/kaggle/working/thesis-code/src/training/trainer.py:97: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
   self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 [Kendall] log_vars frozen for 5 warm-up epochs.
 Epoch   1/300 — train_loss: 1.0468  val_loss: 1.0192  freq: 1.6181  spend: 0.4204  w_freq: 0.500  w_spend: 0.500
@@ -182,7 +153,7 @@ Epoch 135/300 — train_loss: -0.6371  val_loss: -0.1790  freq: 0.2400  spend: 0
 Epoch 136/300 — train_loss: -0.6315  val_loss: -0.1753  freq: 0.2401  spend: 0.3023  w_freq: 0.987  w_spend: 1.171
 Early stopping triggered at epoch 136.
 
-Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_uci_v2_seed42_sample_repair.pt
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_uci_v2_seed42_sample.pt
 
 Duan's smearing factor (val): 1.2509
 Validation-fitted softmax temperature: 0.9783
@@ -200,8 +171,8 @@ Running autoregressive inference on holdout period ...
   Non-zero rate (pred, avg > 0.05):  0.289
   Non-zero rate (true):               0.055
 
-Metrics saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_repair_metrics.json
-Array artifacts saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_repair_arrays.npz
+Metrics saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_arrays.npz
 
 === Holdout Evaluation ===
   freq_rmse: 2.9033
@@ -249,17 +220,11 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_s
   validation_spend_pred_total: 867103.6953
   validation_freq_calibration_factor: 0.9825
   validation_spend_calibration_factor: 0.9886
-  repair_attempted: True
-  repair_strategy: amp_disabled; lr_0.0005; grad_clip_0.5
-  repair_source_failure_type: FloatingPointError
-  training_lr_after_repair: 0.0005
-  training_max_grad_norm_after_repair: 0.5000
-  training_amp_enabled_after_repair: False
   final_manifest_version: 2026-05-20-results-recovery-protocol
-  final_manifest_run_name: lstm_joint_uci_v2_seed42_sample_repair
+  final_manifest_run_name: lstm_joint_uci_v2_seed42_sample
   final_manifest_config: experiments/configs/lstm_joint_uci_v2.yaml
-  final_manifest_config_hash: 096b75255970
-  final_manifest_actual_config_hash: b08ef9274977
+  final_manifest_config_hash: d82c6643fc81
+  final_manifest_actual_config_hash: e25852bc1431
   final_manifest_seed: 42
   final_manifest_epochs: 300
   final_manifest_inference_mode: sample
@@ -267,4 +232,4 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_s
   run_valid: True
   run_invalid_reason: 
   run_warning: 
-History saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_repair_history.json
+History saved: /kaggle/working/results/tables/lstm_joint_uci_v2_seed42_sample_history.json

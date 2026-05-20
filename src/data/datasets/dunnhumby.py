@@ -69,7 +69,6 @@ class DunnhumbyPipeline(BasePipeline):
             "covariate_mode",
             "full" if include_covariates else "none",
         )
-        seed = config.get("training", {}).get("seed", 42)
 
         df = self.load_raw(raw_dir)
         df = self.clean(df)
@@ -105,11 +104,7 @@ class DunnhumbyPipeline(BasePipeline):
             )
 
         n = len(data["customer_ids"])
-        rng = np.random.RandomState(seed)
-        perm = rng.permutation(n)
-        n_val = int(n * val_fraction)
-        val_idx = perm[:n_val]
-        train_idx = perm[n_val:]
+        train_idx, val_idx = self.train_val_indices(n, val_fraction, dataset_cfg)
 
         train_data = _subset_data(data, train_idx)
         val_data = _subset_data(data, val_idx)

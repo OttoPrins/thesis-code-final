@@ -11,7 +11,7 @@ Loading dataset: cdnow ...
 Model: lstm — 89,132 parameters
 
 Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+/kaggle/working/thesis-code/src/training/trainer.py:97: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
   self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 Epoch   1/300 — train_loss: 1.3787  val_loss: 1.3726
 Epoch   2/300 — train_loss: 1.3635  val_loss: 1.3491

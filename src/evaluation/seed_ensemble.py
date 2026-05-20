@@ -32,11 +32,14 @@ from torch.utils.data import DataLoader
 
 from src.data.collate import collate_fn
 from src.evaluation.calibration import (
+    collect_autoregressive_rolling_validation,
     collect_teacher_forced_validation,
     fit_aggregate_calibration,
     fit_temperature_from_loader,
+    fit_temperature_from_rolling_origin,
 )
 from src.evaluation.metrics import compute_all_metrics, mase_scale, save_metrics_with_artifacts
+from src.evaluation.compare import parse_run_name
 from src.training.inference import (
     autoregressive_inference_lstm,
     autoregressive_inference_transformer,
@@ -86,18 +89,81 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
     top_bin = getattr(inference_ds, "top_bin_value", float(max_trans))
     class_values = torch.tensor(list(range(max_trans)) + [top_bin], dtype=torch.float32)
 
+    validation_cfg = config.get("validation", {})
+    calibration_cfg = config.get("calibration", {})
+    use_rolling = validation_cfg.get("mode") == "rolling_origin"
+    rolling_mode = calibration_cfg.get("rolling_origin_mode", "expected")
+    rolling_n_scenarios = int(calibration_cfg.get("rolling_origin_n_scenarios", 1))
+
     temperature = 1.0
     if fit_temperature:
-        temperature = fit_temperature_from_loader(model, val_loader, device=device)
-    smearing_factor = _compute_val_smearing(
-        model, val_loader, device, joint, scaler if joint else None
-    )
-    validation_totals = collect_teacher_forced_validation(
-        model, val_loader, device=device,
-        scaler=scaler if joint else None, temperature=temperature,
-        class_values=class_values.to(device),
-        smearing_factor=smearing_factor,
-    )
+        if use_rolling:
+            temperature = fit_temperature_from_rolling_origin(
+                model,
+                val_ds,
+                dataset_cfg=dataset_cfg,
+                validation_cfg=validation_cfg,
+                batch_size=batch_size,
+                device=device,
+                class_values=class_values,
+                candidates=calibration_cfg.get("temperature_candidates"),
+                mode=rolling_mode,
+                n_scenarios=rolling_n_scenarios,
+                use_kv_cache=config.get("inference", {}).get("use_kv_cache", True),
+            )
+        else:
+            temperature = fit_temperature_from_loader(model, val_loader, device=device)
+
+    rolling_totals = None
+    if use_rolling and joint:
+        rolling_totals = collect_autoregressive_rolling_validation(
+            model,
+            val_ds,
+            dataset_cfg=dataset_cfg,
+            validation_cfg=validation_cfg,
+            batch_size=batch_size,
+            device=device,
+            scaler=scaler,
+            temperature=temperature,
+            class_values=class_values,
+            smearing_factor=None,
+            mode=rolling_mode,
+            n_scenarios=rolling_n_scenarios,
+            use_kv_cache=config.get("inference", {}).get("use_kv_cache", True),
+        )
+        smearing_factor = rolling_totals.get("smearing_factor")
+        if smearing_factor is not None:
+            rolling_totals = None
+    else:
+        smearing_factor = _compute_val_smearing(
+            model, val_loader, device, joint, scaler if joint else None
+        )
+
+    if use_rolling:
+        if rolling_totals is None:
+            rolling_totals = collect_autoregressive_rolling_validation(
+                model,
+                val_ds,
+                dataset_cfg=dataset_cfg,
+                validation_cfg=validation_cfg,
+                batch_size=batch_size,
+                device=device,
+                scaler=scaler if joint else None,
+                temperature=temperature,
+                class_values=class_values,
+                smearing_factor=smearing_factor,
+                mode=rolling_mode,
+                n_scenarios=rolling_n_scenarios,
+                use_kv_cache=config.get("inference", {}).get("use_kv_cache", True),
+            )
+        validation_totals = rolling_totals
+    else:
+        validation_totals = collect_teacher_forced_validation(
+            model, val_loader, device=device,
+            scaler=scaler if joint else None, temperature=temperature,
+            class_values=class_values.to(device),
+            smearing_factor=smearing_factor,
+        )
     aggregate_cal = fit_aggregate_calibration(validation_totals) if fit_aggregate else None
 
     if model_cfg["type"] == "lstm":
@@ -148,6 +214,8 @@ def main() -> None:
         base_config.setdefault("output", {})["results_dir"] = args.results_dir
     results_dir = base_config.get("output", {}).get("results_dir", "results")
     run_name = args.run_name or f"{base_run}_ensemble_{args.mode}"
+    base_config.setdefault("inference", {})["mode"] = args.mode
+    base_config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
     device = _device()
     ckpt_dir = Path(args.checkpoint_dir)
 
@@ -232,7 +300,9 @@ def main() -> None:
     metrics["ensemble_seeds"] = list(args.seeds)
     metrics["ensemble_temperature"] = ens_temperature
     # Distinct model tag so compare.aggregate_all_results lists it as its own row.
-    metrics["model"] = f"{base_config.get('model', {}).get('type', 'model')}_ensemble"
+    base_model, _, _, _, _ = parse_run_name(base_run)
+    metrics["model"] = f"{base_model}_ensemble"
+    metrics["dataset"] = base_config.get("dataset", {}).get("name", "unknown")
 
     attach_manifest_metadata(
         metrics, config_path=args.config, config=base_config, run_name=run_name

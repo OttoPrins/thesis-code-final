@@ -63,6 +63,32 @@ class BasePipeline(ABC):
         """
         return None
 
+    @staticmethod
+    def split_seed(dataset_cfg: dict) -> int:
+        """
+        Seed used for customer-level train/validation splits.
+
+        This is intentionally separate from `training.seed`: seed sweeps should
+        vary optimiser/model randomness, not which customers are held out for
+        validation and calibration diagnostics. Configs can override the default
+        with `dataset.split_seed`.
+        """
+        return int(dataset_cfg.get("split_seed", 42))
+
+    def train_val_indices(
+        self,
+        n_customers: int,
+        val_fraction: float,
+        dataset_cfg: dict,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return deterministic train/validation row indices for customers."""
+        rng = np.random.RandomState(self.split_seed(dataset_cfg))
+        perm = rng.permutation(int(n_customers))
+        n_val = int(int(n_customers) * float(val_fraction))
+        val_idx = perm[:n_val]
+        train_idx = perm[n_val:]
+        return train_idx, val_idx
+
     def validate_clean_transactions(self, clean_df: pd.DataFrame, raw_dir: str) -> None:
         """Optional dataset-specific identity checks after cleaning."""
         return None

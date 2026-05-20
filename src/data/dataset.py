@@ -112,6 +112,12 @@ class CustomerDataset(Dataset):
             else:
                 self.seed_position = torch.arange(self.seed_week.shape[1]).repeat(self.seed_week.shape[0], 1)
             self.seed_trans = torch.tensor(data["seed_trans"], dtype=torch.long)
+            if "seed_raw_trans" in data:
+                self.seed_raw_trans = torch.tensor(
+                    data["seed_raw_trans"], dtype=torch.float32
+                )
+            else:
+                self.seed_raw_trans = self.seed_trans.float()
             self.seed_spend = torch.tensor(data["seed_spend"], dtype=torch.float32)
             if "seed_delta_t" in data:
                 self.seed_delta_t = torch.tensor(data["seed_delta_t"], dtype=torch.float32)
@@ -126,6 +132,7 @@ class CustomerDataset(Dataset):
         else:
             self.seed_week = None
             self.seed_position = None
+            self.seed_raw_trans = None
             self.seed_delta_t = None
             self.seed_state_features = None
 
@@ -175,6 +182,8 @@ class CustomerDataset(Dataset):
             if self.seed_position is not None:
                 item["seed_position"] = self.seed_position[idx]
             item["seed_trans"] = self.seed_trans[idx]
+            if self.seed_raw_trans is not None:
+                item["seed_raw_trans"] = self.seed_raw_trans[idx]
             item["seed_spend"] = self.seed_spend[idx]
             if self.seed_delta_t is not None:
                 item["seed_delta_t"] = self.seed_delta_t[idx]

@@ -61,7 +61,6 @@ class CDNOWPipeline(BasePipeline):
         holdout_weeks = dataset_cfg["holdout_weeks"]
         min_active = dataset_cfg.get("min_active_weeks", 5)
         val_fraction = dataset_cfg.get("val_fraction", 0.1)
-        seed = config.get("training", {}).get("seed", 42)
 
         # Stage 1: Load and clean
         self._current_dataset_cfg = dataset_cfg
@@ -112,11 +111,7 @@ class CDNOWPipeline(BasePipeline):
 
         # Stage 6: Train/val split by customer (shuffled, seeded)
         n = len(data["customer_ids"])
-        rng = np.random.RandomState(seed)
-        perm = rng.permutation(n)
-        n_val = int(n * val_fraction)
-        val_idx = perm[:n_val]
-        train_idx = perm[n_val:]
+        train_idx, val_idx = self.train_val_indices(n, val_fraction, dataset_cfg)
 
         train_data = _subset_data(data, train_idx)
         val_data = _subset_data(data, val_idx)

@@ -30,6 +30,12 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from src.evaluation.metrics import (
+    bias_pct as _bias_pct,
+    clv_decile_lift as _clv_decile_lift,
+    clv_spearman as _clv_spearman,
+    metrics_arrays_path,
+)
 from src.utils.final_manifest import load_final_manifest, result_matches_manifest
 
 logger = logging.getLogger(__name__)
@@ -164,6 +170,8 @@ def _filter_metric_files(
         arrays_path = metrics_path.with_name(arrays_file)
         if not arrays_path.exists():
             return False, f"array sidecar is missing: {arrays_path.name}"
+        if metrics.get("ensemble_seeds") is not None:
+            return True, "ok"
         checkpoint_path = metrics_path.parent.parent / "checkpoints" / f"{stem}.pt"
         if not checkpoint_path.exists():
             return False, f"checkpoint is missing: {checkpoint_path}"
@@ -451,6 +459,7 @@ def aggregate_all_results(
             canonical_model = metrics["model"]
 
         row = {
+            "run_name": stem,
             "model": canonical_model,
             "dataset": dataset,
             "version": version,
@@ -566,7 +575,7 @@ def aggregate_seeds(
         return df
 
     if metric_cols is None:
-        ignore = {"model", "dataset", "version", "seed", "mode"}
+        ignore = {"run_name", "model", "dataset", "version", "seed", "mode"}
         metric_cols = [
             c for c in df.columns
             if c not in ignore and pd.api.types.is_numeric_dtype(df[c])
@@ -594,6 +603,147 @@ def aggregate_seeds(
     agg["_sort"] = agg["model"].apply(_sort_key)
     agg = agg.sort_values(["dataset", "_sort"]).drop("_sort", axis=1).reset_index(drop=True)
     return agg
+
+
+def _bootstrap_interval(values_fn, n: int, *, n_resamples: int, seed: int) -> tuple[float, float, float]:
+    rng = np.random.default_rng(seed)
+    draws = np.empty(n_resamples, dtype=np.float64)
+    indices = np.arange(n)
+    observed = float(values_fn(indices))
+    for i in range(n_resamples):
+        idx = rng.integers(0, n, size=n)
+        draws[i] = float(values_fn(idx))
+    return observed, float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5))
+
+
+def _array_if_present(arrays: np.lib.npyio.NpzFile, key: str) -> Optional[np.ndarray]:
+    if key not in arrays:
+        return None
+    return np.asarray(arrays[key], dtype=np.float64)
+
+
+def build_metric_ci_table(
+    results_dir: str = "results/",
+    *,
+    final_only: bool = True,
+    include_expected: bool = False,
+    protocol_variant: str = "strict",
+    n_resamples: int = 1000,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Bootstrap per-model confidence intervals from per-customer sidecar arrays.
+
+    This complements paired model-vs-model bootstrap tests: it gives each table
+    row its own 95% customer-resampling interval for the metrics used in thesis
+    claims.
+    """
+    tables_dir = Path(results_dir) / "tables"
+    if not tables_dir.exists():
+        return pd.DataFrame()
+
+    import glob as _glob
+    all_files = sorted(_glob.glob(str(tables_dir / "*_metrics.json")))
+    all_files = [f for f in all_files if not Path(f).name.startswith("comparison_")]
+    all_files = _filter_metric_files(
+        all_files,
+        final_only=final_only,
+        include_expected=include_expected,
+        protocol_variant=protocol_variant,
+    )
+
+    rows: list[dict] = []
+    for fpath in all_files:
+        metrics_path = Path(fpath)
+        arrays_path = metrics_arrays_path(metrics_path)
+        if not arrays_path.exists():
+            continue
+        stem = _metric_stem(metrics_path)
+        canonical_model, dataset, version, run_seed, mode = parse_run_name(stem)
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        if "model" in metrics:
+            canonical_model = metrics["model"]
+        if "dataset" in metrics:
+            dataset = metrics["dataset"]
+
+        with np.load(arrays_path) as arrays:
+            specs = []
+            freq_se = _array_if_present(arrays, "per_customer_freq_se")
+            if freq_se is not None:
+                specs.append((
+                    "freq_rmse",
+                    len(freq_se),
+                    lambda idx, a=freq_se: np.sqrt(np.mean(a[idx])),
+                ))
+            freq_ae = _array_if_present(arrays, "per_customer_freq_ae")
+            if freq_ae is not None:
+                specs.append(("freq_mae", len(freq_ae), lambda idx, a=freq_ae: np.mean(a[idx])))
+
+            true_freq = _array_if_present(arrays, "per_customer_true_freq")
+            pred_freq = _array_if_present(arrays, "per_customer_pred_freq")
+            if true_freq is not None and pred_freq is not None:
+                specs.append((
+                    "bias_pct",
+                    len(true_freq),
+                    lambda idx, t=true_freq, p=pred_freq: _bias_pct(np.sum(t[idx]), np.sum(p[idx])),
+                ))
+
+            spend_ae = _array_if_present(arrays, "per_customer_spend_ae")
+            if spend_ae is not None:
+                specs.append((
+                    "spend_mae_raw",
+                    len(spend_ae),
+                    lambda idx, a=spend_ae: np.mean(a[idx]),
+                ))
+
+            clv_ae = _array_if_present(arrays, "per_customer_clv_ae")
+            if clv_ae is not None:
+                specs.append(("clv_mae", len(clv_ae), lambda idx, a=clv_ae: np.mean(a[idx])))
+
+            true_clv = _array_if_present(arrays, "per_customer_true_clv")
+            pred_clv = _array_if_present(arrays, "per_customer_pred_clv")
+            if true_clv is not None and pred_clv is not None:
+                specs.append((
+                    "clv_spearman",
+                    len(true_clv),
+                    lambda idx, t=true_clv, p=pred_clv: _clv_spearman(t[idx], p[idx]),
+                ))
+                specs.append((
+                    "clv_decile_lift",
+                    len(true_clv),
+                    lambda idx, t=true_clv, p=pred_clv: _clv_decile_lift(t[idx], p[idx]),
+                ))
+
+            for metric_name, n, fn in specs:
+                if n <= 1:
+                    continue
+                observed, ci_low, ci_high = _bootstrap_interval(
+                    fn, n, n_resamples=n_resamples, seed=seed
+                )
+                rows.append({
+                    "run_name": stem,
+                    "model": canonical_model,
+                    "dataset": dataset,
+                    "version": version,
+                    "seed": run_seed,
+                    "mode": mode,
+                    "protocol_variant": protocol_variant_from_stem(stem),
+                    "metric": metric_name,
+                    "estimate": observed,
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
+                    "n_customers": n,
+                    "n_resamples": n_resamples,
+                })
+
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows)
+    out["_sort"] = out["model"].apply(_sort_key)
+    return out.sort_values(["dataset", "_sort", "run_name", "metric"]).drop(
+        "_sort", axis=1
+    ).reset_index(drop=True)
 
 
 def export_latex_table(
@@ -771,6 +921,10 @@ if __name__ == "__main__":
                         help="Generate Kendall weight evolution plots")
     parser.add_argument("--seeds", action="store_true",
                         help="Aggregate seeded runs (mean ± std) into comparison_seeds.csv")
+    parser.add_argument("--cis", action="store_true",
+                        help="Bootstrap per-model metric confidence intervals into comparison_cis.csv")
+    parser.add_argument("--ci_resamples", type=int, default=1000,
+                        help="Bootstrap resamples for --cis")
     parser.add_argument("--include_exploratory", action="store_true",
                         help="Include non-manifest or pre-final metrics files")
     parser.add_argument("--include_expected", action="store_true",
@@ -847,6 +1001,18 @@ if __name__ == "__main__":
             seeds_df = aggregate_seeds(df)
             out_path = tables_dir / "comparison_seeds.csv"
             seeds_df.to_csv(out_path, index=False)
+            print(f"Saved: {out_path}")
+
+        if do_all or args.cis:
+            cis_df = build_metric_ci_table(
+                args.results_dir,
+                final_only=not args.include_exploratory,
+                include_expected=args.include_expected,
+                protocol_variant=args.protocol_variant,
+                n_resamples=args.ci_resamples,
+            )
+            out_path = tables_dir / "comparison_cis.csv"
+            cis_df.to_csv(out_path, index=False)
             print(f"Saved: {out_path}")
 
         # Always save the aggregated CSV

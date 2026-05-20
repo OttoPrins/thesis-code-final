@@ -1,11 +1,17 @@
 import numpy as np
 import pandas as pd
 import pytest
+import copy
 
 from src.data.datasets.cdnow import CDNOWPipeline
 from src.data.datasets.dunnhumby import DunnhumbyPipeline
 from src.data.datasets.uci_retail import UCIRetailPipeline
+from src.data.dataset import CustomerDataset
 from src.data.transforms import SequenceBuilder, SpendScaler
+from src.evaluation.calibration import (
+    RollingOriginInferenceDataset,
+    validate_rolling_origins,
+)
 
 
 def test_cdnow_loads_canonical_5_column_sample(tmp_path):
@@ -147,3 +153,61 @@ def test_dunnhumby_covariate_modes_attach_expected_views():
     assert {"static_covariates", "dynamic_covariates"} <= set(full_train[0])
     assert "static_covariates" not in none_train[0]
     assert "dynamic_covariates" not in none_train[0]
+
+
+def test_split_seed_makes_validation_ids_invariant_to_training_seed(tmp_path):
+    rows = []
+    for cid in range(1, 9):
+        rows.append(f"{cid:05d} {cid:04d} 19970101 1 {10.0 + cid:.2f}\n")
+        rows.append(f"{cid:05d} {cid:04d} 19970108 1 {11.0 + cid:.2f}\n")
+    (tmp_path / "CDNOW_sample.txt").write_text("".join(rows))
+
+    base_cfg = {
+        "dataset": {
+            "name": "cdnow",
+            "raw_dir": str(tmp_path),
+            "calibration_weeks": 3,
+            "holdout_weeks": 1,
+            "origin_date": "1997-01-01",
+            "min_active_weeks": 1,
+            "prefer_sample_file": True,
+            "val_fraction": 0.25,
+            "split_seed": 999,
+            "freq_bins": [0, 1, 2, 3],
+        },
+        "model": {},
+        "training": {"seed": 7},
+    }
+    cfg_other_seed = copy.deepcopy(base_cfg)
+    cfg_other_seed["training"]["seed"] = 123
+
+    _, val_a, _, _, _ = CDNOWPipeline().run(copy.deepcopy(base_cfg))
+    _, val_b, _, _, _ = CDNOWPipeline().run(cfg_other_seed)
+
+    assert val_a.customer_ids.tolist() == val_b.customer_ids.tolist()
+
+
+def test_rolling_origin_validation_rejects_holdout_leakage():
+    dataset_cfg = {"calibration_weeks": 10}
+    validate_rolling_origins(dataset_cfg, [(6, 4)])
+    with pytest.raises(ValueError, match="must not touch the final holdout"):
+        validate_rolling_origins(dataset_cfg, [(8, 3)])
+
+
+def test_rolling_origin_truth_uses_raw_unclipped_counts():
+    df = pd.DataFrame({
+        "customer_id": [1, 1, 1, 1],
+        "week": [0, 1, 2, 3],
+        "weekly_freq": [1, 2, 5, 4],
+        "log_spend": [1.0, 1.1, 1.2, 1.3],
+    })
+    data = SequenceBuilder(
+        calibration_weeks=4,
+        min_active_weeks=1,
+        freq_bins=[0, 1, 2, 3],
+    ).build(df)
+    ds = CustomerDataset(data, include_seed=True)
+    ro_ds = RollingOriginInferenceDataset(ds, train_weeks=2, validation_weeks=2)
+
+    assert ro_ds.true_freq().tolist() == [[5.0, 4.0]]
+    assert ds.seed_trans[:, 2:].tolist() == [[3, 3]]

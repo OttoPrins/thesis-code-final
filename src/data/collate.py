@@ -62,6 +62,10 @@ def collate_fn(batch):
                 [item["seed_position"] for item in batch]
             )
         result["seed_trans"] = torch.stack([item["seed_trans"] for item in batch])
+        if "seed_raw_trans" in batch[0]:
+            result["seed_raw_trans"] = torch.stack(
+                [item["seed_raw_trans"] for item in batch]
+            )
         result["seed_spend"] = torch.stack([item["seed_spend"] for item in batch])
         if "seed_delta_t" in batch[0]:
             result["seed_delta_t"] = torch.stack(

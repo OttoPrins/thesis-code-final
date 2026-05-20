@@ -11,67 +11,7 @@ Loading dataset: tafeng ...
 Model: lstm — 98,262 parameters
 
 Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
-  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
-[Kendall] log_vars frozen for 5 warm-up epochs.
-Epoch   1/300 — train_loss: 0.9887  val_loss: 0.9575  freq: 1.6203  spend: 0.2946  w_freq: 0.500  w_spend: 0.500
-Epoch   2/300 — train_loss: 0.8498  val_loss: 0.6181  freq: 0.9743  spend: 0.2619  w_freq: 0.500  w_spend: 0.500
-Epoch   3/300 — train_loss: 0.4945  val_loss: 0.4540  freq: 0.6721  spend: 0.2359  w_freq: 0.500  w_spend: 0.500
-Epoch   4/300 — train_loss: 0.4410  val_loss: 0.4339  freq: 0.6407  spend: 0.2271  w_freq: 0.500  w_spend: 0.500
-Epoch   5/300 — train_loss: 0.4170  val_loss: 0.3920  freq: 0.6117  spend: 0.1722  w_freq: 0.500  w_spend: 0.500
-[Kendall] log_vars unfrozen at epoch 6.
-Epoch   6/300 — train_loss: 0.3647  val_loss: 0.3421  freq: 0.5896  spend: 0.1172  w_freq: 0.504  w_spend: 0.504
-Epoch   7/300 — train_loss: 0.3328  val_loss: 0.3168  freq: 0.5787  spend: 0.1049  w_freq: 0.514  w_spend: 0.514
-Epoch   8/300 — train_loss: 0.3098  val_loss: 0.2956  freq: 0.5721  spend: 0.1013  w_freq: 0.525  w_spend: 0.526
-Epoch   9/300 — train_loss: 0.2878  val_loss: 0.2729  freq: 0.5661  spend: 0.0979  w_freq: 0.539  w_spend: 0.540
-Epoch  10/300 — train_loss: 0.2654  val_loss: 0.2530  freq: 0.5667  spend: 0.0964  w_freq: 0.555  w_spend: 0.556
-Epoch  11/300 — train_loss: 0.2413  val_loss: 0.2272  freq: 0.5602  spend: 0.0944  w_freq: 0.572  w_spend: 0.574
-Epoch  12/300 — train_loss: 0.2207  val_loss: 0.2101  freq: 0.5647  spend: 0.0947  w_freq: 0.590  w_spend: 0.595
-Epoch  13/300 — train_loss: 0.1949  val_loss: 0.1802  freq: 0.5575  spend: 0.0900  w_freq: 0.609  w_spend: 0.616
-Epoch  14/300 — train_loss: 0.1690  val_loss: 0.1574  freq: 0.5572  spend: 0.0926  w_freq: 0.631  w_spend: 0.641
-Epoch  15/300 — train_loss: 0.1446  val_loss: 0.1307  freq: 0.5560  spend: 0.0889  w_freq: 0.654  w_spend: 0.670
-Epoch  16/300 — train_loss: 0.1164  val_loss: 0.1077  freq: 0.5558  spend: 0.0924  w_freq: 0.677  w_spend: 0.701
-Epoch  17/300 — train_loss: 0.0926  val_loss: 0.0827  freq: 0.5568  spend: 0.0894  w_freq: 0.701  w_spend: 0.735
-Epoch  18/300 — train_loss: 0.0664  val_loss: 0.0776  freq: 0.5553  spend: 0.1144  w_freq: 0.723  w_spend: 0.770
-Epoch  19/300 — train_loss: 0.0416  val_loss: 0.0460  freq: 0.5597  spend: 0.0987  w_freq: 0.745  w_spend: 0.807
-Epoch  20/300 — train_loss: 0.0163  val_loss: 0.0125  freq: 0.5553  spend: 0.0901  w_freq: 0.766  w_spend: 0.848
-Epoch  21/300 — train_loss: -0.0070  val_loss: -0.0081  freq: 0.5561  spend: 0.0901  w_freq: 0.786  w_spend: 0.891
-Epoch  22/300 — train_loss: -0.0316  val_loss: -0.0335  freq: 0.5550  spend: 0.0871  w_freq: 0.804  w_spend: 0.934
-Epoch  23/300 — train_loss: -0.0569  val_loss: -0.0543  freq: 0.5546  spend: 0.0879  w_freq: 0.822  w_spend: 0.981
-Epoch  24/300 — train_loss: -0.0775  val_loss: -0.0761  freq: 0.5566  spend: 0.0851  w_freq: 0.838  w_spend: 1.031
-Epoch  25/300 — train_loss: -0.1007  val_loss: -0.0982  freq: 0.5551  spend: 0.0844  w_freq: 0.851  w_spend: 1.082
-Epoch  26/300 — train_loss: -0.1212  val_loss: -0.1152  freq: 0.5569  spend: 0.0848  w_freq: 0.864  w_spend: 1.134
-Epoch  27/300 — train_loss: -0.1424  val_loss: -0.1306  freq: 0.5553  spend: 0.0889  w_freq: 0.874  w_spend: 1.188
-Epoch  28/300 — train_loss: -0.1637  val_loss: -0.1498  freq: 0.5545  spend: 0.0887  w_freq: 0.883  w_spend: 1.246
-Epoch  29/300 — train_loss: -0.1823  val_loss: -0.1579  freq: 0.5543  spend: 0.0961  w_freq: 0.891  w_spend: 1.305
-Epoch  30/300 — train_loss: -0.2010  val_loss: -0.1891  freq: 0.5539  spend: 0.0860  w_freq: 0.897  w_spend: 1.365
-Epoch  31/300 — train_loss: -0.2230  val_loss: -0.2069  freq: 0.5540  spend: 0.0855  w_freq: 0.902  w_spend: 1.430
-Epoch  32/300 — train_loss: -0.2392  val_loss: -0.2161  freq: 0.5548  spend: 0.0895  w_freq: 0.907  w_spend: 1.495
-Epoch  33/300 — train_loss: -0.2585  val_loss: -0.2353  freq: 0.5542  spend: 0.0873  w_freq: 0.911  w_spend: 1.559
-Epoch  34/300 — train_loss: -0.2763  val_loss: -0.2330  freq: 0.5552  spend: 0.0973  w_freq: 0.914  w_spend: 1.628
-Epoch  35/300 — train_loss: -0.2911  val_loss: -0.2581  freq: 0.5565  spend: 0.0899  w_freq: 0.917  w_spend: 1.694
-Epoch  36/300 — train_loss: -0.3074  val_loss: -0.2790  freq: 0.5550  spend: 0.0866  w_freq: 0.918  w_spend: 1.764
-Epoch  37/300 — train_loss: -0.3230  val_loss: -0.2937  freq: 0.5549  spend: 0.0855  w_freq: 0.920  w_spend: 1.833
-Epoch  38/300 — train_loss: -0.3414  val_loss: -0.2986  freq: 0.5554  spend: 0.0897  w_freq: 0.920  w_spend: 1.907
-Epoch  39/300 — train_loss: -0.3593  val_loss: -0.3094  freq: 0.5549  spend: 0.0908  w_freq: 0.922  w_spend: 1.982
-Epoch  40/300 — train_loss: -0.3755  val_loss: -0.3138  freq: 0.5534  spend: 0.0951  w_freq: 0.922  w_spend: 2.061
-Epoch  41/300 — train_loss: -0.3884  val_loss: -0.3252  freq: 0.5560  spend: 0.0940  w_freq: 0.923  w_spend: 2.141
-
-Training failed with a repairable error: FloatingPointError: Non-finite gradients in spend_head.weight, spend_head.bias
-Metrics saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_metrics.json
-Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
-Config: experiments/configs/lstm_joint_tafeng_v2.yaml
-Run: lstm_joint_tafeng_v2_seed123_sample_repair
-Device: cuda
-Loading dataset: tafeng ...
-[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
-  Train customers: 25029, Val: 2780, Inference: 27809
-[tafeng] Customers with 0 calibration transactions: 0 / 27809
-  top-bin decode: class_values[-1] = 4.473 (max_trans = 4)
-Model: lstm — 98,262 parameters
-
-Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+/kaggle/working/thesis-code/src/training/trainer.py:97: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
   self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 [Kendall] log_vars frozen for 5 warm-up epochs.
 Epoch   1/300 — train_loss: 0.9960  val_loss: 0.9803  freq: 1.6647  spend: 0.2960  w_freq: 0.500  w_spend: 0.500
@@ -203,7 +143,7 @@ Epoch 125/300 — train_loss: -0.7513  val_loss: -0.2868  freq: 0.5548  spend: 0
 Epoch 126/300 — train_loss: -0.7720  val_loss: -0.2463  freq: 0.5551  spend: 0.1473  w_freq: 0.927  w_spend: 3.904
 Early stopping triggered at epoch 126.
 
-Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_tafeng_v2_seed123_sample_repair.pt
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_tafeng_v2_seed123_sample.pt
 
 Duan's smearing factor (val): 1.5817
 Validation-fitted softmax temperature: 1.0180
@@ -221,8 +161,8 @@ Running autoregressive inference on holdout period ...
   Non-zero rate (pred, avg > 0.05):  0.973
   Non-zero rate (true):               0.175
 
-Metrics saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_repair_metrics.json
-Array artifacts saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_repair_arrays.npz
+Metrics saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_arrays.npz
 
 === Holdout Evaluation ===
   freq_rmse: 1.3283
@@ -270,17 +210,11 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed1
   validation_spend_pred_total: 4795432.7475
   validation_freq_calibration_factor: 0.9992
   validation_spend_calibration_factor: 0.9730
-  repair_attempted: True
-  repair_strategy: amp_disabled; lr_0.0005; grad_clip_0.5
-  repair_source_failure_type: FloatingPointError
-  training_lr_after_repair: 0.0005
-  training_max_grad_norm_after_repair: 0.5000
-  training_amp_enabled_after_repair: False
   final_manifest_version: 2026-05-20-results-recovery-protocol
-  final_manifest_run_name: lstm_joint_tafeng_v2_seed123_sample_repair
+  final_manifest_run_name: lstm_joint_tafeng_v2_seed123_sample
   final_manifest_config: experiments/configs/lstm_joint_tafeng_v2.yaml
-  final_manifest_config_hash: f7695b59363e
-  final_manifest_actual_config_hash: 7adbf49a3f15
+  final_manifest_config_hash: eb185c5e24bc
+  final_manifest_actual_config_hash: 14bc6b873b90
   final_manifest_seed: 123
   final_manifest_epochs: 300
   final_manifest_inference_mode: sample
@@ -288,4 +222,4 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed1
   run_valid: True
   run_invalid_reason: 
   run_warning: large spend bias (102.4%)
-History saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_repair_history.json
+History saved: /kaggle/working/results/tables/lstm_joint_tafeng_v2_seed123_sample_history.json

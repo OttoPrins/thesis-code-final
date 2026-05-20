@@ -6,6 +6,7 @@ dataset:
   holdout_weeks: 4
   min_active_weeks: 1
   val_fraction: 0.1
+  split_seed: 42
   freq_cap: auto
   spend_scaler: robust
   include_covariates: false

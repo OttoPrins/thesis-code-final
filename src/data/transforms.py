@@ -323,6 +323,7 @@ class SequenceBuilder:
         # Pre-allocate arrays (dense grid: every customer gets T weeks, default 0)
         full_positions = np.tile(np.arange(T, dtype=np.int32), (N, 1))  # (N, T)
         full_weeks = (full_positions % 52).astype(np.int32)  # calendar week-of-year
+        full_raw_trans = np.zeros((N, T), dtype=np.int32)
         full_trans = np.zeros((N, T), dtype=np.int32)
         full_spend = np.zeros((N, T), dtype=np.float32)
 
@@ -340,9 +341,9 @@ class SequenceBuilder:
         top_vals = raw_freq[raw_freq >= self.max_trans]
         top_bin_value: float = float(np.mean(top_vals)) if len(top_vals) > 0 else float(self.max_trans)
 
-        full_trans[row_idx, col_idx] = np.minimum(
-            raw_freq.astype(np.int32), self.max_trans
-        )
+        raw_freq_int = raw_freq.astype(np.int32)
+        full_raw_trans[row_idx, col_idx] = raw_freq_int
+        full_trans[row_idx, col_idx] = np.minimum(raw_freq_int, self.max_trans)
         full_spend[row_idx, col_idx] = df_fill[spend_col].values.astype(np.float32)
 
         # Per-step elapsed-time signal — computed AFTER the dense grid is filled
@@ -390,6 +391,7 @@ class SequenceBuilder:
             "seed_week": full_weeks,
             "seed_position": full_positions,
             "seed_trans": full_trans,
+            "seed_raw_trans": full_raw_trans,
             "seed_spend": full_spend,
             "seed_delta_t": full_delta_t,
             "seed_state_features": seed_state_features,

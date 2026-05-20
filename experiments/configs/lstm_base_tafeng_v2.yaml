@@ -6,6 +6,7 @@ dataset:
   holdout_weeks: 5        # ~5 weeks holdout
   min_active_weeks: 1
   val_fraction: 0.1
+  split_seed: 42
   freq_cap: auto           # 99th-percentile cap from calibration (~30/week)
   max_week: 51
   max_trans: 5             # placeholder; pipeline overrides from freq_cap=auto

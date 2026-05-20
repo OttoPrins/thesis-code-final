@@ -37,9 +37,11 @@ from src.evaluation.metrics import (
     save_metrics_with_artifacts,
 )
 from src.evaluation.calibration import (
+    collect_autoregressive_rolling_validation,
     collect_teacher_forced_validation,
     fit_aggregate_calibration,
     fit_temperature_from_loader,
+    fit_temperature_from_rolling_origin,
 )
 from src.evaluation.validate_pipeline import validate_pipeline_inputs
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
@@ -291,6 +293,12 @@ def _add_result_validity_checks(
                     )
                 spend_bias = metrics.get("spend_bias_pct")
                 if isinstance(spend_bias, (int, float)) and np.isfinite(spend_bias):
+                    max_abs_spend_bias = evaluation_cfg.get("validity_max_abs_spend_bias_pct")
+                    if max_abs_spend_bias is not None and abs(float(spend_bias)) > float(max_abs_spend_bias):
+                        invalid_reasons.append(
+                            f"absolute spend bias {float(spend_bias):.1f}% exceeds "
+                            f"{float(max_abs_spend_bias):.1f}%"
+                        )
                     if abs(float(spend_bias)) > float(
                         evaluation_cfg.get("warning_abs_spend_bias_pct", 100.0)
                     ):
@@ -768,16 +776,34 @@ def run_experiment(
     calibration_cfg = config.setdefault("calibration", {})
     calibration_metadata: dict[str, float | str] = {}
 
-    # Compute smearing factor from validation residuals (joint models only)
-    smearing_factor = _compute_val_smearing(model, val_loader, device, joint, scaler if joint else None)
-    if smearing_factor is not None:
-        print(f"\nDuan's smearing factor (val): {smearing_factor:.4f}")
-
     temperature = float(inference_cfg.get("temperature", 1.0))
+    validation_cfg = config.get("validation", {})
+    use_rolling_origin_calibration = validation_cfg.get("mode") == "rolling_origin"
+    rolling_mode = calibration_cfg.get("rolling_origin_mode", "expected")
+    rolling_n_scenarios = int(calibration_cfg.get("rolling_origin_n_scenarios", 1))
+
     if calibration_cfg.get("temperature_scaling", False):
-        temperature = fit_temperature_from_loader(model, val_loader, device=device)
+        if use_rolling_origin_calibration:
+            temperature = fit_temperature_from_rolling_origin(
+                model,
+                val_ds,
+                dataset_cfg=dataset_cfg,
+                validation_cfg=validation_cfg,
+                batch_size=batch_size,
+                device=device,
+                class_values=class_values,
+                candidates=calibration_cfg.get("temperature_candidates"),
+                mode=rolling_mode,
+                n_scenarios=rolling_n_scenarios,
+                use_kv_cache=inference_cfg.get("use_kv_cache", True),
+            )
+            calibration_metadata["calibration_temperature_source"] = (
+                "rolling_origin_autoregressive"
+            )
+        else:
+            temperature = fit_temperature_from_loader(model, val_loader, device=device)
+            calibration_metadata["calibration_temperature_source"] = "validation_only"
         inference_cfg["temperature"] = float(temperature)
-        calibration_metadata["calibration_temperature_source"] = "validation_only"
         calibration_metadata["validation_temperature"] = float(temperature)
         print(f"Validation-fitted softmax temperature: {temperature:.4f}")
     else:
@@ -785,16 +811,73 @@ def run_experiment(
             "config" if "temperature" in inference_cfg else "default"
         )
 
+    rolling_validation_totals = None
+
+    # Compute smearing factor from validation residuals (joint models only).
+    # Prefer autoregressive rolling-origin residuals so the correction matches
+    # holdout inference; fall back to teacher forcing for legacy configs.
+    smearing_factor = None
+    if joint:
+        if use_rolling_origin_calibration:
+            rolling_validation_totals = collect_autoregressive_rolling_validation(
+                model,
+                val_ds,
+                dataset_cfg=dataset_cfg,
+                validation_cfg=validation_cfg,
+                batch_size=batch_size,
+                device=device,
+                scaler=scaler if joint else None,
+                temperature=temperature,
+                class_values=class_values,
+                smearing_factor=None,
+                mode=rolling_mode,
+                n_scenarios=rolling_n_scenarios,
+                use_kv_cache=inference_cfg.get("use_kv_cache", True),
+            )
+            smearing_factor = rolling_validation_totals.get("smearing_factor")
+            if smearing_factor is not None:
+                rolling_validation_totals = None  # recompute spend totals with smearing applied
+                calibration_metadata["smearing_source"] = "rolling_origin_autoregressive"
+        else:
+            smearing_factor = _compute_val_smearing(
+                model, val_loader, device, joint, scaler if joint else None
+            )
+            if smearing_factor is not None:
+                calibration_metadata["smearing_source"] = "validation_teacher_forced"
+    if smearing_factor is not None:
+        print(f"\nDuan's smearing factor (val): {smearing_factor:.4f}")
+
     if calibration_cfg.get("aggregate_scaling", False):
-        validation_totals = collect_teacher_forced_validation(
-            model,
-            val_loader,
-            device=device,
-            scaler=scaler if joint else None,
-            temperature=temperature,
-            class_values=class_values.to(device),
-            smearing_factor=smearing_factor,
-        )
+        if use_rolling_origin_calibration:
+            if rolling_validation_totals is None:
+                rolling_validation_totals = collect_autoregressive_rolling_validation(
+                    model,
+                    val_ds,
+                    dataset_cfg=dataset_cfg,
+                    validation_cfg=validation_cfg,
+                    batch_size=batch_size,
+                    device=device,
+                    scaler=scaler if joint else None,
+                    temperature=temperature,
+                    class_values=class_values,
+                    smearing_factor=smearing_factor,
+                    mode=rolling_mode,
+                    n_scenarios=rolling_n_scenarios,
+                    use_kv_cache=inference_cfg.get("use_kv_cache", True),
+                )
+            validation_totals = rolling_validation_totals
+            calibration_source = "rolling_origin_autoregressive"
+        else:
+            validation_totals = collect_teacher_forced_validation(
+                model,
+                val_loader,
+                device=device,
+                scaler=scaler if joint else None,
+                temperature=temperature,
+                class_values=class_values.to(device),
+                smearing_factor=smearing_factor,
+            )
+            calibration_source = "validation_only"
         aggregate_calibration = fit_aggregate_calibration(
             validation_totals,
             shrinkage=float(calibration_cfg.get("aggregate_shrinkage", 0.5)),
@@ -804,7 +887,7 @@ def run_experiment(
         calibration_cfg["freq_factor"] = float(aggregate_calibration.freq_factor)
         calibration_cfg["spend_factor"] = float(aggregate_calibration.spend_factor)
         calibration_metadata.update({
-            "calibration_source": "validation_only",
+            "calibration_source": calibration_source,
             "validation_freq_true_total": float(validation_totals["freq_true_total"]),
             "validation_freq_pred_total": float(validation_totals["freq_pred_total"]),
             "validation_spend_true_total": float(validation_totals["spend_true_total"]),
@@ -812,6 +895,10 @@ def run_experiment(
             "validation_freq_calibration_factor": float(aggregate_calibration.freq_factor),
             "validation_spend_calibration_factor": float(aggregate_calibration.spend_factor),
         })
+        if "n_origins" in validation_totals:
+            calibration_metadata["validation_rolling_origin_count"] = int(
+                validation_totals["n_origins"]
+            )
         print(
             "Validation aggregate calibration: "
             f"freq_factor={aggregate_calibration.freq_factor:.4f}, "

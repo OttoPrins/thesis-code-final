@@ -11,25 +11,7 @@ Loading dataset: dunnhumby ...
 Model: transformer — 102,569 parameters
 
 Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
-  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
-[Kendall] log_vars frozen for 5 warm-up epochs.
-
-Training failed with a repairable error: FloatingPointError: Non-finite gradients in freq_head.weight, spend_head.weight
-Metrics saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_metrics.json
-Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
-Config: experiments/configs/transformer_joint_dunnhumby_v2.yaml
-Run: transformer_joint_dunnhumby_v2_seed7_sample_repair
-Device: cuda
-Loading dataset: dunnhumby ...
-[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
-  Train customers: 2249, Val: 249, Inference: 2498
-[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
-  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
-Model: transformer — 102,569 parameters
-
-Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+/kaggle/working/thesis-code/src/training/trainer.py:97: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
   self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 [Kendall] log_vars frozen for 5 warm-up epochs.
 Epoch   1/300 — train_loss: 3.7067  val_loss: 3.3014  freq: 6.1621  spend: 0.4407  w_freq: 0.500  w_spend: 0.500
@@ -334,7 +316,7 @@ Epoch 298/300 — train_loss: 0.1308  val_loss: 0.1821  freq: 1.2160  spend: -0.
 Epoch 299/300 — train_loss: 0.1290  val_loss: 0.1821  freq: 1.2160  spend: -0.0608  w_freq: 0.427  w_spend: 1.016
 Epoch 300/300 — train_loss: 0.1309  val_loss: 0.1821  freq: 1.2160  spend: -0.0608  w_freq: 0.427  w_spend: 1.016
 
-Checkpoint saved: /kaggle/working/results/checkpoints/transformer_joint_dunnhumby_v2_seed7_sample_repair.pt
+Checkpoint saved: /kaggle/working/results/checkpoints/transformer_joint_dunnhumby_v2_seed7_sample.pt
 
 Duan's smearing factor (val): 1.4218
 Validation-fitted softmax temperature: 1.0295
@@ -352,8 +334,8 @@ Running autoregressive inference on holdout period ...
   Non-zero rate (pred, avg > 0.05):  0.985
   Non-zero rate (true):               0.532
 
-Metrics saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_repair_metrics.json
-Array artifacts saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_repair_arrays.npz
+Metrics saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_arrays.npz
 
 === Holdout Evaluation ===
   freq_rmse: 15.0001
@@ -401,17 +383,11 @@ Array artifacts saved: /kaggle/working/results/tables/transformer_joint_dunnhumb
   validation_spend_pred_total: 698978.8620
   validation_freq_calibration_factor: 0.9865
   validation_spend_calibration_factor: 0.9623
-  repair_attempted: True
-  repair_strategy: amp_disabled; lr_0.0005; grad_clip_0.5
-  repair_source_failure_type: FloatingPointError
-  training_lr_after_repair: 0.0005
-  training_max_grad_norm_after_repair: 0.5000
-  training_amp_enabled_after_repair: False
   final_manifest_version: 2026-05-20-results-recovery-protocol
-  final_manifest_run_name: transformer_joint_dunnhumby_v2_seed7_sample_repair
+  final_manifest_run_name: transformer_joint_dunnhumby_v2_seed7_sample
   final_manifest_config: experiments/configs/transformer_joint_dunnhumby_v2.yaml
-  final_manifest_config_hash: a984ee30201b
-  final_manifest_actual_config_hash: 42b6bc6b5a3a
+  final_manifest_config_hash: 42644cccbc45
+  final_manifest_actual_config_hash: a4a3f532f141
   final_manifest_seed: 7
   final_manifest_epochs: 300
   final_manifest_inference_mode: sample
@@ -419,4 +395,4 @@ Array artifacts saved: /kaggle/working/results/tables/transformer_joint_dunnhumb
   run_valid: True
   run_invalid_reason: 
   run_warning: 
-History saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_repair_history.json
+History saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v2_seed7_sample_history.json

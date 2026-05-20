@@ -189,7 +189,12 @@ def result_matches_manifest(
         return False, "config hash does not match frozen manifest"
 
     seeds = set(manifest.get("methodology", {}).get("seeds", []))
-    if metrics.get("final_manifest_seed") not in seeds:
+    is_ensemble = "_ensemble_" in stem
+    if is_ensemble:
+        ensemble_seeds = set(metrics.get("ensemble_seeds", []))
+        if ensemble_seeds != seeds:
+            return False, "ensemble_seeds do not match frozen seed sweep"
+    elif metrics.get("final_manifest_seed") not in seeds:
         return False, "seed is not in frozen seed sweep"
 
     runtime = _runtime_expectations(manifest, cfg_norm)
@@ -241,4 +246,7 @@ def allowed_final_run_names(
                 allowed.add(seeded_expected)
                 if include_repaired:
                     allowed.add(f"{seeded_expected}_repair")
+        allowed.add(f"{run_name}_ensemble_sample")
+        if include_expected:
+            allowed.add(f"{run_name}_ensemble_expected")
     return allowed

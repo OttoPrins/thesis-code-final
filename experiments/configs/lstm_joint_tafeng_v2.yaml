@@ -6,6 +6,7 @@ dataset:
   holdout_weeks: 5
   min_active_weeks: 1
   val_fraction: 0.1
+  split_seed: 42
   freq_cap: auto
   spend_scaler: robust
 
@@ -42,4 +43,4 @@ loss: {type: kendall, n_tasks: 2, warmup_epochs: 5, spend_loss: nll, freq_logvar
 calibration: {temperature_scaling: true, aggregate_scaling: true}
 output: {run_name: lstm_joint_tafeng_v2, results_dir: results, save_checkpoint: true}
 inference: {n_scenarios: 200, mode: sample}
-evaluation: {weekly_discount_rate: 0.0}
+evaluation: {weekly_discount_rate: 0.0, warning_abs_spend_bias_pct: 50.0, validity_max_abs_spend_bias_pct: 50.0}

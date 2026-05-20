@@ -3,7 +3,7 @@
 # unless a command explicitly requests exploratory runs.
 
 version: 2026-05-20-results-recovery-protocol
-results_status: pending_strict_regeneration_after_stability_fixes
+results_status: pending_strict_regeneration_after_fixed_split_rolling_origin_calibration
 archive_dir: results/archive/pre_validity_protocol_20260519
 
 methodology:
@@ -56,26 +56,26 @@ deep_learning_configs:
   - experiments/configs/extension3_transformer_full_dunnhumby.yaml
 
 deep_learning_config_hashes:
-  experiments/configs/lstm_base_cdnow_v2.yaml: e39f2f5aa69c
-  experiments/configs/lstm_joint_cdnow_v2.yaml: 2cb3d5c71015
-  experiments/configs/transformer_joint_cdnow_v2.yaml: 129894db834f
-  experiments/configs/lstm_base_uci_v2.yaml: d9fc8b85a1eb
-  experiments/configs/lstm_joint_uci_v2.yaml: d82c6643fc81
-  experiments/configs/transformer_joint_uci_v2.yaml: 974422eeabf1
-  experiments/configs/lstm_base_tafeng_v2.yaml: 4c68c45a1318
-  experiments/configs/lstm_joint_tafeng_v2.yaml: eb185c5e24bc
-  experiments/configs/transformer_joint_tafeng_v2.yaml: 6ffdb45442f3
-  experiments/configs/lstm_base_dunnhumby_v2.yaml: 5434961310fa
-  experiments/configs/lstm_joint_dunnhumby_v2.yaml: 5504adb8660e
-  experiments/configs/transformer_joint_dunnhumby_v2.yaml: 42644cccbc45
-  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 4679c18bed1d
-  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 7b043ca3c935
-  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: 3eee1f632fa7
-  experiments/configs/extension3_lstm_full_dunnhumby.yaml: e6926ef5ec3f
-  experiments/configs/extension3_transformer_none_dunnhumby.yaml: 456223c5e75a
-  experiments/configs/extension3_transformer_static_dunnhumby.yaml: 30d76850e25b
-  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 766422b7ebe6
-  experiments/configs/extension3_transformer_full_dunnhumby.yaml: 7ff2bd87ccec
+  experiments/configs/lstm_base_cdnow_v2.yaml: d61a76eef5f0
+  experiments/configs/lstm_joint_cdnow_v2.yaml: 740d9ef47338
+  experiments/configs/transformer_joint_cdnow_v2.yaml: f75ac41254ad
+  experiments/configs/lstm_base_uci_v2.yaml: aa05ce9f3c96
+  experiments/configs/lstm_joint_uci_v2.yaml: 55144bc3b9c2
+  experiments/configs/transformer_joint_uci_v2.yaml: 29b052241ff8
+  experiments/configs/lstm_base_tafeng_v2.yaml: 7ab58480ddce
+  experiments/configs/lstm_joint_tafeng_v2.yaml: b28c7143b29a
+  experiments/configs/transformer_joint_tafeng_v2.yaml: a9342acd04df
+  experiments/configs/lstm_base_dunnhumby_v2.yaml: a3d25fc97b18
+  experiments/configs/lstm_joint_dunnhumby_v2.yaml: a7cffe8fe0a2
+  experiments/configs/transformer_joint_dunnhumby_v2.yaml: ae106193109a
+  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 4c7fd1defbd6
+  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 5d2bef7fcc34
+  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: a02fe15c952b
+  experiments/configs/extension3_lstm_full_dunnhumby.yaml: df3c5e674559
+  experiments/configs/extension3_transformer_none_dunnhumby.yaml: 13a8f6664135
+  experiments/configs/extension3_transformer_static_dunnhumby.yaml: db028af66dda
+  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 409298d28aa9
+  experiments/configs/extension3_transformer_full_dunnhumby.yaml: b9cbe08630d1
 
 benchmark_run_names:
   - pareto_nbd_cdnow

@@ -11,47 +11,7 @@ Loading dataset: cdnow ...
 Model: lstm — 97,614 parameters
 
 Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
-  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
-[Kendall] log_vars frozen for 5 warm-up epochs.
-Epoch   1/300 — train_loss: 0.8265  val_loss: 0.7804  freq: 1.3416  spend: 0.2191  w_freq: 0.500  w_spend: 0.500
-Epoch   2/300 — train_loss: 0.7689  val_loss: 0.7115  freq: 1.2080  spend: 0.2149  w_freq: 0.500  w_spend: 0.500
-Epoch   3/300 — train_loss: 0.6775  val_loss: 0.6002  freq: 0.9946  spend: 0.2058  w_freq: 0.500  w_spend: 0.500
-Epoch   4/300 — train_loss: 0.5437  val_loss: 0.4282  freq: 0.6710  spend: 0.1854  w_freq: 0.500  w_spend: 0.500
-Epoch   5/300 — train_loss: 0.3532  val_loss: 0.2241  freq: 0.3083  spend: 0.1400  w_freq: 0.500  w_spend: 0.500
-[Kendall] log_vars unfrozen at epoch 6.
-Epoch   6/300 — train_loss: 0.1908  val_loss: 0.1289  freq: 0.1742  spend: 0.0894  w_freq: 0.501  w_spend: 0.501
-Epoch   7/300 — train_loss: 0.1677  val_loss: 0.1210  freq: 0.1725  spend: 0.0818  w_freq: 0.503  w_spend: 0.503
-Epoch   8/300 — train_loss: 0.1546  val_loss: 0.1168  freq: 0.1537  spend: 0.0998  w_freq: 0.505  w_spend: 0.504
-Epoch   9/300 — train_loss: 0.1365  val_loss: 0.1022  freq: 0.1401  spend: 0.0936  w_freq: 0.507  w_spend: 0.507
-Epoch  10/300 — train_loss: 0.1235  val_loss: 0.0887  freq: 0.1347  spend: 0.0828  w_freq: 0.510  w_spend: 0.510
-Epoch  11/300 — train_loss: 0.1239  val_loss: 0.0818  freq: 0.1314  spend: 0.0837  w_freq: 0.513  w_spend: 0.513
-Epoch  12/300 — train_loss: 0.1031  val_loss: 0.0755  freq: 0.1287  spend: 0.0864  w_freq: 0.516  w_spend: 0.516
-Epoch  13/300 — train_loss: 0.1071  val_loss: 0.0684  freq: 0.1269  spend: 0.0877  w_freq: 0.520  w_spend: 0.520
-Epoch  14/300 — train_loss: 0.0896  val_loss: 0.0564  freq: 0.1254  spend: 0.0799  w_freq: 0.524  w_spend: 0.524
-Epoch  15/300 — train_loss: 0.0933  val_loss: 0.0564  freq: 0.1244  spend: 0.0953  w_freq: 0.529  w_spend: 0.528
-Epoch  16/300 — train_loss: 0.0812  val_loss: 0.0397  freq: 0.1237  spend: 0.0790  w_freq: 0.534  w_spend: 0.533
-Epoch  17/300 — train_loss: 0.0984  val_loss: 0.0280  freq: 0.1232  spend: 0.0719  w_freq: 0.538  w_spend: 0.537
-Epoch  18/300 — train_loss: 0.0667  val_loss: 0.0255  freq: 0.1224  spend: 0.0822  w_freq: 0.543  w_spend: 0.542
-Epoch  19/300 — train_loss: 0.0424  val_loss: 0.0050  freq: 0.1223  spend: 0.0597  w_freq: 0.548  w_spend: 0.547
-Epoch  20/300 — train_loss: 0.0271  val_loss: -0.0007  freq: 0.1217  spend: 0.0640  w_freq: 0.553  w_spend: 0.551
-Epoch  21/300 — train_loss: 0.0090  val_loss: -0.0008  freq: 0.1221  spend: 0.0752  w_freq: 0.557  w_spend: 0.556
-
-Training failed with a repairable error: FloatingPointError: Non-finite gradients in lstm.weight_ih_l0
-Metrics saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_metrics.json
-Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
-Config: experiments/configs/lstm_joint_cdnow_v2.yaml
-Run: lstm_joint_cdnow_v2_seed42_sample_repair
-Device: cuda
-Loading dataset: cdnow ...
-[pipeline] freq_bins from config: [0, 1, 2, 3]
-  Train customers: 2115, Val: 234, Inference: 2349
-[cdnow] Customers with 0 calibration transactions: 0 / 2349
-  top-bin decode: class_values[-1] = 4.071 (max_trans = 3)
-Model: lstm — 97,614 parameters
-
-Training for up to 300 epochs ...
-/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+/kaggle/working/thesis-code/src/training/trainer.py:97: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
   self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
 [Kendall] log_vars frozen for 5 warm-up epochs.
 Epoch   1/300 — train_loss: 0.8305  val_loss: 0.7937  freq: 1.3676  spend: 0.2199  w_freq: 0.500  w_spend: 0.500
@@ -237,7 +197,7 @@ Epoch 179/300 — train_loss: -0.4652  val_loss: -0.3673  freq: 0.1202  spend: -
 Epoch 180/300 — train_loss: -0.4616  val_loss: -0.3667  freq: 0.1198  spend: -0.0081  w_freq: 0.773  w_spend: 0.800
 Early stopping triggered at epoch 180.
 
-Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_cdnow_v2_seed42_sample_repair.pt
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_joint_cdnow_v2_seed42_sample.pt
 
 Duan's smearing factor (val): 1.1924
 Validation-fitted softmax temperature: 0.9783
@@ -255,8 +215,8 @@ Running autoregressive inference on holdout period ...
   Non-zero rate (pred, avg > 0.05):  0.105
   Non-zero rate (true):               0.018
 
-Metrics saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_repair_metrics.json
-Array artifacts saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_repair_arrays.npz
+Metrics saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_arrays.npz
 
 === Holdout Evaluation ===
   freq_rmse: 1.2197
@@ -304,17 +264,11 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42
   validation_spend_pred_total: 11869.0759
   validation_freq_calibration_factor: 0.9830
   validation_spend_calibration_factor: 0.9970
-  repair_attempted: True
-  repair_strategy: amp_disabled; lr_0.0005; grad_clip_0.5
-  repair_source_failure_type: FloatingPointError
-  training_lr_after_repair: 0.0005
-  training_max_grad_norm_after_repair: 0.5000
-  training_amp_enabled_after_repair: False
   final_manifest_version: 2026-05-20-results-recovery-protocol
-  final_manifest_run_name: lstm_joint_cdnow_v2_seed42_sample_repair
+  final_manifest_run_name: lstm_joint_cdnow_v2_seed42_sample
   final_manifest_config: experiments/configs/lstm_joint_cdnow_v2.yaml
-  final_manifest_config_hash: b1a240974d5b
-  final_manifest_actual_config_hash: a2f3b0b1a079
+  final_manifest_config_hash: 2cb3d5c71015
+  final_manifest_actual_config_hash: 95dc0b2c2b48
   final_manifest_seed: 42
   final_manifest_epochs: 300
   final_manifest_inference_mode: sample
@@ -322,4 +276,4 @@ Array artifacts saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42
   run_valid: True
   run_invalid_reason: 
   run_warning: 
-History saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_repair_history.json
+History saved: /kaggle/working/results/tables/lstm_joint_cdnow_v2_seed42_sample_history.json

@@ -36,12 +36,13 @@ training:
   epochs: 100
   max_epochs: 100
   batch_size: 256
-  lr: 0.001
+  lr: 0.0005
   optimizer: adamw
   weight_decay: 0.0001
   early_stopping_patience: 20
   restore_best_checkpoint: true
-  max_grad_norm: 1.0
+  max_grad_norm: 0.5
+  amp_enabled: false       # Strict stabilization for hurdle spend/Kendall training
   scheduler: {type: cosine, warmup_fraction: 0.05}
   seed: 42
 

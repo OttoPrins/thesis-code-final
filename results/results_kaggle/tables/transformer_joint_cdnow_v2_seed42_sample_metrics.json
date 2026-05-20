@@ -1,0 +1,20 @@
+{
+  "model": "transformer_joint",
+  "dataset": "cdnow",
+  "run_valid": false,
+  "run_invalid_reason": "training failed: FloatingPointError: Non-finite gradients in state_proj.weight, time_proj.weight, freq_head.weight, spend_head.weight",
+  "run_warning": "",
+  "training_failed": true,
+  "repair_attempted": true,
+  "failure_type": "FloatingPointError",
+  "failure_message": "Non-finite gradients in state_proj.weight, time_proj.weight, freq_head.weight, spend_head.weight",
+  "final_manifest_version": "2026-05-20-results-recovery-protocol",
+  "final_manifest_run_name": "transformer_joint_cdnow_v2_seed42_sample",
+  "final_manifest_config": "experiments/configs/transformer_joint_cdnow_v2.yaml",
+  "final_manifest_config_hash": "d7a22b85e39b",
+  "final_manifest_actual_config_hash": "08dafef97045",
+  "final_manifest_seed": 42,
+  "final_manifest_epochs": 300,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 200
+}

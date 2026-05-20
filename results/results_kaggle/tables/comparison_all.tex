@@ -1,0 +1,31 @@
+\begin{table}
+\caption{Model comparison across datasets}
+\label{tab:model_comparison}
+\begin{tabular}{llrrrrrrrrr}
+\toprule
+Model & Dataset & Freq RMSE & Freq MAPE \% & Bias \% & Spend MAE (log) & Spend MAE (\$) & Spend $R^2$ (log) & CLV MAE (\$) & CLV Spearman & CLV Decile Lift \\
+\midrule
+lstm_base & cdnow & 1.174 & 12.057 & -12.057 & — & — & — & — & — & — \\
+lstm_base & cdnow & 1.225 & 40.375 & -40.375 & — & — & — & — & — & — \\
+lstm_base & cdnow & 1.257 & 36.067 & -36.067 & — & — & — & — & — & — \\
+lstm_base & dunnhumby & 13.866 & 0.201 & -0.201 & — & — & — & — & — & — \\
+lstm_base & dunnhumby & 13.969 & 1.971 & 1.971 & — & — & — & — & — & — \\
+lstm_base & dunnhumby & 13.954 & 2.372 & 2.372 & — & — & — & — & — & — \\
+lstm_joint & dunnhumby & 14.593 & 7.602 & -7.602 & 0.757 & 309.146 & 0.447 & 302.985 & 0.814 & 3.241 \\
+lstm_joint & dunnhumby & 14.780 & 3.184 & -3.184 & 0.742 & 298.747 & 0.462 & 292.787 & 0.820 & 3.254 \\
+lstm_joint & dunnhumby & 14.412 & 3.295 & -3.295 & 0.747 & 299.835 & 0.463 & 293.792 & 0.818 & 3.192 \\
+extension3_lstm_none & dunnhumby & 3.214 & 3.634 & -3.634 & 1.074 & 63.725 & 0.440 & 63.553 & 0.797 & 3.389 \\
+extension3_lstm_none & dunnhumby & 3.144 & 1.519 & -1.519 & 1.081 & 63.947 & 0.435 & 63.775 & 0.795 & 3.407 \\
+extension3_lstm_none & dunnhumby & 3.139 & 1.867 & -1.867 & 1.078 & 64.286 & 0.438 & 64.113 & 0.797 & 3.429 \\
+extension3_lstm_static & dunnhumby & 3.243 & 5.153 & -5.153 & 1.071 & 63.387 & 0.446 & 63.216 & 0.797 & 3.384 \\
+extension3_lstm_static & dunnhumby & 3.136 & 1.833 & -1.833 & 1.067 & 63.230 & 0.456 & 63.060 & 0.798 & 3.404 \\
+extension3_lstm_static & dunnhumby & 3.160 & 2.093 & -2.093 & 1.072 & 63.192 & 0.442 & 63.022 & 0.798 & 3.419 \\
+lstm_base & tafeng & 1.426 & 50.532 & 50.532 & — & — & — & — & — & — \\
+lstm_base & tafeng & 1.255 & 5.576 & 5.576 & — & — & — & — & — & — \\
+lstm_base & tafeng & 1.357 & 32.189 & 32.189 & — & — & — & — & — & — \\
+lstm_base & uci & 2.303 & 18.681 & 18.681 & — & — & — & — & — & — \\
+lstm_base & uci & 2.236 & 10.272 & 10.272 & — & — & — & — & — & — \\
+lstm_base & uci & 2.371 & 23.153 & 23.153 & — & — & — & — & — & — \\
+\bottomrule
+\end{tabular}
+\end{table}

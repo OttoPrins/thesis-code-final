@@ -1,0 +1,36 @@
+[Kaggle] raw_dir  → /kaggle/working/input/dunnhumby
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml
+Run: extension3_transformer_dynamic_dunnhumby_final_seed42_sample
+Device: cuda
+Loading dataset: dunnhumby ...
+[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
+  Train customers: 2249, Val: 249, Inference: 2498
+[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
+  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
+Model: transformer — 102,761 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+[Kendall] log_vars frozen for 5 warm-up epochs.
+
+Training failed with a repairable error: FloatingPointError: Non-finite gradients in freq_head.weight
+Metrics saved: /kaggle/working/results/tables/extension3_transformer_dynamic_dunnhumby_final_seed42_sample_metrics.json
+Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
+Config: experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml
+Run: extension3_transformer_dynamic_dunnhumby_final_seed42_sample_repair
+Device: cuda
+Loading dataset: dunnhumby ...
+[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
+  Train customers: 2249, Val: 249, Inference: 2498
+[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
+  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
+Model: transformer — 102,761 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+[Kendall] log_vars frozen for 5 warm-up epochs.
+Metrics saved: /kaggle/working/results/tables/extension3_transformer_dynamic_dunnhumby_final_seed42_sample_metrics.json
+Invalid run: training failed: FloatingPointError: Non-finite gradients in freq_head.weight; repair failed: RuntimeError: The size of tensor a (79) must match the size of tensor b (84) at non-singleton dimension 1

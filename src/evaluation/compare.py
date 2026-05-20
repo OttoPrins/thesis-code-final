@@ -14,7 +14,8 @@ Functions:
 CLI (python -m src.evaluation.compare):
     --latex   exports comparison_all.tex to results/tables/
     --plots   generates bar chart and weight-evolution plots to experiments/insights/
-    --seeds   aggregates seeded runs with mean ± std into comparison_seeds.csv
+    --seeds   aggregates selected-protocol seeded runs with mean ± std into
+              comparison_seeds.csv
 """
 
 from __future__ import annotations
@@ -843,11 +844,7 @@ if __name__ == "__main__":
             )
 
         if do_all or args.seeds:
-            seed_source = pd.concat(
-                [x for x in (strict_df, repaired_df) if not x.empty],
-                ignore_index=True,
-            ) if (not strict_df.empty or not repaired_df.empty) else df
-            seeds_df = aggregate_seeds(seed_source)
+            seeds_df = aggregate_seeds(df)
             out_path = tables_dir / "comparison_seeds.csv"
             seeds_df.to_csv(out_path, index=False)
             print(f"Saved: {out_path}")

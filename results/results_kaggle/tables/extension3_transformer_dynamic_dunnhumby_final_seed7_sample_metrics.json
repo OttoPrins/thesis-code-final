@@ -1,0 +1,23 @@
+{
+  "model": "transformer_joint",
+  "dataset": "dunnhumby",
+  "run_valid": false,
+  "run_invalid_reason": "training failed: FloatingPointError: Non-finite gradients in freq_head.weight, spend_head.weight; repair failed: RuntimeError: The size of tensor a (79) must match the size of tensor b (84) at non-singleton dimension 1",
+  "run_warning": "",
+  "training_failed": true,
+  "repair_attempted": true,
+  "failure_type": "FloatingPointError",
+  "failure_message": "Non-finite gradients in freq_head.weight, spend_head.weight",
+  "repair_failed": true,
+  "repair_failure_type": "RuntimeError",
+  "repair_failure_message": "The size of tensor a (79) must match the size of tensor b (84) at non-singleton dimension 1",
+  "final_manifest_version": "2026-05-20-results-recovery-protocol",
+  "final_manifest_run_name": "extension3_transformer_dynamic_dunnhumby_final_seed7_sample",
+  "final_manifest_config": "experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml",
+  "final_manifest_config_hash": "f2c6e5111150",
+  "final_manifest_actual_config_hash": "bc171cad6017",
+  "final_manifest_seed": 7,
+  "final_manifest_epochs": 100,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 30
+}

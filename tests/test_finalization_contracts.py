@@ -17,6 +17,7 @@ from src.evaluation.calibration import (
     collect_teacher_forced_validation,
     conservative_ratio_factor,
     fit_aggregate_calibration,
+    fit_temperature_from_loader,
 )
 import src.evaluation.compare as compare_module
 from src.evaluation.compare import (
@@ -47,7 +48,12 @@ from src.utils.final_manifest import (
     manifest_config_hash,
     result_matches_manifest,
 )
-from train import _add_result_validity_checks, _build_repair_config, _failed_training_metrics
+from train import (
+    _add_result_validity_checks,
+    _build_repair_config,
+    _compute_val_smearing,
+    _failed_training_metrics,
+)
 
 
 def test_metrics_json_is_scalar_only_and_arrays_go_to_npz(tmp_path):
@@ -835,6 +841,165 @@ def test_validate_pipeline_inputs_rejects_bad_inputs_and_outputs(tmp_path):
             bad_spend_ckpt,
             torch.device("cpu"),
         )
+
+
+def _teacher_forced_full_dynamic_batch():
+    return {
+        "week": torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.long),
+        "position": torch.tensor([[0, 1, 2], [0, 1, 2]], dtype=torch.long),
+        "trans": torch.tensor([[0, 1, 0], [1, 0, 2]], dtype=torch.long),
+        "spend": torch.zeros((2, 3), dtype=torch.float32),
+        "state_features": torch.zeros((2, 3, 1), dtype=torch.float32),
+        "delta_t": torch.zeros((2, 3), dtype=torch.float32),
+        "dynamic_covariates": torch.ones((2, 5, 1), dtype=torch.float32),
+        "mask": torch.ones((2, 3), dtype=torch.float32),
+        "y_freq": torch.tensor([[0, 1, 0], [1, 0, 2]], dtype=torch.long),
+        "y_spend": torch.zeros((2, 3), dtype=torch.float32),
+    }
+
+
+class ShapeCheckingLSTM(LSTMModel):
+    def forward(self, week, trans, hidden=None, **kwargs):
+        dynamic_cov = kwargs.get("dynamic_covariates")
+        if dynamic_cov is not None:
+            assert dynamic_cov.shape[1] == week.shape[1]
+        return super().forward(week, trans, hidden=hidden, **kwargs)
+
+
+class ShapeCheckingTransformer(TransformerModel):
+    def forward(self, week, trans, **kwargs):
+        dynamic_cov = kwargs.get("dynamic_covariates")
+        if dynamic_cov is not None:
+            assert dynamic_cov.shape[1] == week.shape[1]
+        return super().forward(week, trans, **kwargs)
+
+
+class IdentityLogScaler:
+    def inverse_transform_log1p(self, values):
+        return np.asarray(values, dtype=np.float32)
+
+
+def test_teacher_forced_paths_slice_full_dynamic_covariates():
+    model = ShapeCheckingLSTM(
+        max_week=51,
+        max_trans=3,
+        memory_units=4,
+        dense_units=4,
+        joint=True,
+        dynamic_cov_dim=1,
+        state_feature_dim=1,
+    )
+    batch = _teacher_forced_full_dynamic_batch()
+    loss_fn = KendallMultiTaskLoss(n_tasks=2)
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(list(model.parameters()) + list(loss_fn.parameters())),
+        device=torch.device("cpu"),
+        joint=True,
+        multi_task_loss=loss_fn,
+    )
+
+    logits, spend_mu, _ = trainer._forward(batch)
+    assert logits.shape[:2] == batch["week"].shape
+    assert spend_mu.shape == batch["week"].shape
+
+    totals = collect_teacher_forced_validation(
+        model,
+        [batch],
+        device=torch.device("cpu"),
+        scaler=None,
+    )
+    assert totals["freq_true_total"] == pytest.approx(4.0)
+
+    temp = fit_temperature_from_loader(model, [batch], device=torch.device("cpu"), max_iter=2)
+    assert np.isfinite(temp)
+
+    smear = _compute_val_smearing(
+        model,
+        [batch],
+        torch.device("cpu"),
+        joint=True,
+        scaler=IdentityLogScaler(),
+    )
+    assert np.isfinite(smear)
+
+
+def test_teacher_forced_transformer_paths_slice_full_dynamic_covariates():
+    model = ShapeCheckingTransformer(
+        max_week=51,
+        max_trans=3,
+        d_model=8,
+        n_heads=2,
+        n_layers=1,
+        d_ff=16,
+        dropout=0.0,
+        time2vec_dim=4,
+        joint=True,
+        dynamic_cov_dim=1,
+        state_feature_dim=1,
+    )
+    batch = _teacher_forced_full_dynamic_batch()
+    loss_fn = KendallMultiTaskLoss(n_tasks=2)
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(list(model.parameters()) + list(loss_fn.parameters())),
+        device=torch.device("cpu"),
+        joint=True,
+        multi_task_loss=loss_fn,
+    )
+
+    logits, spend_mu, _ = trainer._forward(batch)
+    assert logits.shape[:2] == batch["week"].shape
+    assert spend_mu.shape == batch["week"].shape
+
+    totals = collect_teacher_forced_validation(
+        model,
+        [batch],
+        device=torch.device("cpu"),
+        scaler=None,
+    )
+    assert totals["freq_true_total"] == pytest.approx(4.0)
+
+    temp = fit_temperature_from_loader(model, [batch], device=torch.device("cpu"), max_iter=2)
+    assert np.isfinite(temp)
+
+    smear = _compute_val_smearing(
+        model,
+        [batch],
+        torch.device("cpu"),
+        joint=True,
+        scaler=IdentityLogScaler(),
+    )
+    assert np.isfinite(smear)
+
+
+def test_final_joint_configs_use_strict_stability_defaults():
+    manifest = yaml.safe_load(open("experiments/final_manifest.yaml"))
+    final_configs = manifest["deep_learning_configs"]
+    manifest_hashes = manifest["deep_learning_config_hashes"]
+    joint_configs = [
+        path for path in final_configs
+        if "lstm_base_" not in path
+    ]
+    assert joint_configs
+
+    for path in joint_configs:
+        cfg = yaml.safe_load(open(path))
+        assert manifest_hashes[path] == manifest_config_hash(cfg), path
+        training = cfg["training"]
+        assert training["lr"] == pytest.approx(5e-4), path
+        assert training["max_grad_norm"] == pytest.approx(0.5), path
+        assert training["amp_enabled"] is False, path
+
+    base_configs = [path for path in final_configs if "lstm_base_" in path]
+    assert base_configs
+    for path in base_configs:
+        cfg = yaml.safe_load(open(path))
+        assert manifest_hashes[path] == manifest_config_hash(cfg), path
+        training = cfg["training"]
+        assert training["lr"] == pytest.approx(1e-3), path
+        assert training["max_grad_norm"] == pytest.approx(1.0), path
+        assert "amp_enabled" not in training
 
 
 def test_hpo_objective_penalizes_invalid_and_degenerate_runs():

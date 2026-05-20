@@ -1,8 +1,0 @@
-{
-  "freq_rmse": 35.198890686035156,
-  "freq_mae": 17.917444229125977,
-  "freq_mape": 40.157179073676105,
-  "bias_pct": -40.157179073676105,
-  "model": "pareto_nbd",
-  "dataset": "dunnhumby"
-}

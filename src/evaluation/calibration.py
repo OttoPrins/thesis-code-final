@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerModel
+from src.models.covariates import align_dynamic_covariates
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,7 @@ def collect_teacher_forced_validation(
         dynamic_cov = batch.get("dynamic_covariates")
         if dynamic_cov is not None:
             dynamic_cov = dynamic_cov.to(device)
+            dynamic_cov = align_dynamic_covariates(dynamic_cov, week.shape[1])
 
         if isinstance(model, LSTMModel):
             out = model(
@@ -237,6 +239,7 @@ def fit_temperature_from_loader(
             dynamic_cov = batch.get("dynamic_covariates")
             if dynamic_cov is not None:
                 dynamic_cov = dynamic_cov.to(device)
+                dynamic_cov = align_dynamic_covariates(dynamic_cov, week.shape[1])
 
             if isinstance(model, LSTMModel):
                 out = model(

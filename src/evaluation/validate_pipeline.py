@@ -8,6 +8,7 @@ import torch
 
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerModel
+from src.models.covariates import align_dynamic_covariates
 
 
 def _to_device(batch: dict, key: str, device: torch.device):
@@ -22,8 +23,7 @@ def _forward_once(model, batch: dict, device: torch.device):
     state_features = _to_device(batch, "state_features", device)
     static_cov = _to_device(batch, "static_covariates", device)
     dynamic_cov = _to_device(batch, "dynamic_covariates", device)
-    if dynamic_cov is not None and dynamic_cov.shape[1] != week.shape[1]:
-        dynamic_cov = dynamic_cov[:, : week.shape[1], :]
+    dynamic_cov = align_dynamic_covariates(dynamic_cov, week.shape[1])
 
     if isinstance(model, LSTMModel):
         out = model(

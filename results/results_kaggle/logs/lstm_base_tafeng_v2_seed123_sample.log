@@ -1,0 +1,135 @@
+[Kaggle] raw_dir  → /kaggle/working/input/tafeng-dataset
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_tafeng_v2.yaml
+Run: lstm_base_tafeng_v2_seed123_sample
+Device: cuda
+Loading dataset: tafeng ...
+[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
+  Train customers: 25029, Val: 2780, Inference: 27809
+[tafeng] Customers with 0 calibration transactions: 0 / 27809
+  top-bin decode: class_values[-1] = 4.473 (max_trans = 4)
+Model: lstm — 89,780 parameters
+
+Training for up to 300 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/300 — train_loss: 1.5713  val_loss: 1.5003
+Epoch   2/300 — train_loss: 1.0667  val_loss: 0.7075
+Epoch   3/300 — train_loss: 0.6454  val_loss: 0.6218
+Epoch   4/300 — train_loss: 0.5925  val_loss: 0.5937
+Epoch   5/300 — train_loss: 0.5740  val_loss: 0.5797
+Epoch   6/300 — train_loss: 0.5632  val_loss: 0.5716
+Epoch   7/300 — train_loss: 0.5549  val_loss: 0.5656
+Epoch   8/300 — train_loss: 0.5501  val_loss: 0.5659
+Epoch   9/300 — train_loss: 0.5481  val_loss: 0.5595
+Epoch  10/300 — train_loss: 0.5458  val_loss: 0.5580
+Epoch  11/300 — train_loss: 0.5451  val_loss: 0.5586
+Epoch  12/300 — train_loss: 0.5439  val_loss: 0.5570
+Epoch  13/300 — train_loss: 0.5439  val_loss: 0.5571
+Epoch  14/300 — train_loss: 0.5434  val_loss: 0.5583
+Epoch  15/300 — train_loss: 0.5425  val_loss: 0.5562
+Epoch  16/300 — train_loss: 0.5434  val_loss: 0.5568
+Epoch  17/300 — train_loss: 0.5425  val_loss: 0.5566
+Epoch  18/300 — train_loss: 0.5425  val_loss: 0.5562
+Epoch  19/300 — train_loss: 0.5421  val_loss: 0.5587
+Epoch  20/300 — train_loss: 0.5416  val_loss: 0.5570
+Epoch  21/300 — train_loss: 0.5420  val_loss: 0.5560
+Epoch  22/300 — train_loss: 0.5420  val_loss: 0.5562
+Epoch  23/300 — train_loss: 0.5417  val_loss: 0.5563
+Epoch  24/300 — train_loss: 0.5413  val_loss: 0.5559
+Epoch  25/300 — train_loss: 0.5411  val_loss: 0.5560
+Epoch  26/300 — train_loss: 0.5412  val_loss: 0.5558
+Epoch  27/300 — train_loss: 0.5416  val_loss: 0.5557
+Epoch  28/300 — train_loss: 0.5411  val_loss: 0.5563
+Epoch  29/300 — train_loss: 0.5407  val_loss: 0.5560
+Epoch  30/300 — train_loss: 0.5409  val_loss: 0.5556
+Epoch  31/300 — train_loss: 0.5405  val_loss: 0.5556
+Epoch  32/300 — train_loss: 0.5405  val_loss: 0.5560
+Epoch  33/300 — train_loss: 0.5403  val_loss: 0.5574
+Epoch  34/300 — train_loss: 0.5404  val_loss: 0.5556
+Epoch  35/300 — train_loss: 0.5398  val_loss: 0.5559
+Epoch  36/300 — train_loss: 0.5402  val_loss: 0.5557
+Epoch  37/300 — train_loss: 0.5399  val_loss: 0.5553
+Epoch  38/300 — train_loss: 0.5400  val_loss: 0.5559
+Epoch  39/300 — train_loss: 0.5399  val_loss: 0.5570
+Epoch  40/300 — train_loss: 0.5401  val_loss: 0.5558
+Epoch  41/300 — train_loss: 0.5398  val_loss: 0.5558
+Epoch  42/300 — train_loss: 0.5401  val_loss: 0.5554
+Epoch  43/300 — train_loss: 0.5399  val_loss: 0.5552
+Epoch  44/300 — train_loss: 0.5394  val_loss: 0.5558
+Epoch  45/300 — train_loss: 0.5400  val_loss: 0.5558
+Epoch  46/300 — train_loss: 0.5396  val_loss: 0.5554
+Epoch  47/300 — train_loss: 0.5392  val_loss: 0.5568
+Epoch  48/300 — train_loss: 0.5402  val_loss: 0.5557
+Epoch  49/300 — train_loss: 0.5392  val_loss: 0.5560
+Epoch  50/300 — train_loss: 0.5392  val_loss: 0.5561
+Epoch  51/300 — train_loss: 0.5391  val_loss: 0.5572
+Epoch  52/300 — train_loss: 0.5390  val_loss: 0.5559
+Epoch  53/300 — train_loss: 0.5388  val_loss: 0.5556
+Epoch  54/300 — train_loss: 0.5391  val_loss: 0.5562
+Epoch  55/300 — train_loss: 0.5388  val_loss: 0.5557
+Epoch  56/300 — train_loss: 0.5391  val_loss: 0.5567
+Epoch  57/300 — train_loss: 0.5394  val_loss: 0.5556
+Epoch  58/300 — train_loss: 0.5392  val_loss: 0.5573
+Epoch  59/300 — train_loss: 0.5387  val_loss: 0.5563
+Epoch  60/300 — train_loss: 0.5383  val_loss: 0.5562
+Epoch  61/300 — train_loss: 0.5389  val_loss: 0.5559
+Epoch  62/300 — train_loss: 0.5384  val_loss: 0.5558
+Epoch  63/300 — train_loss: 0.5383  val_loss: 0.5564
+Early stopping triggered at epoch 63.
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_tafeng_v2_seed123_sample.pt
+Validation-fitted softmax temperature: 1.0094
+Validation aggregate calibration: freq_factor=1.0000, spend_factor=1.0000
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 200  temperature: 1.0094
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.3262
+  Mean actual freq/week:       0.2167
+  Over-prediction ratio:       1.505x
+  Customers predicted as zero total:  0.004
+  Customers actually zero total:      0.504
+  Non-zero rate (pred, avg > 0.05):  0.970
+  Non-zero rate (true):               0.175
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_tafeng_v2_seed123_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_tafeng_v2_seed123_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  freq_rmse: 1.4263
+  freq_mae: 1.0441
+  freq_normalized_gini: 0.6541
+  freq_calibration_factor: 1.0000
+  freq_mape: 50.5318
+  bias_pct: 50.5318
+  freq_weekly_mae: 3667.5983
+  freq_weekly_total_true: 30127.0000
+  freq_weekly_total_pred: 45350.7018
+  freq_weekly_mape: 70.2419
+  freq_weekly_bias_pct: 59.9857
+  freq_mase: 1.0080
+  freq_mase_scale: 0.3519
+  calibration_temperature_source: validation_only
+  validation_temperature: 1.0094
+  calibration_source: validation_only
+  validation_freq_true_total: 5343.0000
+  validation_freq_pred_total: 5343.4792
+  validation_spend_true_total: 0.0000
+  validation_spend_pred_total: 0.0000
+  validation_freq_calibration_factor: 1.0000
+  validation_spend_calibration_factor: 1.0000
+  final_manifest_version: 2026-05-20-results-recovery-protocol
+  final_manifest_run_name: lstm_base_tafeng_v2_seed123_sample
+  final_manifest_config: experiments/configs/lstm_base_tafeng_v2.yaml
+  final_manifest_config_hash: 4c68c45a1318
+  final_manifest_actual_config_hash: 020d685ce141
+  final_manifest_seed: 123
+  final_manifest_epochs: 300
+  final_manifest_inference_mode: sample
+  final_manifest_n_scenarios: 200
+  run_valid: True
+  run_invalid_reason: 
+  run_warning: 
+History saved: /kaggle/working/results/tables/lstm_base_tafeng_v2_seed123_sample_history.json

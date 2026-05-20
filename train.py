@@ -43,6 +43,7 @@ from src.evaluation.calibration import (
 )
 from src.evaluation.validate_pipeline import validate_pipeline_inputs
 from src.models import KendallMultiTaskLoss, LSTMModel, TransformerModel
+from src.models.covariates import align_dynamic_covariates
 from src.training.callbacks import EarlyStopping
 from src.training.inference import (
     autoregressive_inference_lstm,
@@ -105,6 +106,7 @@ def _compute_val_smearing(model, val_loader, device, joint, scaler):
             static_cov = batch["static_covariates"].to(device)
         if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
             dynamic_cov = batch["dynamic_covariates"].to(device)
+            dynamic_cov = align_dynamic_covariates(dynamic_cov, week.shape[1])
 
         state_features = batch.get("state_features")
         if state_features is not None:

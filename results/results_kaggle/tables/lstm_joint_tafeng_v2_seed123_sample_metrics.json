@@ -1,0 +1,20 @@
+{
+  "model": "lstm_joint",
+  "dataset": "tafeng",
+  "run_valid": false,
+  "run_invalid_reason": "training failed: FloatingPointError: Non-finite gradients in spend_head.weight, spend_head.bias",
+  "run_warning": "",
+  "training_failed": true,
+  "repair_attempted": true,
+  "failure_type": "FloatingPointError",
+  "failure_message": "Non-finite gradients in spend_head.weight, spend_head.bias",
+  "final_manifest_version": "2026-05-20-results-recovery-protocol",
+  "final_manifest_run_name": "lstm_joint_tafeng_v2_seed123_sample",
+  "final_manifest_config": "experiments/configs/lstm_joint_tafeng_v2.yaml",
+  "final_manifest_config_hash": "f7695b59363e",
+  "final_manifest_actual_config_hash": "9635d9b2035d",
+  "final_manifest_seed": 123,
+  "final_manifest_epochs": 300,
+  "final_manifest_inference_mode": "sample",
+  "final_manifest_n_scenarios": 200
+}

@@ -28,6 +28,7 @@ import torch.nn.functional as F
 
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerModel
+from src.models.covariates import align_dynamic_covariates
 from src.training.inference import _zero_inactive_spend_feedback
 
 
@@ -181,6 +182,7 @@ class Trainer:
             static_cov = batch["static_covariates"].to(self.device)   # (B, S)
         if "dynamic_covariates" in batch and batch["dynamic_covariates"] is not None:
             dynamic_cov = batch["dynamic_covariates"].to(self.device)  # (B, T, D)
+            dynamic_cov = align_dynamic_covariates(dynamic_cov, week.shape[1])
 
         if isinstance(self.model, LSTMModel):
             if self.joint:
@@ -333,6 +335,7 @@ class Trainer:
         dynamic_cov = batch.get("dynamic_covariates")
         if dynamic_cov is not None:
             dynamic_cov = dynamic_cov.to(self.device)
+            dynamic_cov = align_dynamic_covariates(dynamic_cov, T)
 
         hidden = None
         logits_steps: list = []

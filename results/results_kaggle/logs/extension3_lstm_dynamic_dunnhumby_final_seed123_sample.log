@@ -1,0 +1,50 @@
+[Kaggle] raw_dir  → /kaggle/working/input/dunnhumby
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml
+Run: extension3_lstm_dynamic_dunnhumby_final_seed123_sample
+Device: cuda
+Loading dataset: dunnhumby ...
+[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
+  Train customers: 2249, Val: 249, Inference: 2498
+[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
+  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
+Model: lstm — 103,697 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:96: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+[Kendall] log_vars frozen for 5 warm-up epochs.
+Traceback (most recent call last):
+  File "/kaggle/working/thesis-code/train.py", line 1014, in <module>
+    main()
+  File "/kaggle/working/thesis-code/train.py", line 581, in main
+    metrics = run_experiment_with_repair(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/train.py", line 449, in run_experiment_with_repair
+    return run_experiment(
+           ^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/train.py", line 744, in run_experiment
+    history = trainer.fit(
+              ^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/src/training/trainer.py", line 601, in fit
+    val_metrics = self.validate(val_loader)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/src/training/trainer.py", line 551, in validate
+    loss, metrics = self._compute_loss(batch)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/src/training/trainer.py", line 437, in _compute_loss
+    freq_logits, spend_mu, spend_log_var = self._forward(batch)
+                                           ^^^^^^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/src/training/trainer.py", line 187, in _forward
+    out = self.model(
+          ^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/kaggle/working/thesis-code/src/models/lstm.py", line 222, in forward
+    x = torch.cat([x, d_emb], dim=-1)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Sizes of tensors must match except in dimension 2. Expected size 79 but got size 84 for tensor number 1 in the list.

@@ -1,0 +1,269 @@
+[Kaggle] raw_dir  → /kaggle/working/input/dunnhumby
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_dunnhumby_v3.yaml
+Run: lstm_base_dunnhumby_v3_seed42_sample
+Device: cuda
+Loading dataset: dunnhumby ...
+[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
+  Train customers: 2249, Val: 249, Inference: 2498
+[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
+  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
+Model: lstm — 91,095 parameters
+
+Training for up to 300 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:104: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/300 — train_loss: 2.3804  val_loss: 2.3762
+Epoch   2/300 — train_loss: 2.3707  val_loss: 2.3602
+Epoch   3/300 — train_loss: 2.3498  val_loss: 2.3300
+Epoch   4/300 — train_loss: 2.3093  val_loss: 2.2649
+Epoch   5/300 — train_loss: 2.1961  val_loss: 2.0116
+Epoch   6/300 — train_loss: 1.7189  val_loss: 1.5193
+Epoch   7/300 — train_loss: 1.5797  val_loss: 1.4437
+Epoch   8/300 — train_loss: 1.4963  val_loss: 1.4238
+Epoch   9/300 — train_loss: 1.4694  val_loss: 1.3778
+Epoch  10/300 — train_loss: 1.4090  val_loss: 1.3054
+Epoch  11/300 — train_loss: 1.3373  val_loss: 1.2469
+Epoch  12/300 — train_loss: 1.2943  val_loss: 1.2268
+Epoch  13/300 — train_loss: 1.2727  val_loss: 1.2072
+Epoch  14/300 — train_loss: 1.2608  val_loss: 1.1942
+Epoch  15/300 — train_loss: 1.2499  val_loss: 1.1994
+Epoch  16/300 — train_loss: 1.2459  val_loss: 1.1817
+Epoch  17/300 — train_loss: 1.2361  val_loss: 1.1781
+Epoch  18/300 — train_loss: 1.2302  val_loss: 1.1706
+Epoch  19/300 — train_loss: 1.2277  val_loss: 1.1657
+Epoch  20/300 — train_loss: 1.2229  val_loss: 1.1621
+Epoch  21/300 — train_loss: 1.2185  val_loss: 1.1597
+Epoch  22/300 — train_loss: 1.2159  val_loss: 1.1577
+Epoch  23/300 — train_loss: 1.2141  val_loss: 1.1563
+Epoch  24/300 — train_loss: 1.2112  val_loss: 1.1560
+Epoch  25/300 — train_loss: 1.2091  val_loss: 1.1522
+Epoch  26/300 — train_loss: 1.2075  val_loss: 1.1510
+Epoch  27/300 — train_loss: 1.2075  val_loss: 1.1516
+Epoch  28/300 — train_loss: 1.2041  val_loss: 1.1495
+Epoch  29/300 — train_loss: 1.2042  val_loss: 1.1495
+Epoch  30/300 — train_loss: 1.2023  val_loss: 1.1477
+Epoch  31/300 — train_loss: 1.1997  val_loss: 1.1464
+Epoch  32/300 — train_loss: 1.1982  val_loss: 1.1446
+Epoch  33/300 — train_loss: 1.1963  val_loss: 1.1423
+Epoch  34/300 — train_loss: 1.1948  val_loss: 1.1398
+Epoch  35/300 — train_loss: 1.1940  val_loss: 1.1388
+Epoch  36/300 — train_loss: 1.1948  val_loss: 1.1390
+Epoch  37/300 — train_loss: 1.1933  val_loss: 1.1390
+Epoch  38/300 — train_loss: 1.1938  val_loss: 1.1380
+Epoch  39/300 — train_loss: 1.1914  val_loss: 1.1375
+Epoch  40/300 — train_loss: 1.1896  val_loss: 1.1360
+Epoch  41/300 — train_loss: 1.1897  val_loss: 1.1360
+Epoch  42/300 — train_loss: 1.1894  val_loss: 1.1365
+Epoch  43/300 — train_loss: 1.1897  val_loss: 1.1361
+Epoch  44/300 — train_loss: 1.1903  val_loss: 1.1369
+Epoch  45/300 — train_loss: 1.1891  val_loss: 1.1341
+Epoch  46/300 — train_loss: 1.1879  val_loss: 1.1333
+Epoch  47/300 — train_loss: 1.1881  val_loss: 1.1333
+Epoch  48/300 — train_loss: 1.1869  val_loss: 1.1337
+Epoch  49/300 — train_loss: 1.1868  val_loss: 1.1329
+Epoch  50/300 — train_loss: 1.1881  val_loss: 1.1327
+Epoch  51/300 — train_loss: 1.1860  val_loss: 1.1316
+Epoch  52/300 — train_loss: 1.1863  val_loss: 1.1313
+Epoch  53/300 — train_loss: 1.1878  val_loss: 1.1316
+Epoch  54/300 — train_loss: 1.1876  val_loss: 1.1325
+Epoch  55/300 — train_loss: 1.1864  val_loss: 1.1315
+Epoch  56/300 — train_loss: 1.1855  val_loss: 1.1308
+Epoch  57/300 — train_loss: 1.1862  val_loss: 1.1311
+Epoch  58/300 — train_loss: 1.1859  val_loss: 1.1309
+Epoch  59/300 — train_loss: 1.1863  val_loss: 1.1305
+Epoch  60/300 — train_loss: 1.1854  val_loss: 1.1305
+Epoch  61/300 — train_loss: 1.1869  val_loss: 1.1306
+Epoch  62/300 — train_loss: 1.1855  val_loss: 1.1308
+Epoch  63/300 — train_loss: 1.1850  val_loss: 1.1300
+Epoch  64/300 — train_loss: 1.1837  val_loss: 1.1303
+Epoch  65/300 — train_loss: 1.1842  val_loss: 1.1295
+Epoch  66/300 — train_loss: 1.1845  val_loss: 1.1298
+Epoch  67/300 — train_loss: 1.1864  val_loss: 1.1324
+Epoch  68/300 — train_loss: 1.1843  val_loss: 1.1296
+Epoch  69/300 — train_loss: 1.1835  val_loss: 1.1311
+Epoch  70/300 — train_loss: 1.1860  val_loss: 1.1295
+Epoch  71/300 — train_loss: 1.1862  val_loss: 1.1308
+Epoch  72/300 — train_loss: 1.1848  val_loss: 1.1303
+Epoch  73/300 — train_loss: 1.1829  val_loss: 1.1289
+Epoch  74/300 — train_loss: 1.1832  val_loss: 1.1295
+Epoch  75/300 — train_loss: 1.1854  val_loss: 1.1303
+Epoch  76/300 — train_loss: 1.1861  val_loss: 1.1313
+Epoch  77/300 — train_loss: 1.1857  val_loss: 1.1299
+Epoch  78/300 — train_loss: 1.1852  val_loss: 1.1296
+Epoch  79/300 — train_loss: 1.1859  val_loss: 1.1285
+Epoch  80/300 — train_loss: 1.1844  val_loss: 1.1293
+Epoch  81/300 — train_loss: 1.1847  val_loss: 1.1290
+Epoch  82/300 — train_loss: 1.1831  val_loss: 1.1291
+Epoch  83/300 — train_loss: 1.1833  val_loss: 1.1285
+Epoch  84/300 — train_loss: 1.1857  val_loss: 1.1281
+Epoch  85/300 — train_loss: 1.1848  val_loss: 1.1290
+Epoch  86/300 — train_loss: 1.1848  val_loss: 1.1283
+Epoch  87/300 — train_loss: 1.1852  val_loss: 1.1292
+Epoch  88/300 — train_loss: 1.1851  val_loss: 1.1285
+Epoch  89/300 — train_loss: 1.1858  val_loss: 1.1281
+Epoch  90/300 — train_loss: 1.1858  val_loss: 1.1280
+Epoch  91/300 — train_loss: 1.1852  val_loss: 1.1281
+Epoch  92/300 — train_loss: 1.1834  val_loss: 1.1281
+Epoch  93/300 — train_loss: 1.1860  val_loss: 1.1277
+Epoch  94/300 — train_loss: 1.1857  val_loss: 1.1282
+Epoch  95/300 — train_loss: 1.1856  val_loss: 1.1291
+Epoch  96/300 — train_loss: 1.1847  val_loss: 1.1294
+Epoch  97/300 — train_loss: 1.1874  val_loss: 1.1301
+Epoch  98/300 — train_loss: 1.1846  val_loss: 1.1283
+Epoch  99/300 — train_loss: 1.1856  val_loss: 1.1288
+Epoch 100/300 — train_loss: 1.1868  val_loss: 1.1279
+Epoch 101/300 — train_loss: 1.1869  val_loss: 1.1281
+Epoch 102/300 — train_loss: 1.1856  val_loss: 1.1279
+Epoch 103/300 — train_loss: 1.1866  val_loss: 1.1298
+Epoch 104/300 — train_loss: 1.1871  val_loss: 1.1279
+Epoch 105/300 — train_loss: 1.1847  val_loss: 1.1274
+Epoch 106/300 — train_loss: 1.1876  val_loss: 1.1279
+Epoch 107/300 — train_loss: 1.1873  val_loss: 1.1272
+Epoch 108/300 — train_loss: 1.1860  val_loss: 1.1283
+Epoch 109/300 — train_loss: 1.1854  val_loss: 1.1274
+Epoch 110/300 — train_loss: 1.1867  val_loss: 1.1284
+Epoch 111/300 — train_loss: 1.1876  val_loss: 1.1272
+Epoch 112/300 — train_loss: 1.1867  val_loss: 1.1281
+Epoch 113/300 — train_loss: 1.1860  val_loss: 1.1273
+Epoch 114/300 — train_loss: 1.1863  val_loss: 1.1276
+Epoch 115/300 — train_loss: 1.1882  val_loss: 1.1270
+Epoch 116/300 — train_loss: 1.1866  val_loss: 1.1272
+Epoch 117/300 — train_loss: 1.1857  val_loss: 1.1273
+Epoch 118/300 — train_loss: 1.1853  val_loss: 1.1271
+Epoch 119/300 — train_loss: 1.1869  val_loss: 1.1283
+Epoch 120/300 — train_loss: 1.1876  val_loss: 1.1268
+Epoch 121/300 — train_loss: 1.1868  val_loss: 1.1270
+Epoch 122/300 — train_loss: 1.1860  val_loss: 1.1280
+Epoch 123/300 — train_loss: 1.1878  val_loss: 1.1275
+Epoch 124/300 — train_loss: 1.1884  val_loss: 1.1273
+Epoch 125/300 — train_loss: 1.1895  val_loss: 1.1291
+Epoch 126/300 — train_loss: 1.1874  val_loss: 1.1272
+Epoch 127/300 — train_loss: 1.1880  val_loss: 1.1271
+Epoch 128/300 — train_loss: 1.1867  val_loss: 1.1272
+Epoch 129/300 — train_loss: 1.1871  val_loss: 1.1276
+Epoch 130/300 — train_loss: 1.1877  val_loss: 1.1268
+Epoch 131/300 — train_loss: 1.1872  val_loss: 1.1270
+Epoch 132/300 — train_loss: 1.1890  val_loss: 1.1275
+Epoch 133/300 — train_loss: 1.1883  val_loss: 1.1266
+Epoch 134/300 — train_loss: 1.1871  val_loss: 1.1272
+Epoch 135/300 — train_loss: 1.1883  val_loss: 1.1266
+Epoch 136/300 — train_loss: 1.1872  val_loss: 1.1278
+Epoch 137/300 — train_loss: 1.1885  val_loss: 1.1289
+Epoch 138/300 — train_loss: 1.1880  val_loss: 1.1272
+Epoch 139/300 — train_loss: 1.1881  val_loss: 1.1273
+Epoch 140/300 — train_loss: 1.1895  val_loss: 1.1290
+Epoch 141/300 — train_loss: 1.1895  val_loss: 1.1270
+Epoch 142/300 — train_loss: 1.1901  val_loss: 1.1265
+Epoch 143/300 — train_loss: 1.1918  val_loss: 1.1276
+Epoch 144/300 — train_loss: 1.1897  val_loss: 1.1267
+Epoch 145/300 — train_loss: 1.1893  val_loss: 1.1284
+Epoch 146/300 — train_loss: 1.1908  val_loss: 1.1280
+Epoch 147/300 — train_loss: 1.1906  val_loss: 1.1272
+Epoch 148/300 — train_loss: 1.1918  val_loss: 1.1274
+Epoch 149/300 — train_loss: 1.1907  val_loss: 1.1266
+Epoch 150/300 — train_loss: 1.1884  val_loss: 1.1267
+Epoch 151/300 — train_loss: 1.1909  val_loss: 1.1267
+Epoch 152/300 — train_loss: 1.1896  val_loss: 1.1267
+Epoch 153/300 — train_loss: 1.1896  val_loss: 1.1269
+Epoch 154/300 — train_loss: 1.1903  val_loss: 1.1267
+Epoch 155/300 — train_loss: 1.1905  val_loss: 1.1267
+Epoch 156/300 — train_loss: 1.1915  val_loss: 1.1265
+Epoch 157/300 — train_loss: 1.1909  val_loss: 1.1273
+Epoch 158/300 — train_loss: 1.1913  val_loss: 1.1268
+Epoch 159/300 — train_loss: 1.1901  val_loss: 1.1266
+Epoch 160/300 — train_loss: 1.1918  val_loss: 1.1273
+Epoch 161/300 — train_loss: 1.1900  val_loss: 1.1268
+Epoch 162/300 — train_loss: 1.1929  val_loss: 1.1272
+Epoch 163/300 — train_loss: 1.1915  val_loss: 1.1267
+Epoch 164/300 — train_loss: 1.1919  val_loss: 1.1266
+Epoch 165/300 — train_loss: 1.1928  val_loss: 1.1278
+Epoch 166/300 — train_loss: 1.1930  val_loss: 1.1272
+Epoch 167/300 — train_loss: 1.1929  val_loss: 1.1268
+Epoch 168/300 — train_loss: 1.1925  val_loss: 1.1271
+Epoch 169/300 — train_loss: 1.1911  val_loss: 1.1280
+Epoch 170/300 — train_loss: 1.1931  val_loss: 1.1280
+Epoch 171/300 — train_loss: 1.1927  val_loss: 1.1264
+Epoch 172/300 — train_loss: 1.1922  val_loss: 1.1269
+Epoch 173/300 — train_loss: 1.1928  val_loss: 1.1271
+Epoch 174/300 — train_loss: 1.1915  val_loss: 1.1268
+Epoch 175/300 — train_loss: 1.1928  val_loss: 1.1266
+Epoch 176/300 — train_loss: 1.1936  val_loss: 1.1269
+Epoch 177/300 — train_loss: 1.1924  val_loss: 1.1265
+Epoch 178/300 — train_loss: 1.1931  val_loss: 1.1265
+Epoch 179/300 — train_loss: 1.1930  val_loss: 1.1271
+Epoch 180/300 — train_loss: 1.1940  val_loss: 1.1269
+Epoch 181/300 — train_loss: 1.1930  val_loss: 1.1274
+Epoch 182/300 — train_loss: 1.1955  val_loss: 1.1271
+Epoch 183/300 — train_loss: 1.1945  val_loss: 1.1286
+Epoch 184/300 — train_loss: 1.1962  val_loss: 1.1270
+Epoch 185/300 — train_loss: 1.1953  val_loss: 1.1267
+Epoch 186/300 — train_loss: 1.1941  val_loss: 1.1268
+Epoch 187/300 — train_loss: 1.1939  val_loss: 1.1268
+Epoch 188/300 — train_loss: 1.1934  val_loss: 1.1268
+Epoch 189/300 — train_loss: 1.1937  val_loss: 1.1267
+Epoch 190/300 — train_loss: 1.1957  val_loss: 1.1266
+Epoch 191/300 — train_loss: 1.1955  val_loss: 1.1267
+Early stopping triggered at epoch 191.
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_dunnhumby_v3_seed42_sample.pt
+Validation-fitted softmax temperature: 0.9000
+Validation aggregate calibration: freq_factor=1.0653, spend_factor=1.0000
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 200  temperature: 0.9000
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    1.0370
+  Mean actual freq/week:       1.1447
+  Over-prediction ratio:       0.906x
+  Customers predicted as zero total:  0.000
+  Customers actually zero total:      0.036
+  Non-zero rate (pred, avg > 0.05):  0.996
+  Non-zero rate (true):               0.532
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_dunnhumby_v3_seed42_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_dunnhumby_v3_seed42_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 14.8020
+  freq_mae: 8.4559
+  freq_normalized_gini: 0.8718
+  freq_calibration_factor: 1.0653
+  freq_horizon_abs_bias_pct: 3.4913
+  bias_pct: -3.4913
+  freq_weekly_mae: 196.2144
+  freq_weekly_total_true: 62910.0000
+  freq_weekly_total_pred: 60713.6448
+  freq_valendin_mape: 6.8617
+  freq_horizon_bias_pct: -3.4913
+  freq_weekly_mean_pct_mape: 7.9998
+  freq_weekly_mean_pct_bias_pct: -2.0471
+  freq_weekly_bias_pct: -3.4913
+  freq_weekly_mape: 6.8617
+  freq_mape: 6.8617
+  freq_mase: 1.0103
+  freq_mase_scale: 0.8235
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.9000
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 6257.0000
+  validation_freq_pred_total: 5533.9956
+  validation_spend_true_total: 0.0000
+  validation_spend_pred_total: 0.0000
+  validation_freq_calibration_factor: 1.0653
+  validation_spend_calibration_factor: 1.0000
+  validation_rolling_origin_count: 2
+  protocol_name: dunnhumby_configured_80x22
+  cohort_size: 2498
+  calibration_weeks: 80
+  holdout_weeks: 22
+  inference_mode: sample
+  n_scenarios: 200
+  run_valid: True
+  run_invalid_reason: 
+  run_warning: 
+  epochs_completed: 191
+  max_epochs_configured: 300
+History saved: /kaggle/working/results/tables/lstm_base_dunnhumby_v3_seed42_sample_history.json

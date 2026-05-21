@@ -5,7 +5,7 @@
 # Subsequent runs create new versions of already-existing datasets (idempotent).
 #
 # Datasets created:
-#   ottoprins/cdnow-dataset   ← data/raw/CDNOW_sample.txt
+#   ottoprins/cdnow-dataset   ← data/raw/CDNOW_sample.txt + data/raw/CDNOW_master.txt
 #   ottoprins/uci-retail      ← data/raw/online_retail_II.xlsx
 #   ottoprins/tafeng-dataset  ← data/raw/ta_feng_all_months_merged.csv
 #
@@ -30,9 +30,10 @@ KAGGLE_USER="ottoprins"
 MSG="Raw data upload $(date +%Y-%m-%d)"
 
 # ── Helper: create or version a dataset ──────────────────────────────────────
+# Accepts one or more source files; all are copied into the staging dir.
 upload_dataset() {
     local slug="$1"
-    local src_file="$2"
+    shift
     local stage
     stage=$(mktemp -d)
     trap "rm -rf '$stage'" RETURN
@@ -45,8 +46,16 @@ with open("$stage/dataset-metadata.json", "w") as f:
     json.dump(meta, f, indent=2)
 PY
 
-    # Copy the raw file
-    cp "$src_file" "$stage/"
+    # Copy each raw file into the staging dir
+    local src_file
+    for src_file in "$@"; do
+        if [[ ! -f "$src_file" ]]; then
+            echo "  ✗  Missing source file: $src_file"
+            return 1
+        fi
+        cp "$src_file" "$stage/"
+        echo "    staged: $(basename "$src_file")"
+    done
 
     echo "  Uploading $slug ..."
     if kaggle datasets metadata "$KAGGLE_USER/$slug" &>/dev/null; then
@@ -63,9 +72,13 @@ echo ""
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-upload_dataset "cdnow-dataset"   "$REPO_ROOT/data/raw/CDNOW_sample.txt"
-upload_dataset "uci-retail"      "$REPO_ROOT/data/raw/online_retail_II.xlsx"
-upload_dataset "tafeng-dataset"  "$REPO_ROOT/data/raw/ta_feng_all_months_merged.csv"
+# CDNOW: ship BOTH the 2,357-customer sample (default replication runs) AND the
+# 23,570-customer master (Valendin et al. 2022 39×39 replication protocol).
+upload_dataset "cdnow-dataset" \
+    "$REPO_ROOT/data/raw/CDNOW_sample.txt" \
+    "$REPO_ROOT/data/raw/CDNOW_master.txt"
+upload_dataset "uci-retail"     "$REPO_ROOT/data/raw/online_retail_II.xlsx"
+upload_dataset "tafeng-dataset" "$REPO_ROOT/data/raw/ta_feng_all_months_merged.csv"
 
 echo ""
 echo "=== Done ==="

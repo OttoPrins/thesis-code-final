@@ -1,0 +1,29 @@
+\begin{table}
+\caption{Model comparison across datasets}
+\label{tab:model_comparison}
+\begin{tabular}{llrrrrrrrrr}
+\toprule
+Model & Dataset & Freq RMSE & Freq MAPE \% & Bias \% & Spend MAE (log) & Spend MAE (\$) & Spend $R^2$ (log) & CLV MAE (\$) & CLV Spearman & CLV Decile Lift \\
+\midrule
+lstm_base & cdnow & 1.334 & 74.758 & -74.758 & — & — & — & — & — & — \\
+lstm_joint & cdnow & 1.234 & 48.325 & -45.020 & 1.475 & 18.416 & -0.012 & 18.028 & 0.381 & 5.257 \\
+transformer_joint & cdnow & 1.322 & 64.939 & -64.939 & 0.917 & 17.074 & 0.222 & 16.718 & 0.441 & 5.193 \\
+lstm_base & dunnhumby & 14.109 & 5.496 & 4.864 & — & — & — & — & — & — \\
+lstm_joint & dunnhumby & 14.814 & 7.713 & -3.511 & 0.729 & 297.819 & 0.508 & 291.910 & 0.818 & 3.262 \\
+transformer_joint & dunnhumby & 15.181 & 6.255 & 5.577 & 0.733 & 311.518 & 0.515 & 305.315 & 0.817 & 3.269 \\
+extension3_lstm_dynamic & dunnhumby & 3.320 & 4.929 & -4.929 & 1.054 & 63.140 & 0.474 & 62.970 & 0.793 & 3.398 \\
+extension3_lstm_full & dunnhumby & 3.318 & 7.452 & -7.452 & 1.003 & 63.242 & 0.546 & 63.073 & 0.796 & 3.401 \\
+extension3_lstm_none & dunnhumby & 3.369 & 6.648 & -6.648 & 1.014 & 64.160 & 0.533 & 63.989 & 0.793 & 3.416 \\
+extension3_lstm_static & dunnhumby & 3.370 & 8.163 & -8.163 & 1.008 & 62.890 & 0.539 & 62.720 & 0.797 & 3.382 \\
+extension3_transformer_dynamic & dunnhumby & 3.654 & 5.515 & -5.515 & 1.013 & 67.544 & 0.501 & 67.364 & 0.778 & 3.342 \\
+extension3_transformer_full & dunnhumby & 3.816 & 6.265 & -6.265 & 1.005 & 68.122 & 0.509 & 67.941 & 0.784 & 3.342 \\
+extension3_transformer_none & dunnhumby & 3.695 & 3.541 & -3.541 & 1.018 & 66.361 & 0.494 & 66.185 & 0.777 & 3.343 \\
+extension3_transformer_static & dunnhumby & 3.665 & 5.613 & -5.613 & 1.012 & 67.386 & 0.506 & 67.207 & 0.779 & 3.326 \\
+lstm_base & tafeng & 1.424 & 34.262 & -2.236 & — & — & — & — & — & — \\
+transformer_joint & tafeng & 1.292 & 24.352 & -24.352 & 3.436 & 870.535 & -0.481 & 870.535 & 0.415 & 3.471 \\
+lstm_base & uci & 2.544 & 23.883 & -22.333 & — & — & — & — & — & — \\
+lstm_joint & uci & 2.921 & 49.863 & -49.863 & 2.595 & 627.239 & 0.166 & 610.941 & 0.588 & 6.260 \\
+transformer_joint & uci & 2.242 & 32.209 & -30.954 & 2.527 & 581.979 & 0.148 & 567.152 & 0.608 & 6.136 \\
+\bottomrule
+\end{tabular}
+\end{table}

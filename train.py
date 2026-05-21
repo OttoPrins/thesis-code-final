@@ -915,6 +915,7 @@ def run_experiment(
         max_grad_norm=training_cfg.get("max_grad_norm", 1.0),
         kendall_warmup_epochs=loss_cfg.get("warmup_epochs", 5),
         spend_loss=loss_cfg.get("spend_loss", "mse"),
+        spend_logvar_clamp=loss_cfg.get("spend_logvar_clamp", None),
         scheduler=scheduler,
         restore_best_checkpoint=training_cfg.get("restore_best_checkpoint", True),
         spend_loss_normalize=bool(loss_cfg.get("spend_loss_normalize", False)),

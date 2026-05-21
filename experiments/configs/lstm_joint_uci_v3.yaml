@@ -1,4 +1,6 @@
-# v3: v2 + spend_logvar_max (anti-silencing) + scheduled sampling
+# v3 (stabilised): v2 + spend_logvar_max + spend_logvar_clamp.
+# Scheduled sampling removed — it explodes joint training via the
+# spend-head feedback loop. lr / max_grad_norm restored to v2 values.
 dataset:
   name: uci
   raw_dir: data/raw
@@ -30,21 +32,16 @@ training:
   epochs: 300
   max_epochs: 300
   batch_size: 256
-  lr: 0.001
+  lr: 0.0005
   optimizer: adamw
   weight_decay: 0.0001
   early_stopping_patience: 20
   restore_best_checkpoint: true
-  max_grad_norm: 1.0
+  max_grad_norm: 0.5
   scheduler:
     type: cosine
     warmup_fraction: 0.05
   seed: 42
-  scheduled_sampling:
-    enabled: true
-    start_epoch: 10
-    max_prob: 0.35
-    schedule: linear
 loss:
   type: kendall
   n_tasks: 2
@@ -52,6 +49,7 @@ loss:
   spend_loss: nll
   freq_logvar_max: 2.0
   spend_logvar_max: 2.0
+  spend_logvar_clamp: [-2.0, 2.0]
 calibration:
   temperature_scaling: true
   aggregate_scaling: true

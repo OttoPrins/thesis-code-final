@@ -56,6 +56,7 @@ class Trainer:
         max_grad_norm: float = 1.0,
         kendall_warmup_epochs: int = 5,
         spend_loss: str = "mse",
+        spend_logvar_clamp: tuple[float, float] | list[float] | None = None,
         scheduler=None,
         restore_best_checkpoint: bool = True,
         spend_loss_normalize: bool = False,
@@ -75,6 +76,17 @@ class Trainer:
         self.max_grad_norm = max_grad_norm
         self.kendall_warmup_epochs = kendall_warmup_epochs
         self.spend_loss = spend_loss
+        # Per-step clamp on the hurdle-lognormal head's `spend_log_var`. The
+        # precision factor in the Gaussian NLL is exp(-log_var), so allowing
+        # log_var to drift far negative blows up the loss on outlier residuals
+        # and explodes the gradient. Default (-2, 2) caps precision at exp(2)≈7.4
+        # — wide enough to model heteroscedasticity, tight enough to keep
+        # joint+scheduled-sampling runs finite.
+        if spend_logvar_clamp is None:
+            self.spend_logvar_clamp = (-2.0, 2.0)
+        else:
+            lo, hi = spend_logvar_clamp
+            self.spend_logvar_clamp = (float(lo), float(hi))
         self.scheduler = scheduler
         self.restore_best_checkpoint = restore_best_checkpoint
         self.current_epoch: int = 0
@@ -269,7 +281,8 @@ class Trainer:
             else:
                 if spend_log_var is None:
                     spend_log_var = torch.zeros_like(spend_mu)
-                log_var = spend_log_var.clamp(-8.0, 8.0)
+                clamp_lo, clamp_hi = self.spend_logvar_clamp
+                log_var = spend_log_var.clamp(clamp_lo, clamp_hi)
                 per_step = 0.5 * (torch.exp(-log_var) * (y_spend - spend_mu) ** 2 + log_var)
             return (per_step * positive_mask).sum() / denom
 

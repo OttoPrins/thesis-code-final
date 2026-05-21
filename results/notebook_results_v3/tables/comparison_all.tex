@@ -1,0 +1,18 @@
+\begin{table}
+\caption{Model comparison across datasets}
+\label{tab:model_comparison}
+\begin{tabular}{llrrrrrrrrr}
+\toprule
+Model & Dataset & Freq RMSE & Freq MAPE \% & Bias \% & Spend MAE (log) & Spend MAE (\$) & Spend $R^2$ (log) & CLV MAE (\$) & CLV Spearman & CLV Decile Lift \\
+\midrule
+extension3_lstm_dynamic & dunnhumby & 3.320 & 4.929 & -4.929 & 1.054 & 63.140 & 0.474 & 62.970 & 0.793 & 3.398 \\
+extension3_lstm_full & dunnhumby & 3.318 & 7.452 & -7.452 & 1.003 & 63.242 & 0.546 & 63.073 & 0.796 & 3.401 \\
+extension3_lstm_none & dunnhumby & 3.369 & 6.648 & -6.648 & 1.014 & 64.160 & 0.533 & 63.989 & 0.793 & 3.416 \\
+extension3_lstm_static & dunnhumby & 3.370 & 8.163 & -8.163 & 1.008 & 62.890 & 0.539 & 62.720 & 0.797 & 3.382 \\
+extension3_transformer_dynamic & dunnhumby & 3.654 & 5.515 & -5.515 & 1.013 & 67.544 & 0.501 & 67.364 & 0.778 & 3.342 \\
+extension3_transformer_full & dunnhumby & 3.816 & 6.265 & -6.265 & 1.005 & 68.122 & 0.509 & 67.941 & 0.784 & 3.342 \\
+extension3_transformer_none & dunnhumby & 3.695 & 3.541 & -3.541 & 1.018 & 66.361 & 0.494 & 66.185 & 0.777 & 3.343 \\
+extension3_transformer_static & dunnhumby & 3.665 & 5.613 & -5.613 & 1.012 & 67.386 & 0.506 & 67.207 & 0.779 & 3.326 \\
+\bottomrule
+\end{tabular}
+\end{table}

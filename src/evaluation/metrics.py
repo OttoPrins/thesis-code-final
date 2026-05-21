@@ -142,9 +142,26 @@ def per_week_aggregate_metrics(
         pct_err = (pred_agg[valid] - true_agg[valid]) / np.abs(true_agg[valid])
         out[f"{prefix}_weekly_mean_pct_mape"] = float(np.mean(np.abs(pct_err)) * 100)
         out[f"{prefix}_weekly_mean_pct_bias_pct"] = float(np.mean(pct_err) * 100)
+        # Volume-weighted tracking error: scale the SUMMED mismatch by the SUMMED
+        # absolute truth on the valid slice. Equal weight per week (unweighted mean)
+        # inflates metrics on dead weeks; this formulation matches the CBA tracking-
+        # error convention used by Valendin et al. (2022) for aggregate reporting.
+        true_valid_total = float(np.abs(true_agg[valid]).sum())
+        if true_valid_total > 0:
+            out[f"{prefix}_weekly_bias_pct"] = float(
+                (pred_agg[valid] - true_agg[valid]).sum() / true_valid_total * 100
+            )
+            out[f"{prefix}_weekly_mape"] = float(
+                np.abs(pred_agg[valid] - true_agg[valid]).sum() / true_valid_total * 100
+            )
+        else:
+            out[f"{prefix}_weekly_bias_pct"] = float("nan")
+            out[f"{prefix}_weekly_mape"] = float("nan")
     else:
         out[f"{prefix}_weekly_mean_pct_mape"] = float("nan")
         out[f"{prefix}_weekly_mean_pct_bias_pct"] = float("nan")
+        out[f"{prefix}_weekly_bias_pct"] = float("nan")
+        out[f"{prefix}_weekly_mape"] = float("nan")
     return out
 
 
@@ -396,6 +413,41 @@ def clv_decile_lift(true_clv: np.ndarray, pred_clv: np.ndarray) -> float:
     if mean_all == 0:
         return float("nan")
     return float(true_clv[top_idx].mean() / mean_all)
+
+
+def apply_literature_activity_gate(
+    y_spend_pred_per_week: np.ndarray,
+    pred_activity_per_week: np.ndarray,
+    threshold: float = 0.5,
+) -> np.ndarray:
+    """
+    Zero-mask predicted per-week spend on weeks the model predicts as inactive.
+
+    Deep models emit tiny log-space values on dormant weeks; expm1 of those values
+    leaks fractional currency into spend_mae_raw even when the activity head was
+    correct. This gate removes the leak so "Literature Lens" metrics match the CBA
+    reporting convention (only active-week spend counts toward tracking error).
+
+    Does NOT modify compute_all_metrics — call explicitly in re-scoring scripts to
+    keep the Valuation Lens (ungated, for DCF stress-testing) intact.
+
+    Args:
+        y_spend_pred_per_week: (N, H) raw-currency or log-space spend predictions.
+        pred_activity_per_week: (N, H) model activity probability P(freq > 0).
+        threshold: weeks with activity probability < threshold are zero-masked.
+
+    Returns:
+        (N, H) zero-masked copy of y_spend_pred_per_week.
+    """
+    spend = np.asarray(y_spend_pred_per_week, dtype=np.float64)
+    activity = np.asarray(pred_activity_per_week, dtype=np.float64)
+    if spend.shape != activity.shape:
+        raise ValueError(
+            f"apply_literature_activity_gate: spend/activity shape mismatch: "
+            f"{spend.shape} vs {activity.shape}"
+        )
+    gate = (activity >= threshold).astype(spend.dtype)
+    return spend * gate
 
 
 def _spend_per_week_raw_matrix(

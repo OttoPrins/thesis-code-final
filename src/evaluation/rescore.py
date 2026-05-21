@@ -31,7 +31,14 @@ from src.training.inference import (
 )
 from src.utils.config import load_config
 from src.utils.final_manifest import attach_manifest_metadata
-from train import PIPELINES, _add_result_validity_checks, _compute_val_smearing, build_model
+from train import (
+    PIPELINES,
+    _add_protocol_metadata,
+    _add_result_validity_checks,
+    _append_run_warning,
+    _compute_val_smearing,
+    build_model,
+)
 
 
 def _device() -> torch.device:
@@ -164,6 +171,13 @@ def main() -> None:
         **freq_kwargs,
         **spend_kwargs,
     )
+    _add_protocol_metadata(
+        metrics,
+        config=config,
+        cohort_size=len(true_ids),
+        inference_mode=args.mode,
+        n_scenarios=int(args.n_scenarios),
+    )
     metrics["rescore_checkpoint"] = str(args.checkpoint)
     metrics["rescore_temperature"] = float(temperature)
     metrics.update({f"validation_{k}": float(v) for k, v in validation_totals.items()})
@@ -179,6 +193,12 @@ def main() -> None:
         evaluation_cfg=config.get("evaluation", {}),
         joint=joint,
     )
+    if args.mode == "expected":
+        metrics["diagnostic_only"] = True
+        _append_run_warning(
+            metrics,
+            "expected inference mode is diagnostic-only for Valendin-style reporting",
+        )
 
     tables_dir = Path(output_cfg["results_dir"]) / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)

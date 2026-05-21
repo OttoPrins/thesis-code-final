@@ -27,7 +27,10 @@ from src.evaluation.compare import (
     protocol_variant_from_stem,
 )
 from src.evaluation.metrics import (
+    METRIC_DEFINITION_VERSION,
     compute_all_metrics,
+    freq_mape,
+    horizon_abs_bias_pct,
     mase,
     mase_scale,
     metrics_arrays_path,
@@ -127,7 +130,11 @@ def test_sparse_metrics_include_weekly_scaled_gini_and_decile_artifacts(tmp_path
         scaler=IdentitySpendScaler(),
         weekly_discount_rate=0.0,
     )
-    assert metrics["freq_weekly_mape"] >= 0
+    assert metrics["metric_definition_version"] == METRIC_DEFINITION_VERSION
+    assert metrics["freq_mape"] >= 0
+    assert metrics["freq_valendin_mape"] == metrics["freq_mape"]
+    assert metrics["freq_horizon_abs_bias_pct"] >= 0
+    assert metrics["freq_weekly_mean_pct_mape"] >= 0
     assert np.isfinite(metrics["freq_mase"])
     assert "freq_normalized_gini" in metrics
     assert "spend_normalized_gini" in metrics
@@ -149,9 +156,65 @@ def test_mase_weekly_metrics_and_normalized_gini_helpers():
     assert mase_scale(y_true) == pytest.approx(np.mean([1, 2, 1, 0]))
     assert mase(y_true, y_true + 1, scale=mase_scale(y_true)) == pytest.approx(1 / 1.0)
     weekly = per_week_aggregate_metrics(y_true, y_true, "freq")
-    assert weekly["freq_weekly_mape"] == pytest.approx(0.0)
+    assert weekly["freq_valendin_mape"] == pytest.approx(0.0)
+    assert weekly["freq_horizon_abs_bias_pct"] == pytest.approx(0.0)
+    assert weekly["freq_weekly_mean_pct_mape"] == pytest.approx(0.0)
     assert normalized_gini(np.array([0, 1, 3]), np.array([0, 1, 3])) == pytest.approx(1.0)
     assert normalized_gini(np.array([0, 1, 3]), np.array([3, 1, 0])) < 0
+
+
+def test_valendin_mape_and_horizon_bias_are_distinct_hand_computed():
+    true = np.array([[2, 0, 1], [0, 3, 0]], dtype=np.float32)
+    pred = np.array([[1, 1, 1], [0, 2, 2]], dtype=np.float32)
+
+    # Weekly aggregates are true=[2, 3, 1], pred=[1, 3, 3].
+    # Valendin MAPE = 100 * (|2-1| + |3-3| + |1-3|) / (2+3+1) = 50.
+    assert freq_mape(true, pred) == pytest.approx(50.0)
+
+    # Full-horizon totals are true=6, pred=7, so absolute horizon bias is 16.67%.
+    assert horizon_abs_bias_pct(float(true.sum()), float(pred.sum())) == pytest.approx(
+        100 / 6
+    )
+    weekly = per_week_aggregate_metrics(true, pred, "freq")
+    assert weekly["freq_valendin_mape"] == pytest.approx(50.0)
+    assert weekly["freq_horizon_abs_bias_pct"] == pytest.approx(100 / 6)
+    assert weekly["freq_horizon_bias_pct"] == pytest.approx(100 / 6)
+    assert weekly["freq_weekly_mean_pct_mape"] == pytest.approx(
+        ((1 / 2) + 0 + (2 / 1)) / 3 * 100
+    )
+
+
+def test_comparison_table_backfills_valendin_mape_from_sidecar_arrays(tmp_path):
+    tables_dir = tmp_path / "tables"
+    true = np.array([[2, 0, 1], [0, 3, 0]], dtype=np.float32)
+    pred = np.array([[1, 1, 1], [0, 2, 2]], dtype=np.float32)
+    metrics = {
+        "model": "lstm_base",
+        "dataset": "cdnow",
+        "run_valid": True,
+        "freq_rmse": 1.0,
+        "freq_mae": 1.0,
+        "freq_mape": 999.0,  # stale pre-correction value; must not survive aggregation
+        "bias_pct": 100 / 6,
+        "_per_week_true_freq": true,
+        "_per_week_pred_freq": pred,
+    }
+    save_metrics_with_artifacts(
+        metrics,
+        tables_dir / "lstm_base_cdnow_v3_seed42_sample_metrics.json",
+    )
+
+    df = compare_module.build_comparison_table(
+        str(tmp_path),
+        "cdnow",
+        final_only=False,
+        include_expected=False,
+        protocol_variant="all",
+    )
+
+    assert len(df) == 1
+    assert df.loc[0, "freq_mape"] == pytest.approx(50.0)
+    assert df.loc[0, "freq_valendin_mape"] == pytest.approx(50.0)
 
 
 def test_split_metric_artifacts_rejects_non_scalar_non_numeric_values():

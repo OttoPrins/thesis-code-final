@@ -358,6 +358,138 @@ def _add_run_metadata(
         metrics["run_warning"] = "; ".join([x for x in (existing, warning) if x])
 
 
+def _append_run_warning(metrics: dict, warning: str) -> None:
+    existing = str(metrics.get("run_warning", "") or "")
+    metrics["run_warning"] = "; ".join([x for x in (existing, warning) if x])
+
+
+def _add_protocol_metadata(
+    metrics: dict,
+    *,
+    config: dict,
+    cohort_size: int,
+    inference_mode: str,
+    n_scenarios: int,
+) -> None:
+    """Attach explicit protocol labels so CDNOW variants are not conflated."""
+    dataset_cfg = config["dataset"]
+    calibration_weeks = int(dataset_cfg["calibration_weeks"])
+    holdout_weeks = int(dataset_cfg["holdout_weeks"])
+    protocol_name = dataset_cfg.get("protocol_name")
+    if not protocol_name:
+        raw_file = str(dataset_cfg.get("raw_file", ""))
+        source = (
+            "master"
+            if "master" in raw_file.lower()
+            else "sample"
+            if dataset_cfg.get("prefer_sample_file", False)
+            else "configured"
+        )
+        protocol_name = (
+            f"{dataset_cfg['name']}_{source}_{calibration_weeks}x{holdout_weeks}"
+        )
+
+    metrics["protocol_name"] = str(protocol_name)
+    metrics["cohort_size"] = int(cohort_size)
+    metrics["calibration_weeks"] = calibration_weeks
+    metrics["holdout_weeks"] = holdout_weeks
+    metrics["inference_mode"] = str(inference_mode)
+    metrics["n_scenarios"] = int(n_scenarios)
+
+
+def _run_final_finetune(
+    *,
+    trainer: Trainer,
+    optimizer: torch.optim.Optimizer,
+    full_dataset,
+    device: torch.device,
+    training_cfg: dict,
+    batch_size: int,
+    num_workers: int,
+) -> dict:
+    """
+    Fine-tune on the full calibration cohort after validation-based checkpointing.
+
+    Valendin et al. restore the best validation model and then run a small number
+    of low-LR epochs using the full calibration cohort, including the former
+    validation customers. This does not touch final holdout data.
+    """
+    cfg = training_cfg.get("final_finetune", {}) or {}
+    if not cfg.get("enabled", False):
+        return {"train_loss": [], "val_loss": []}
+
+    epochs = int(cfg.get("epochs", 0))
+    if epochs <= 0:
+        return {"train_loss": [], "val_loss": []}
+
+    if len(full_dataset) <= 0:
+        raise ValueError("final_finetune requires a non-empty full calibration dataset")
+
+    ft_batch = int(
+        cfg.get(
+            "batch_size",
+            max(batch_size, int(batch_size * float(cfg.get("batch_size_multiplier", 1.0)))),
+        )
+    )
+    ft_batch = max(1, min(ft_batch, len(full_dataset)))
+    ft_lr = cfg.get("lr")
+    if ft_lr is None:
+        ft_lr = float(training_cfg["lr"]) * float(cfg.get("lr_multiplier", 0.1))
+    ft_lr = float(ft_lr)
+
+    for group in optimizer.param_groups:
+        group["lr"] = ft_lr
+
+    pin_memory = device.type == "cuda"
+    loader = DataLoader(
+        full_dataset,
+        batch_size=ft_batch,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+    )
+    eval_loader = DataLoader(
+        full_dataset,
+        batch_size=ft_batch,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+    )
+
+    old_scheduler = trainer.scheduler
+    trainer.scheduler = None
+    trainer._total_epochs = max(int(getattr(trainer, "_total_epochs", epochs)), epochs)
+
+    history = {"train_loss": [], "val_loss": []}
+    print(
+        "\nFinal calibration fine-tuning "
+        f"for {epochs} epochs on {len(full_dataset)} customers "
+        f"(batch_size={ft_batch}, lr={ft_lr:g}) ..."
+    )
+    try:
+        start_epoch = int(getattr(trainer, "current_epoch", -1)) + 1
+        for i in range(epochs):
+            trainer.current_epoch = start_epoch + i
+            train_metrics = trainer.train_epoch(loader)
+            val_metrics = trainer.validate(eval_loader)
+            train_loss = train_metrics.get("total_loss", train_metrics["freq_loss"])
+            val_loss = val_metrics.get("total_loss", val_metrics["freq_loss"])
+            history["train_loss"].append(train_loss)
+            history["val_loss"].append(val_loss)
+            print(
+                f"Fine-tune epoch {i + 1:3d}/{epochs} - "
+                f"train_loss: {train_loss:.4f}  full_loss: {val_loss:.4f}"
+            )
+    finally:
+        trainer.scheduler = old_scheduler
+
+    return history
+
+
 def _model_label(config: dict) -> str:
     model_cfg = config.get("model", {})
     model_type = model_cfg.get("type", "unknown")
@@ -801,6 +933,21 @@ def run_experiment(
         early_stopping=early_stopping,
     )
 
+    finetune_history = _run_final_finetune(
+        trainer=trainer,
+        optimizer=optimizer,
+        full_dataset=inference_ds,
+        device=device,
+        training_cfg=training_cfg,
+        batch_size=batch_size,
+        num_workers=_n_workers,
+    )
+    if finetune_history["train_loss"]:
+        history["final_finetune_train_loss"] = finetune_history["train_loss"]
+        history["final_finetune_val_loss"] = finetune_history["val_loss"]
+        history["train_loss"].extend(finetune_history["train_loss"])
+        history["val_loss"].extend(finetune_history["val_loss"])
+
     # Save checkpoint
     results_dir = Path(output_cfg["results_dir"])
     temp_ckpt_dir = None
@@ -1070,6 +1217,29 @@ def run_experiment(
         **spend_kwargs,
     )
     metrics.update(calibration_metadata)
+    _add_protocol_metadata(
+        metrics,
+        config=config,
+        cohort_size=len(true_ids),
+        inference_mode=str(inference_mode),
+        n_scenarios=int(n_scenarios),
+    )
+    finetune_cfg = training_cfg.get("final_finetune", {}) or {}
+    if finetune_cfg.get("enabled", False):
+        metrics["final_finetune_enabled"] = True
+        metrics["final_finetune_epochs"] = int(finetune_cfg.get("epochs", 0))
+        if "lr" in finetune_cfg:
+            metrics["final_finetune_lr"] = float(finetune_cfg["lr"])
+        if "lr_multiplier" in finetune_cfg:
+            metrics["final_finetune_lr_multiplier"] = float(
+                finetune_cfg["lr_multiplier"]
+            )
+        if "batch_size" in finetune_cfg:
+            metrics["final_finetune_batch_size"] = int(finetune_cfg["batch_size"])
+        if "batch_size_multiplier" in finetune_cfg:
+            metrics["final_finetune_batch_size_multiplier"] = float(
+                finetune_cfg["batch_size_multiplier"]
+            )
     if evaluation_cfg.get("diagnostic_only", False):
         metrics["diagnostic_only"] = True
     if training_cfg.get("repair_attempt", False):
@@ -1095,6 +1265,12 @@ def run_experiment(
         evaluation_cfg=evaluation_cfg,
         joint=joint,
     )
+    if inference_mode == "expected":
+        metrics["diagnostic_only"] = True
+        _append_run_warning(
+            metrics,
+            "expected inference mode is diagnostic-only for Valendin-style reporting",
+        )
     _add_run_metadata(
         metrics,
         history=history,

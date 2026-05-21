@@ -185,6 +185,16 @@ def main():
             # Add model name and dataset
             metrics["model"] = model_name
             metrics["dataset"] = dataset_name
+            protocol_name = dataset_cfg.get(
+                "protocol_name",
+                f"{dataset_name}_{dataset_cfg['calibration_weeks']}x{dataset_cfg['holdout_weeks']}",
+            )
+            metrics["protocol_name"] = str(protocol_name)
+            metrics["cohort_size"] = int(len(customer_ids))
+            metrics["calibration_weeks"] = int(dataset_cfg["calibration_weeks"])
+            metrics["holdout_weeks"] = int(dataset_cfg["holdout_weeks"])
+            metrics["inference_mode"] = "benchmark_expected_total"
+            metrics["n_scenarios"] = 0
             benchmark_run_name = f"{model_name}_{dataset_name}"
             attach_manifest_metadata(
                 metrics,

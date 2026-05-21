@@ -6,8 +6,13 @@ Frequency metrics (individual-level):
     freq_mae:  MAE of purchase counts
 
 Cohort-level metrics:
-    freq_mape:  MAPE of aggregated cohort predictions vs actuals
-    bias_pct:   Percentage bias = (sum_pred - sum_actual) / sum_actual * 100
+    freq_mape: Valendin et al. (2022) aggregate weekly MAPE:
+               100 * sum_t |A_t - P_t| / sum_t A_t
+    freq_horizon_abs_bias_pct:
+               Absolute full-horizon aggregate error. This is the historical
+               scalar "MAPE" implementation retained under an explicit name.
+    bias_pct:  Signed full-horizon aggregate bias:
+               100 * (sum_t P_t - sum_t A_t) / sum_t A_t
 
 Spend aggregation (critical):
     The model predicts per-week spend in raw log1p space. To obtain
@@ -37,6 +42,9 @@ import numpy as np
 from scipy import stats
 
 
+METRIC_DEFINITION_VERSION = "valendin_aggregate_mape_v1"
+
+
 def freq_rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
@@ -45,8 +53,8 @@ def freq_mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(np.abs(y_true - y_pred)))
 
 
-def freq_mape(y_true_agg: float, y_pred_agg: float) -> float:
-    """Cohort-level MAPE. Inputs are scalar aggregated totals."""
+def horizon_abs_bias_pct(y_true_agg: float, y_pred_agg: float) -> float:
+    """Absolute full-horizon aggregate error as a percent of true total."""
     if y_true_agg == 0:
         return float("nan")
     return float(abs(y_pred_agg - y_true_agg) / abs(y_true_agg) * 100)
@@ -59,6 +67,36 @@ def bias_pct(y_true_agg: float, y_pred_agg: float) -> float:
     return float((y_pred_agg - y_true_agg) / abs(y_true_agg) * 100)
 
 
+def freq_mape(y_true_per_week: np.ndarray, y_pred_per_week: np.ndarray) -> float:
+    """
+    Valendin et al. (2022) aggregate weekly MAPE.
+
+    The paper scores the cohort-level weekly transaction flow, not a scalar
+    holdout total and not the mean of week-by-week percentage errors:
+
+        100 * sum_t |A_t - P_t| / sum_t A_t
+
+    Inputs may be per-customer weekly matrices (N, H) or already aggregated
+    weekly vectors (H,). In both cases the denominator is total actual
+    aggregate transactions over the scored horizon.
+    """
+    true = np.asarray(y_true_per_week, dtype=np.float64)
+    pred = np.asarray(y_pred_per_week, dtype=np.float64)
+    if true.shape != pred.shape:
+        raise ValueError(
+            f"Valendin MAPE true/pred shape mismatch: {true.shape} vs {pred.shape}"
+        )
+    if true.ndim == 2:
+        true = true.sum(axis=0)
+        pred = pred.sum(axis=0)
+    elif true.ndim != 1:
+        raise ValueError(f"Valendin MAPE expects 1D or 2D arrays, got ndim={true.ndim}")
+    total_true = float(true.sum())
+    if total_true == 0:
+        return float("nan")
+    return float(np.abs(true - pred).sum() / abs(total_true) * 100)
+
+
 def per_week_aggregate_metrics(
     y_true_per_week: np.ndarray,
     y_pred_per_week: np.ndarray,
@@ -67,9 +105,10 @@ def per_week_aggregate_metrics(
     """
     Aggregate all customers by week and score the resulting cohort time series.
 
-    This complements full-horizon cohort MAPE/bias: a model can have acceptable
-    total holdout bias while missing the timing of purchases within the horizon.
-    Weeks with zero actual aggregate are skipped for percentage metrics.
+    This complements full-horizon cohort bias: a model can have acceptable total
+    holdout bias while missing the timing of purchases within the horizon.
+    Valendin MAPE uses total actual aggregate transactions as denominator; the
+    old mean of week-level percentage errors is retained with an explicit name.
     """
     true = np.asarray(y_true_per_week, dtype=np.float64)
     pred = np.asarray(y_pred_per_week, dtype=np.float64)
@@ -89,14 +128,23 @@ def per_week_aggregate_metrics(
         f"{prefix}_weekly_mae": float(abs_err.mean()),
         f"{prefix}_weekly_total_true": float(true_agg.sum()),
         f"{prefix}_weekly_total_pred": float(pred_agg.sum()),
+        f"{prefix}_valendin_mape": freq_mape(true_agg, pred_agg),
+        f"{prefix}_horizon_abs_bias_pct": horizon_abs_bias_pct(
+            float(true_agg.sum()),
+            float(pred_agg.sum()),
+        ),
+        f"{prefix}_horizon_bias_pct": bias_pct(
+            float(true_agg.sum()),
+            float(pred_agg.sum()),
+        ),
     }
     if valid.any():
         pct_err = (pred_agg[valid] - true_agg[valid]) / np.abs(true_agg[valid])
-        out[f"{prefix}_weekly_mape"] = float(np.mean(np.abs(pct_err)) * 100)
-        out[f"{prefix}_weekly_bias_pct"] = float(np.mean(pct_err) * 100)
+        out[f"{prefix}_weekly_mean_pct_mape"] = float(np.mean(np.abs(pct_err)) * 100)
+        out[f"{prefix}_weekly_mean_pct_bias_pct"] = float(np.mean(pct_err) * 100)
     else:
-        out[f"{prefix}_weekly_mape"] = float("nan")
-        out[f"{prefix}_weekly_bias_pct"] = float("nan")
+        out[f"{prefix}_weekly_mean_pct_mape"] = float("nan")
+        out[f"{prefix}_weekly_mean_pct_bias_pct"] = float("nan")
     return out
 
 
@@ -260,7 +308,7 @@ def aggregate_cohort(
     return {
         "total_true": total_true,
         "total_pred": total_pred,
-        "mape": freq_mape(total_true, total_pred),
+        "horizon_abs_bias_pct": horizon_abs_bias_pct(total_true, total_pred),
         "bias_pct": bias_pct(total_true, total_pred),
         "n_customers": len(np.unique(customer_ids)),
     }
@@ -470,6 +518,7 @@ def compute_all_metrics(
     y_freq_pred = np.asarray(y_freq_pred, dtype=np.float32) * float(freq_calibration_factor)
 
     metrics = {
+        "metric_definition_version": METRIC_DEFINITION_VERSION,
         "freq_rmse": freq_rmse(y_freq_true, y_freq_pred),
         "freq_mae": freq_mae(y_freq_true, y_freq_pred),
         "freq_normalized_gini": normalized_gini(y_freq_true, y_freq_pred),
@@ -478,7 +527,7 @@ def compute_all_metrics(
         metrics["freq_calibration_factor"] = float(freq_calibration_factor)
     if customer_ids is not None:
         cohort = aggregate_cohort(y_freq_true, y_freq_pred, customer_ids)
-        metrics["freq_mape"] = cohort["mape"]
+        metrics["freq_horizon_abs_bias_pct"] = cohort["horizon_abs_bias_pct"]
         metrics["bias_pct"] = cohort["bias_pct"]
     metrics.update(decile_calibration_arrays(y_freq_true, y_freq_pred, "freq"))
 
@@ -489,6 +538,7 @@ def compute_all_metrics(
             * float(freq_calibration_factor)
         )
         metrics.update(per_week_aggregate_metrics(true_freq_week, pred_freq_week, "freq"))
+        metrics["freq_mape"] = metrics["freq_valendin_mape"]
         metrics["freq_mase"] = mase(true_freq_week, pred_freq_week, scale=freq_mase_scale)
         if freq_mase_scale is not None:
             metrics["freq_mase_scale"] = float(freq_mase_scale)

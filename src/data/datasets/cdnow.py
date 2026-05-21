@@ -132,6 +132,16 @@ class CDNOWPipeline(BasePipeline):
 
     def load_raw(self, raw_dir: str) -> pd.DataFrame:
         """Load CDNOW raw file, supporting both sample and master formats."""
+        cfg = getattr(self, "_current_dataset_cfg", {})
+        requested = cfg.get("raw_file")
+        if requested:
+            path = os.path.join(raw_dir, requested)
+            if not os.path.exists(path):
+                raise FileNotFoundError(
+                    f"Configured CDNOW raw_file not found: {path}"
+                )
+        else:
+            path = None
         candidates = [
             "CDNOW_sample.txt",
             "CDNOW_sample.csv",
@@ -139,12 +149,12 @@ class CDNOWPipeline(BasePipeline):
             "cdnow.csv",
             "cdnow.txt",
         ]
-        path = None
-        for name in candidates:
-            candidate = os.path.join(raw_dir, name)
-            if os.path.exists(candidate):
-                path = candidate
-                break
+        if path is None:
+            for name in candidates:
+                candidate = os.path.join(raw_dir, name)
+                if os.path.exists(candidate):
+                    path = candidate
+                    break
 
         if path is None:
             raise FileNotFoundError(
@@ -164,7 +174,6 @@ class CDNOWPipeline(BasePipeline):
             ]
         elif df.shape[1] == 4:
             df.columns = ["customer_id", "date", "num_cds", "amount"]
-            cfg = getattr(self, "_current_dataset_cfg", {})
             if cfg.get("prefer_sample_file", False):
                 sample_path = os.path.join(raw_dir, "CDNOW_sample.txt")
                 raise ValueError(

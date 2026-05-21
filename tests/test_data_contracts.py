@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 import copy
+import yaml
+from pathlib import Path
 
 from src.data.datasets.cdnow import CDNOWPipeline
 from src.data.datasets.dunnhumby import DunnhumbyPipeline
@@ -54,6 +56,58 @@ def test_cdnow_final_config_rejects_master_when_sample_required(tmp_path):
     pipe._current_dataset_cfg = {"prefer_sample_file": True}
     with pytest.raises(ValueError, match="canonical 2,357-customer sample"):
         pipe.load_raw(str(tmp_path))
+
+
+def test_cdnow_valendin_master_protocol_stats_match_paper_order():
+    raw_path = Path("data/raw/CDNOW_master.txt")
+    if not raw_path.exists():
+        pytest.skip("CDNOW_master.txt is not available in this checkout")
+
+    df = pd.read_csv(
+        raw_path,
+        sep=r"\s+",
+        header=None,
+        names=["customer_id", "date", "num_cds", "amount"],
+    )
+    df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d")
+    first_purchase = df.groupby("customer_id")["date"].min()
+    cohort_ids = first_purchase[first_purchase <= pd.Timestamp("1997-03-31")].index
+    assert len(cohort_ids) == 23570
+
+    df = df[df["customer_id"].isin(cohort_ids)].copy()
+    df["week"] = ((df["date"] - pd.Timestamp("1997-01-01")).dt.days // 7).astype(int)
+    cohort_index = pd.Index(cohort_ids)
+    calib_counts = (
+        df[df["week"].between(0, 38)]
+        .groupby("customer_id")
+        .size()
+        .reindex(cohort_index, fill_value=0)
+    )
+    holdout_counts = (
+        df[df["week"].between(39, 77)]
+        .groupby("customer_id")
+        .size()
+        .reindex(cohort_index, fill_value=0)
+    )
+
+    assert calib_counts.mean() == pytest.approx(2.1, abs=0.05)
+    assert (calib_counts == 1).mean() * 100 == pytest.approx(59.0, abs=1.0)
+    assert holdout_counts.mean() == pytest.approx(0.9, abs=0.05)
+    assert (holdout_counts == 0).mean() * 100 == pytest.approx(70.0, abs=1.0)
+
+
+def test_cdnow_valendin_master_config_parses_expected_protocol():
+    cfg_path = Path("experiments/configs/lstm_base_cdnow_valendin_master_39x39.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text())
+
+    assert cfg["dataset"]["protocol_name"] == "valendin_cdnow_master_39x39"
+    assert cfg["dataset"]["raw_file"] == "CDNOW_master.txt"
+    assert cfg["dataset"]["prefer_sample_file"] is False
+    assert cfg["dataset"]["calibration_weeks"] == 39
+    assert cfg["dataset"]["holdout_weeks"] == 39
+    assert cfg["dataset"]["freq_cap"] == "observed"
+    assert cfg["inference"]["mode"] == "sample"
+    assert cfg["inference"]["n_scenarios"] >= 30
 
 
 def test_uci_final_validation_rejects_one_year_online_retail(tmp_path):

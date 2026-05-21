@@ -34,6 +34,7 @@ from src.evaluation.metrics import (
     bias_pct as _bias_pct,
     clv_decile_lift as _clv_decile_lift,
     clv_spearman as _clv_spearman,
+    freq_mape as _valendin_freq_mape,
     metrics_arrays_path,
 )
 from src.utils.final_manifest import load_final_manifest, result_matches_manifest
@@ -342,16 +343,53 @@ def build_comparison_table(
             model_name, _, _, _, _ = parse_run_name(stem)
         stem = Path(metrics_file).stem.removesuffix("_metrics")
 
+        arrays_path = metrics_arrays_path(metrics_file)
+        if arrays_path.exists():
+            try:
+                with np.load(arrays_path) as arrays:
+                    if (
+                        "per_week_true_freq" in arrays.files
+                        and "per_week_pred_freq" in arrays.files
+                    ):
+                        metrics["freq_mape"] = _valendin_freq_mape(
+                            arrays["per_week_true_freq"],
+                            arrays["per_week_pred_freq"],
+                        )
+                        metrics["freq_valendin_mape"] = metrics["freq_mape"]
+                    if (
+                        "per_week_true_spend" in arrays.files
+                        and "per_week_pred_spend" in arrays.files
+                    ):
+                        metrics["spend_valendin_mape"] = _valendin_freq_mape(
+                            arrays["per_week_true_spend"],
+                            arrays["per_week_pred_spend"],
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "Could not backfill Valendin MAPE from %s: %s",
+                    arrays_path,
+                    exc,
+                )
+
         row = {
             "model": model_name,
             "dataset": dataset,
+            "protocol_name": metrics.get("protocol_name", ""),
+            "cohort_size": metrics.get("cohort_size", np.nan),
+            "calibration_weeks": metrics.get("calibration_weeks", np.nan),
+            "holdout_weeks": metrics.get("holdout_weeks", np.nan),
+            "inference_mode": metrics.get("inference_mode", metrics.get("mode", "")),
+            "n_scenarios": metrics.get("n_scenarios", np.nan),
             "protocol_variant": protocol_variant_from_stem(stem),
+            "metric_definition_version": metrics.get("metric_definition_version", ""),
             "freq_rmse":       metrics.get("freq_rmse", np.nan),
             "freq_mae":        metrics.get("freq_mae", np.nan),
             "freq_mape":       metrics.get("freq_mape", np.nan),
+            "freq_horizon_abs_bias_pct": metrics.get("freq_horizon_abs_bias_pct", np.nan),
             "bias_pct":        metrics.get("bias_pct", np.nan),
-            "freq_weekly_mape": metrics.get("freq_weekly_mape", np.nan),
-            "freq_weekly_bias_pct": metrics.get("freq_weekly_bias_pct", np.nan),
+            "freq_valendin_mape": metrics.get("freq_valendin_mape", np.nan),
+            "freq_weekly_mean_pct_mape": metrics.get("freq_weekly_mean_pct_mape", np.nan),
+            "freq_weekly_mean_pct_bias_pct": metrics.get("freq_weekly_mean_pct_bias_pct", np.nan),
             "freq_mase":       metrics.get("freq_mase", np.nan),
             "freq_normalized_gini": metrics.get("freq_normalized_gini", np.nan),
             "spend_mae_log":   metrics.get("spend_mae_log", np.nan),
@@ -359,8 +397,10 @@ def build_comparison_table(
             "spend_r2_log":    metrics.get("spend_r2_log", np.nan),
             "spend_mae_raw":   metrics.get("spend_mae_raw", np.nan),
             "spend_rmse_raw":  metrics.get("spend_rmse_raw", np.nan),
-            "spend_weekly_mape": metrics.get("spend_weekly_mape", np.nan),
-            "spend_weekly_bias_pct": metrics.get("spend_weekly_bias_pct", np.nan),
+            "spend_valendin_mape": metrics.get("spend_valendin_mape", np.nan),
+            "spend_horizon_abs_bias_pct": metrics.get("spend_horizon_abs_bias_pct", np.nan),
+            "spend_weekly_mean_pct_mape": metrics.get("spend_weekly_mean_pct_mape", np.nan),
+            "spend_weekly_mean_pct_bias_pct": metrics.get("spend_weekly_mean_pct_bias_pct", np.nan),
             "spend_mase":      metrics.get("spend_mase", np.nan),
             "spend_normalized_gini": metrics.get("spend_normalized_gini", np.nan),
             "clv_mae":         metrics.get("clv_mae", np.nan),

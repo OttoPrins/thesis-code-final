@@ -46,7 +46,9 @@ def resolve_freq_bins(dataset_cfg: dict, calib_weekly_freq: np.ndarray) -> list:
     Precedence:
         1. Explicit `freq_bins: [0, 1, ..., k]` in YAML — used as-is.
         2. Explicit `freq_cap: <int>` in YAML — bins become [0..cap].
-        3. `freq_cap: auto` (or unspecified) — cap derived from calibration via
+        3. `freq_cap: observed` — cap is max calibration weekly count, matching
+           Valendin et al.'s observed-outcome softmax support.
+        4. `freq_cap: auto` (or unspecified) — cap derived from calibration via
            compute_freq_cap (q=0.99 by default; override with `freq_cap_quantile`).
 
     Logs the chosen cap for traceability.
@@ -60,6 +62,11 @@ def resolve_freq_bins(dataset_cfg: dict, calib_weekly_freq: np.ndarray) -> list:
     if isinstance(cap_setting, int):
         cap = cap_setting
         source = "explicit"
+    elif str(cap_setting).lower() in {"observed", "max", "observed_max"}:
+        values = np.asarray(calib_weekly_freq)
+        cap = int(np.max(values)) if values.size else 1
+        cap = max(1, cap)
+        source = "observed max"
     else:
         q = float(dataset_cfg.get("freq_cap_quantile", 0.99))
         cap = compute_freq_cap(np.asarray(calib_weekly_freq), q=q)

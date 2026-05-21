@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ```
 data/raw/
 ├── CDNOW_sample.txt  ← canonical 2,357-customer sample
-├── CDNOW_master.txt  ← 23,570-customer master file for Valendin 39x39 replication
+├── CDNOW_master.txt  ← optional 23,570-customer master file for Valendin 39x39 check
 ├── UCI Retail/       ← online_retail_II.xlsx  (UCI Machine Learning Repository)
 ├── TaFeng/           ← ta_feng_all_months_merged.csv  (Kaggle IJCAI-15)
 └── Dunnhumby datasets/
@@ -67,7 +67,7 @@ Results saved to `results/tables/{model}_{dataset}_metrics.json`.
 
 Strict replication: single LSTM layer, Dense(128), softmax over frequency classes,
 Monte Carlo inference with n_scenarios=30 (configurable via `inference.n_scenarios`).
-The literal Valendin sanity check uses the master CDNOW file:
+The optional literal Valendin sanity check uses the master CDNOW file:
 
 ```bash
 python train.py --config experiments/configs/lstm_base_cdnow_valendin_master_39x39.yaml

@@ -6,6 +6,7 @@ import copy
 from src.data.datasets.cdnow import CDNOWPipeline
 from src.data.datasets.dunnhumby import DunnhumbyPipeline
 from src.data.datasets.uci_retail import UCIRetailPipeline
+from src.data.collate import collate_fn
 from src.data.dataset import CustomerDataset
 from src.data.transforms import SequenceBuilder, SpendScaler
 from src.evaluation.calibration import (
@@ -211,3 +212,28 @@ def test_rolling_origin_truth_uses_raw_unclipped_counts():
 
     assert ro_ds.true_freq().tolist() == [[5.0, 4.0]]
     assert ds.seed_trans[:, 2:].tolist() == [[3, 3]]
+
+
+def test_raw_frequency_target_survives_sequence_dataset_and_collate():
+    df = pd.DataFrame({
+        "customer_id": [1, 1, 1, 1],
+        "week": [0, 1, 2, 3],
+        "weekly_freq": [1, 5, 0, 4],
+        "log_spend": [1.0, 1.5, 0.0, 1.2],
+    })
+    data = SequenceBuilder(
+        calibration_weeks=4,
+        min_active_weeks=1,
+        freq_bins=[0, 1, 2, 3],
+    ).build(df)
+    assert data["y_freq"].tolist() == [[3, 0, 3]]
+    assert data["y_freq_raw"].tolist() == [[5, 0, 4]]
+
+    ds = CustomerDataset(data)
+    item = ds[0]
+    assert item["y_freq"].tolist() == [3, 0, 3]
+    assert item["y_freq_raw"].tolist() == [5.0, 0.0, 4.0]
+
+    batch = collate_fn([item])
+    assert batch["y_freq"].tolist() == [[3, 0, 3]]
+    assert batch["y_freq_raw"].tolist() == [[5.0, 0.0, 4.0]]

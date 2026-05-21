@@ -275,6 +275,23 @@ def _add_result_validity_checks(
                     evaluation_cfg.get("warning_abs_bias_pct", 100.0)
                 ):
                     warnings.append(f"large frequency bias ({metrics.get('bias_pct'):.1f}%)")
+                max_abs_bias = evaluation_cfg.get("validity_max_abs_bias_pct")
+                if max_abs_bias is not None and abs(float(metrics.get("bias_pct", 0.0))) > float(max_abs_bias):
+                    invalid_reasons.append(
+                        f"absolute frequency bias {float(metrics.get('bias_pct', 0.0)):.1f}% "
+                        f"exceeds {float(max_abs_bias):.1f}%"
+                    )
+
+    factor_range = evaluation_cfg.get("validity_calibration_factor_range")
+    if factor_range is not None:
+        lo, hi = float(factor_range[0]), float(factor_range[1])
+        for key in ("freq_calibration_factor", "spend_calibration_factor"):
+            if key in metrics:
+                factor = float(metrics[key])
+                if np.isfinite(factor) and not (lo <= factor <= hi):
+                    invalid_reasons.append(
+                        f"{key} {factor:.3f} outside [{lo:.3f}, {hi:.3f}]"
+                    )
 
     if joint and "spend_weekly_total_true" in metrics and "spend_weekly_total_pred" in metrics:
         true_spend = float(metrics["spend_weekly_total_true"])
@@ -315,6 +332,30 @@ def _add_result_validity_checks(
     metrics["run_valid"] = len(invalid_reasons) == 0
     metrics["run_invalid_reason"] = "; ".join(invalid_reasons) if invalid_reasons else ""
     metrics["run_warning"] = "; ".join(warnings)
+
+
+def _add_run_metadata(
+    metrics: dict,
+    *,
+    history: dict,
+    training_cfg: dict,
+    evaluation_cfg: dict,
+) -> None:
+    """Attach run-length metadata so smoke runs cannot masquerade as final runs."""
+    epochs_completed = int(len(history.get("train_loss", []))) if history else 0
+    max_epochs = int(training_cfg.get("max_epochs", training_cfg.get("epochs", epochs_completed)))
+    threshold = int(evaluation_cfg.get("smoke_max_epochs_threshold", 20))
+
+    metrics["epochs_completed"] = epochs_completed
+    metrics["max_epochs_configured"] = max_epochs
+    if max_epochs < threshold:
+        metrics["smoke_run"] = True
+        warning = (
+            f"smoke run only: max_epochs={max_epochs} is below "
+            f"threshold={threshold}"
+        )
+        existing = str(metrics.get("run_warning", "") or "")
+        metrics["run_warning"] = "; ".join([x for x in (existing, warning) if x])
 
 
 def _model_label(config: dict) -> str:
@@ -746,6 +787,8 @@ def run_experiment(
         restore_best_checkpoint=training_cfg.get("restore_best_checkpoint", True),
         spend_loss_normalize=bool(loss_cfg.get("spend_loss_normalize", False)),
         scheduled_sampling=training_cfg.get("scheduled_sampling", None),
+        frequency_loss_config=loss_cfg.get("frequency_loss", None),
+        class_values=class_values,
         amp_enabled=bool(training_cfg.get("amp_enabled", True)),
         dataset_name=dataset_name,
         run_id=output_cfg["run_name"],
@@ -1051,6 +1094,12 @@ def run_experiment(
         true_per_week=true_per_week,
         evaluation_cfg=evaluation_cfg,
         joint=joint,
+    )
+    _add_run_metadata(
+        metrics,
+        history=history,
+        training_cfg=training_cfg,
+        evaluation_cfg=evaluation_cfg,
     )
 
     # Prediction diagnostics — helps identify exposure bias / class distribution issues.

@@ -285,7 +285,8 @@ class SequenceBuilder:
             spend_input   : (N, T-1) float32 — log-spend at each input step
             delta_t_input : (N, T-1) float32 — weeks since last purchase at each input step
             state_features: (N, T-1, S) float32 — optional causal state features
-            y_freq        : (N, T-1) int32   — target freq class, shifted +1
+            y_freq        : (N, T-1) int32   — clipped target freq class, shifted +1
+            y_freq_raw    : (N, T-1) int32   — raw unclipped target count, shifted +1
             y_spend       : (N, T-1) float32 — target log-spend, shifted +1
             active_mask   : (N, T-1) float32 — 1 when target period is active
             customer_ids  : (N,)     int64   — customer identifiers
@@ -358,6 +359,7 @@ class SequenceBuilder:
         delta_t_input = full_delta_t[:, :-1]         # (N, T-1)
         state_features = delta_t_input[..., None].astype(np.float32)
         y_freq = full_trans[:, 1:]                   # (N, T-1)
+        y_freq_raw = full_raw_trans[:, 1:]           # (N, T-1)
         y_spend = full_spend[:, 1:]                  # (N, T-1)
 
         # Mask = 1 only for target steps strictly after the customer's first active week.
@@ -384,6 +386,7 @@ class SequenceBuilder:
             "delta_t_input": delta_t_input,
             "state_features": state_features,
             "y_freq": y_freq,
+            "y_freq_raw": y_freq_raw,
             "y_spend": y_spend,
             "active_mask": active_mask,
             "customer_ids": customer_ids,

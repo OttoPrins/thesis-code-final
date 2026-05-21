@@ -23,6 +23,7 @@ def collate_fn(batch):
         delta_t     : (B, T-1)  float
         state_features: (B, T-1, S) float
         y_freq      : (B, T-1)  long
+        y_freq_raw  : (B, T-1)  float
         y_spend     : (B, T-1)  float
         active_mask : (B, T-1)  float
         customer_id : (B,)      long
@@ -46,6 +47,7 @@ def collate_fn(batch):
         "spend": torch.stack([item["spend"] for item in batch]),
         "state_features": torch.stack([item["state_features"] for item in batch]),
         "y_freq": torch.stack([item["y_freq"] for item in batch]),
+        "y_freq_raw": torch.stack([item["y_freq_raw"] for item in batch]),
         "y_spend": torch.stack([item["y_spend"] for item in batch]),
         "active_mask": torch.stack([item["active_mask"] for item in batch]),
         "customer_id": torch.stack([item["customer_id"] for item in batch]),

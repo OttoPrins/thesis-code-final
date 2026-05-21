@@ -36,7 +36,8 @@ class CustomerDataset(Dataset):
         spend       : (T-1,)  float — log-spend at each input step
         delta_t     : (T-1,)  float — weeks since last purchase at each step
         state_features: (T-1, S) float — optional causal state features
-        y_freq      : (T-1,)  int   — target frequency class at each step
+        y_freq      : (T-1,)  int   — clipped target frequency class at each step
+        y_freq_raw  : (T-1,)  float — raw unclipped target count at each step
         y_spend     : (T-1,)  float — target log-spend at each step
         active_mask : (T-1,)  float — 1 when target frequency is positive
         mask        : (T-1,)  float — 1=real data, 0=padding
@@ -85,6 +86,10 @@ class CustomerDataset(Dataset):
         else:
             self.state_features = self.delta_t.unsqueeze(-1)
         self.y_freq = torch.tensor(data["y_freq"], dtype=torch.long)
+        if "y_freq_raw" in data:
+            self.y_freq_raw = torch.tensor(data["y_freq_raw"], dtype=torch.float32)
+        else:
+            self.y_freq_raw = self.y_freq.to(dtype=torch.float32)
         self.y_spend = torch.tensor(data["y_spend"], dtype=torch.float32)
         if "active_mask" in data:
             self.active_mask = torch.tensor(data["active_mask"], dtype=torch.float32)
@@ -172,6 +177,7 @@ class CustomerDataset(Dataset):
             "delta_t": self.delta_t[idx],
             "state_features": self.state_features[idx],
             "y_freq": self.y_freq[idx],
+            "y_freq_raw": self.y_freq_raw[idx],
             "y_spend": self.y_spend[idx],
             "active_mask": self.active_mask[idx],
             "customer_id": self.customer_ids[idx],

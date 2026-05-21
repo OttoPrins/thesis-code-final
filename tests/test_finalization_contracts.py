@@ -38,7 +38,7 @@ from src.evaluation.metrics import (
 )
 from src.evaluation.validate_pipeline import validate_pipeline_inputs
 from src.models.heads import SpendHead
-from src.models.losses import KendallMultiTaskLoss
+from src.models.losses import KendallMultiTaskLoss, MetricAlignedFrequencyLoss
 from src.models import LSTMModel, TransformerModel
 from src.training.callbacks import EarlyStopping
 from src.training.inference import _step_from_logits, _zero_inactive_spend_feedback
@@ -50,6 +50,7 @@ from src.utils.final_manifest import (
 )
 from train import (
     _add_result_validity_checks,
+    _add_run_metadata,
     _build_repair_config,
     _compute_val_smearing,
     _failed_training_metrics,
@@ -570,6 +571,76 @@ def test_hurdle_spend_loss_ignores_inactive_targets():
     assert loss.item() == pytest.approx(0.0, abs=1e-6)
 
 
+def test_metric_aligned_frequency_loss_is_finite_and_respects_mask():
+    logits = torch.tensor(
+        [
+            [[4.0, 0.0, 0.0, 0.0], [0.0, 4.0, 0.0, 0.0], [0.0, 0.0, 4.0, 0.0]],
+            [[0.0, 0.0, 0.0, 4.0], [4.0, 0.0, 0.0, 0.0], [8.0, 0.0, 0.0, 0.0]],
+        ],
+        requires_grad=True,
+    )
+    y_freq = torch.tensor([[0, 1, 2], [3, 0, 3]])
+    y_raw = torch.tensor([[0.0, 1.0, 2.0], [5.0, 0.0, 99.0]])
+    mask = torch.tensor([[1.0, 1.0, 1.0], [1.0, 1.0, 0.0]])
+    loss_fn = MetricAlignedFrequencyLoss(
+        {
+            "enabled": True,
+            "class_weights": "auto",
+            "activity_bce_weight": 0.2,
+            "count_huber_weight": 0.5,
+            "aggregate_bias_weight": 0.3,
+            "temporal_tail_weight": 0.4,
+        },
+        class_values=torch.tensor([0.0, 1.0, 2.0, 5.0]),
+    )
+
+    loss, metrics = loss_fn(logits, y_freq, mask, y_freq_raw=y_raw)
+    assert torch.isfinite(loss)
+    assert metrics["freq_count_huber_loss"] < 5.0
+    loss.backward()
+    assert torch.isfinite(logits.grad).all()
+    assert torch.all(logits.grad[1, 2] == 0)
+
+
+def test_transformer_scheduled_noising_uses_only_previous_predictions():
+    model = TransformerModel(
+        max_week=51,
+        max_trans=3,
+        d_model=8,
+        n_heads=2,
+        n_layers=1,
+        d_ff=16,
+        dropout=0.0,
+        time2vec_dim=2,
+        joint=False,
+    )
+    trainer = Trainer(
+        model=model,
+        optimizer=torch.optim.Adam(model.parameters()),
+        device=torch.device("cpu"),
+        joint=False,
+        scheduled_sampling={"enabled": True, "start_epoch": 0, "max_prob": 1.0},
+    )
+    batch = {
+        "week": torch.tensor([[0, 1, 2, 3]]),
+        "position": torch.tensor([[0, 1, 2, 3]]),
+        "trans": torch.tensor([[0, 0, 0, 0]]),
+        "spend": torch.zeros((1, 4)),
+        "state_features": torch.zeros((1, 4, 1)),
+        "delta_t": torch.zeros((1, 4)),
+        "mask": torch.ones((1, 4)),
+        "y_freq": torch.tensor([[0, 0, 0, 0]]),
+    }
+    logits = torch.full((1, 4, 4), -10.0)
+    logits[0, 0, 1] = 10.0
+    logits[0, 1, 2] = 10.0
+    logits[0, 2, 3] = 10.0
+    logits[0, 3, 0] = 10.0
+
+    noisy = trainer._build_scheduled_noising_batch(batch, logits, None, ss_prob=1.0)
+    assert noisy["trans"].tolist() == [[0, 1, 2, 3]]
+
+
 def _last_linear(module: nn.Module) -> nn.Linear:
     linears = [m for m in module.modules() if isinstance(m, nn.Linear)]
     assert linears
@@ -1002,6 +1073,28 @@ def test_final_joint_configs_use_strict_stability_defaults():
         assert "amp_enabled" not in training
 
 
+def test_cdnow_v4_soft_configs_parse_and_use_conservative_frequency_loss():
+    expected = {
+        "lstm_base_cdnow_v4_soft": False,
+        "lstm_joint_cdnow_v4_soft": True,
+        "transformer_joint_cdnow_v4_soft": True,
+    }
+    for stem, joint in expected.items():
+        path = f"experiments/configs/{stem}.yaml"
+        cfg = yaml.safe_load(open(path))
+        assert cfg["dataset"]["name"] == "cdnow"
+        assert cfg["output"]["run_name"] == stem
+        assert cfg["model"]["joint"] is joint
+
+        freq_loss = cfg["loss"]["frequency_loss"]
+        assert freq_loss["enabled"] is True
+        assert freq_loss["class_weights"] is None
+        assert freq_loss["activity_bce_weight"] == pytest.approx(0.05)
+        assert freq_loss["count_huber_weight"] == pytest.approx(0.10)
+        assert freq_loss["aggregate_bias_weight"] == pytest.approx(0.10)
+        assert freq_loss["temporal_tail_weight"] == pytest.approx(0.15)
+
+
 def test_hpo_objective_penalizes_invalid_and_degenerate_runs():
     """The HPO objective must (a) hard-penalize invalid runs and (b) NOT reward a
     near-zero-bias model that has collapsed per-customer discrimination (the
@@ -1031,6 +1124,39 @@ def test_hpo_objective_penalizes_invalid_and_degenerate_runs():
          "spend_r2_log": 0.45, "clv_spearman": 0.6}, joint=True
     )
     assert better_spend < worse_spend
+
+
+def test_short_diagnostic_run_metadata_marks_smoke_run():
+    metrics = {"diagnostic_only": True, "run_warning": "large frequency bias (42.0%)"}
+
+    _add_run_metadata(
+        metrics,
+        history={"train_loss": [1.0, 0.9, 0.8], "val_loss": [1.1, 1.0, 0.95]},
+        training_cfg={"max_epochs": 3},
+        evaluation_cfg={},
+    )
+
+    assert metrics["diagnostic_only"] is True
+    assert metrics["epochs_completed"] == 3
+    assert metrics["max_epochs_configured"] == 3
+    assert metrics["smoke_run"] is True
+    assert "smoke run only" in metrics["run_warning"]
+    assert "large frequency bias" in metrics["run_warning"]
+
+
+def test_full_run_metadata_does_not_mark_smoke_run():
+    metrics = {}
+
+    _add_run_metadata(
+        metrics,
+        history={"train_loss": [1.0] * 20},
+        training_cfg={"max_epochs": 60},
+        evaluation_cfg={},
+    )
+
+    assert metrics["epochs_completed"] == 20
+    assert metrics["max_epochs_configured"] == 60
+    assert "smoke_run" not in metrics
 
 
 def test_transformer_cpu_training_smoke_is_finite_with_loss_mask():

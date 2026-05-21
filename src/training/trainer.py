@@ -29,6 +29,7 @@ import torch.nn.functional as F
 from src.models.lstm import LSTMModel
 from src.models.transformer import TransformerModel
 from src.models.covariates import align_dynamic_covariates
+from src.models.losses import MetricAlignedFrequencyLoss
 from src.training.inference import _zero_inactive_spend_feedback
 
 
@@ -59,6 +60,8 @@ class Trainer:
         restore_best_checkpoint: bool = True,
         spend_loss_normalize: bool = False,
         scheduled_sampling: dict | None = None,
+        frequency_loss_config: dict | None = None,
+        class_values: torch.Tensor | None = None,
         amp_enabled: bool = True,
         dataset_name: str = "dataset",
         run_id: str = "run",
@@ -90,6 +93,10 @@ class Trainer:
         # config-gated, default OFF (preserves paper-faithful teacher forcing).
         self.scheduled_sampling = scheduled_sampling
         self._total_epochs: int = 1
+        self.frequency_loss = MetricAlignedFrequencyLoss(
+            frequency_loss_config,
+            class_values=class_values,
+        ).to(device)
         # Automatic mixed precision: uses FP16 Tensor Cores on T4/A100 for ~1.5x
         # speedup. Config-gated so numerical repair runs can fall back to FP32.
         # Disabled on CPU/MPS where AMP has no benefit.
@@ -268,10 +275,13 @@ class Trainer:
 
         # Restrict loss to active (purchase) weeks only.  Training on inactive weeks
         # (log1p(0) = 0 target) teaches the head to predict ≈0 everywhere → -93% bias.
-        mse_per_step = F.mse_loss(spend_mu, y_spend, reduction="none")
-        active = (active_mask * mask).to(dtype=mse_per_step.dtype)
+        if self.spend_loss == "huber":
+            per_step = F.smooth_l1_loss(spend_mu, y_spend, reduction="none")
+        else:
+            per_step = F.mse_loss(spend_mu, y_spend, reduction="none")
+        active = (active_mask * mask).to(dtype=per_step.dtype)
         denom = active.sum().clamp(min=1.0)
-        return (mse_per_step * active).sum() / denom
+        return (per_step * active).sum() / denom
 
     def _ss_prob(self) -> float:
         """Scheduled-sampling probability ε for the current epoch (0 disables it).
@@ -279,12 +289,13 @@ class Trainer:
         ε is the per-step probability of feeding the model's own previous
         prediction instead of the ground-truth token (Bengio et al. 2015).
         Ramps from 0 at start_epoch up to max_prob, linear or inverse-sigmoid.
-        Only ever active for the LSTM during training.
+        LSTM uses stepwise scheduled sampling. Transformer uses a two-pass
+        scheduled input-noising variant that replaces only previous-step inputs.
         """
         cfg = self.scheduled_sampling
         if not cfg or not cfg.get("enabled", False):
             return 0.0
-        if not isinstance(self.model, LSTMModel) or not self.model.training:
+        if not self.model.training:
             return 0.0
         start = int(cfg.get("start_epoch", self.kendall_warmup_epochs))
         if self.current_epoch < start:
@@ -301,6 +312,61 @@ class Trainer:
         else:
             frac = progress
         return float(max(0.0, min(max_prob, max_prob * frac)))
+
+    def _build_scheduled_noising_batch(
+        self,
+        batch: dict,
+        freq_logits: torch.Tensor,
+        spend_mu: torch.Tensor | None,
+        ss_prob: float,
+    ) -> dict:
+        """Build a Transformer noising batch using only previous-step predictions.
+
+        At input position t>0, the only model prediction allowed as replacement is
+        the prediction made at t-1. This mirrors autoregressive conditioning
+        without leaking future targets into the repair path.
+        """
+        noisy = dict(batch)
+        trans = batch["trans"].to(self.device)
+        B, T = trans.shape
+        if T <= 1 or ss_prob <= 0.0:
+            return noisy
+
+        with torch.no_grad():
+            prev_class = torch.argmax(freq_logits[:, :-1, :], dim=-1).detach()
+            replace = torch.rand(B, T - 1, device=self.device) < ss_prob
+            trans_noisy = trans.clone()
+            trans_noisy[:, 1:] = torch.where(replace, prev_class, trans_noisy[:, 1:])
+            noisy["trans"] = trans_noisy
+
+            if self.joint and spend_mu is not None and "spend" in batch:
+                spend = batch["spend"].to(self.device)
+                prev_spend = _zero_inactive_spend_feedback(
+                    spend_mu[:, :-1].detach(),
+                    prev_class,
+                )
+                spend_noisy = spend.clone()
+                spend_noisy[:, 1:] = torch.where(replace, prev_spend, spend_noisy[:, 1:])
+                noisy["spend"] = spend_noisy
+
+        return noisy
+
+    def _scheduled_noising_forward_transformer(self, batch: dict, ss_prob: float):
+        """Two-pass Transformer exposure-bias repair.
+
+        First pass predicts from teacher-forced inputs. The second pass trains on
+        a copy where some inputs at t>0 are replaced by predictions from t-1.
+        Gradients flow only through the second pass.
+        """
+        with torch.no_grad():
+            first_logits, first_mu, _ = self._forward(batch)
+        noisy_batch = self._build_scheduled_noising_batch(
+            batch,
+            first_logits,
+            first_mu,
+            ss_prob,
+        )
+        return self._forward(noisy_batch)
 
     def _scheduled_sampling_forward_lstm(self, batch: dict, ss_prob: float):
         """Step-by-step LSTM unroll with token-level scheduled sampling.
@@ -432,20 +498,27 @@ class Trainer:
         y_freq = batch["y_freq"].to(self.device)
 
         ss_prob = self._ss_prob()
-        if ss_prob > 0.0:
+        if ss_prob > 0.0 and isinstance(self.model, LSTMModel):
             freq_logits, spend_mu, spend_log_var = self._scheduled_sampling_forward_lstm(
+                batch, ss_prob
+            )
+        elif ss_prob > 0.0 and isinstance(self.model, TransformerModel):
+            freq_logits, spend_mu, spend_log_var = self._scheduled_noising_forward_transformer(
                 batch, ss_prob
             )
         else:
             freq_logits, spend_mu, spend_log_var = self._forward(batch)
         B, T, n_classes = freq_logits.shape
 
-        ce_per_step = F.cross_entropy(
-            freq_logits.reshape(-1, n_classes),
-            y_freq.reshape(-1),
-            reduction="none",
-        ).reshape(B, T)
-        freq_loss = (ce_per_step * mask).sum() / mask.sum()
+        y_freq_raw = batch.get("y_freq_raw")
+        if y_freq_raw is not None:
+            y_freq_raw = y_freq_raw.to(self.device)
+        freq_loss, freq_metrics = self.frequency_loss(
+            freq_logits,
+            y_freq,
+            mask,
+            y_freq_raw=y_freq_raw,
+        )
 
         if self.joint:
             y_spend = batch["y_spend"].to(self.device)
@@ -472,15 +545,18 @@ class Trainer:
 
             # Log Kendall task weights (exp(-log_var) per task)
             weights = self.multi_task_loss.task_weights.cpu().tolist()
-            return total_loss, {
+            out_metrics = {
                 "total_loss": total_loss.item(),
-                "freq_loss": freq_loss.item(),
                 "spend_loss": spend_loss.item(),
                 "task_weight_freq": weights[0],
                 "task_weight_spend": weights[1],
             }
+            out_metrics.update(freq_metrics)
+            out_metrics["freq_loss"] = freq_loss.item()
+            return total_loss, out_metrics
 
-        return freq_loss, {"freq_loss": freq_loss.item()}
+        freq_metrics["freq_loss"] = freq_loss.item()
+        return freq_loss, freq_metrics
 
     def train_epoch(self, dataloader) -> dict:
         """One training epoch. Returns average metrics dict."""

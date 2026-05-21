@@ -1,0 +1,14 @@
+{
+  "train_loss": [
+    398.13236194186743
+  ],
+  "val_loss": [
+    32.99421310424805
+  ],
+  "task_weight_freq": [
+    0.5
+  ],
+  "task_weight_spend": [
+    0.5
+  ]
+}

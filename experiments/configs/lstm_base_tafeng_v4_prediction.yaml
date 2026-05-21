@@ -1,0 +1,65 @@
+# v4_prediction — Base LSTM Ta-Feng with metric-aligned frequency loss.
+dataset:
+  name: tafeng
+  raw_dir: data/raw
+  calibration_weeks: 12
+  holdout_weeks: 5
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: auto
+
+validation:
+  mode: rolling_origin
+  origins: [[8, 2], [10, 2]]
+
+model:
+  type: lstm
+  max_week: 51
+  max_trans: 5
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.1
+  joint: false
+
+training:
+  epochs: 100
+  max_epochs: 100
+  batch_size: 512
+  lr: 0.001
+  optimizer: adamw
+  weight_decay: 0.0001
+  early_stopping_patience: 20
+  restore_best_checkpoint: true
+  max_grad_norm: 1.0
+  scheduler: {type: cosine, warmup_fraction: 0.05}
+  scheduled_sampling: {enabled: true, start_epoch: 8, max_prob: 0.30, schedule: linear}
+  seed: 42
+
+loss:
+  type: cross_entropy
+  frequency_loss:
+    enabled: true
+    ce_weight: 1.0
+    class_weights: auto
+    class_weight_min: 0.35
+    class_weight_max: 4.0
+    activity_bce_weight: 0.20
+    count_huber_weight: 0.75
+    aggregate_bias_weight: 1.0
+    temporal_tail_weight: 0.35
+    temporal_tail_power: 1.0
+
+calibration:
+  temperature_scaling: true
+  aggregate_scaling: true
+  aggregate_shrinkage: 0.25
+
+output: {run_name: lstm_base_tafeng_v4_prediction, results_dir: results, save_checkpoint: true}
+inference: {n_scenarios: 1, mode: expected}
+evaluation:
+  weekly_discount_rate: 0.0
+  warning_abs_bias_pct: 15.0
+  validity_max_abs_bias_pct: 15.0
+  validity_calibration_factor_range: [0.67, 1.50]
+  fail_on_invalid: false

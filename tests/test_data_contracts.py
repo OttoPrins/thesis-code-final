@@ -110,6 +110,20 @@ def test_cdnow_valendin_master_config_parses_expected_protocol():
     assert cfg["inference"]["n_scenarios"] >= 30
 
 
+def test_cdnow_requested_master_missing_error_is_actionable(tmp_path):
+    (tmp_path / "CDNOW_sample.txt").write_text("00004 0001 19970101 2 29.33\n")
+
+    pipe = CDNOWPipeline()
+    pipe._current_dataset_cfg = {"raw_file": "CDNOW_master.txt"}
+    with pytest.raises(FileNotFoundError) as excinfo:
+        pipe.load_raw(str(tmp_path))
+
+    message = str(excinfo.value)
+    assert "CDNOW_master.txt" in message
+    assert "CDNOW_sample.txt" in message
+    assert "upload_data_to_kaggle.sh" in message
+
+
 def test_uci_final_validation_rejects_one_year_online_retail(tmp_path):
     path = tmp_path / "Online Retail.csv"
     path.write_text(

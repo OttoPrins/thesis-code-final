@@ -137,8 +137,27 @@ class CDNOWPipeline(BasePipeline):
         if requested:
             path = os.path.join(raw_dir, requested)
             if not os.path.exists(path):
+                available = []
+                if os.path.isdir(raw_dir):
+                    available = sorted(
+                        name for name in os.listdir(raw_dir)
+                        if not name.startswith(".")
+                    )
+                shown = ", ".join(available[:12]) if available else "<none>"
+                if len(available) > 12:
+                    shown += ", ..."
+                hint = (
+                    "The Valendin 39x39 replication config requires the "
+                    "23,570-customer CDNOW_master.txt file. On Kaggle, re-run "
+                    "upload_data_to_kaggle.sh locally and hard-refresh the "
+                    "notebook so ottoprins/cdnow-dataset contains both "
+                    "CDNOW_sample.txt and CDNOW_master.txt."
+                    if requested == "CDNOW_master.txt"
+                    else "Check the dataset.raw_file value or place the file in raw_dir."
+                )
                 raise FileNotFoundError(
-                    f"Configured CDNOW raw_file not found: {path}"
+                    f"Configured CDNOW raw_file not found: {path}. "
+                    f"Files currently visible in {raw_dir}: {shown}. {hint}"
                 )
         else:
             path = None

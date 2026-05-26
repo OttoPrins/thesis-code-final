@@ -1,0 +1,11 @@
+{
+  "model": "transformer_joint",
+  "dataset": "cdnow",
+  "run_valid": false,
+  "run_invalid_reason": "training failed: FloatingPointError: Non-finite gradients in input_proj.weight, state_proj.weight, time_proj.weight, freq_head.weight, spend_head.weight",
+  "run_warning": "",
+  "training_failed": true,
+  "repair_attempted": true,
+  "failure_type": "FloatingPointError",
+  "failure_message": "Non-finite gradients in input_proj.weight, state_proj.weight, time_proj.weight, freq_head.weight, spend_head.weight"
+}

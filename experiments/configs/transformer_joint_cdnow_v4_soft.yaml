@@ -27,7 +27,7 @@ model:
   dropout: 0.1
   time2vec_dim: 8
   joint: true
-  spend_head: regression
+  spend_head: hurdle_lognormal
   state_feature_dim: 1
 
 training:
@@ -49,10 +49,11 @@ loss:
   type: kendall
   n_tasks: 2
   warmup_epochs: 5
-  spend_loss: huber
+  spend_loss: nll
   spend_loss_normalize: true
   freq_logvar_max: 2.0
   spend_logvar_max: 2.0
+  spend_logvar_clamp: [-2.0, 2.0]
   frequency_loss:
     enabled: true
     ce_weight: 1.0

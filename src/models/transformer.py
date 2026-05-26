@@ -390,7 +390,7 @@ class TransformerModel(nn.Module):
         e_trans = self.embed_trans(trans.clamp(0, self.max_trans))
         x = torch.cat([e_week, e_trans], dim=-1)   # (B, T, emb_dim)
 
-        h = self.input_proj(x) * math.sqrt(self.d_model)  # (B, T, d_model)
+        h = self.input_proj(x)  # (B, T, d_model)
         if self.spend_proj is not None:
             if spend is None:
                 spend = torch.zeros((B, T), dtype=h.dtype, device=week.device)

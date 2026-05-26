@@ -1,2 +1,0 @@
-run_name,model,dataset,version,seed,mode,protocol_variant,run_valid,training_failed,failure_type,failure_message,repair_attempted,repair_failed,repair_failure_type,run_invalid_reason,final_manifest_version,final_manifest_config
-lstm_joint_tafeng_v2_seed42_sample,lstm_joint,tafeng,v2,42,sample,strict,False,False,,,False,False,,absolute spend bias 62.6% exceeds 50.0%,2026-05-20-results-recovery-protocol,experiments/configs/lstm_joint_tafeng_v2.yaml

@@ -1,0 +1,2 @@
+run_name,model,dataset,version,seed,mode,protocol_variant,run_valid,training_failed,failure_type,failure_message,repair_attempted,repair_failed,repair_failure_type,run_invalid_reason,final_manifest_version,final_manifest_config
+lstm_base_uci_v2_seed7_sample,lstm_base,uci,v2,7,sample,strict,False,True,FloatingPointError,Non-finite gradients in lstm.weight_ih_l0,True,False,,training failed: FloatingPointError: Non-finite gradients in lstm.weight_ih_l0,2026-05-20-results-recovery-protocol,experiments/configs/lstm_base_uci_v2.yaml

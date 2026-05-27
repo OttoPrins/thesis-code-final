@@ -49,15 +49,23 @@ class KendallMultiTaskLoss(nn.Module):
         n_tasks: int = 2,
         freq_logvar_max: float | None = None,
         spend_logvar_max: float | None = None,
+        freq_logvar_min: float | None = None,
+        spend_logvar_min: float | None = None,
     ):
         super().__init__()
         # log(σ²) parameterisation for numerical stability (σ² = exp(log_var))
         self.log_vars = nn.Parameter(torch.zeros(n_tasks))
         self.freq_logvar_max = freq_logvar_max
         self.spend_logvar_max = spend_logvar_max
+        # Lower bounds prevent the optimizer from driving log_var negative,
+        # which would make the 0.5·log_var regularizer term dominate and cause
+        # total Kendall loss to go negative → model collapses to zero predictions.
+        # Setting min=0.0 guarantees each Kendall term ≥ 0 (since L_i ≥ 0).
+        self.freq_logvar_min = freq_logvar_min
+        self.spend_logvar_min = spend_logvar_min
 
     def _effective_log_var(self, i: int) -> torch.Tensor:
-        """Per-task log_var with the global and per-task upper bounds applied.
+        """Per-task log_var with the global and per-task bounds applied.
 
         Used by both forward (loss/gradient) and task_weights (logging) so the
         reported weights always match the weights that actually drive training.
@@ -68,10 +76,13 @@ class KendallMultiTaskLoss(nn.Module):
         # frequency head from being starved of gradient signal.
         if i == 0 and self.freq_logvar_max is not None:
             log_var = log_var.clamp(max=float(self.freq_logvar_max))
-        # Symmetric upper bound on the spend task (task 1) so it cannot be
-        # silenced by the optimiser (cause of negative spend R²).
+        if i == 0 and self.freq_logvar_min is not None:
+            log_var = log_var.clamp(min=float(self.freq_logvar_min))
+        # Symmetric bounds on the spend task (task 1).
         if i == 1 and self.spend_logvar_max is not None:
             log_var = log_var.clamp(max=float(self.spend_logvar_max))
+        if i == 1 and self.spend_logvar_min is not None:
+            log_var = log_var.clamp(min=float(self.spend_logvar_min))
         return log_var
 
     def forward(self, losses: list) -> torch.Tensor:
@@ -244,7 +255,12 @@ class MetricAlignedFrequencyLoss(nn.Module):
 
         if self.activity_bce_weight > 0.0:
             active_target = (target_count > 0).to(dtype=logits.dtype)
-            active_logit = torch.logsumexp(logits[..., 1:], dim=-1) - logits[..., 0]
+            # Clamp prevents -inf when the model is very confident about class 0
+            # (inactive), which would make BCE produce +inf for active customers
+            # and propagate NaN gradients back through the LSTM.
+            active_logit = (
+                torch.logsumexp(logits[..., 1:], dim=-1) - logits[..., 0]
+            ).clamp(-50.0, 50.0)
             activity = F.binary_cross_entropy_with_logits(
                 active_logit,
                 active_target,

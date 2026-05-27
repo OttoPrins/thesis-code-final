@@ -863,12 +863,17 @@ def run_experiment(
     opt_params = list(model.parameters())
 
     if joint:
-        _freq_logvar_max = config.get("loss", {}).get("freq_logvar_max", None)
-        _spend_logvar_max = config.get("loss", {}).get("spend_logvar_max", None)
+        _loss_cfg = config.get("loss", {})
+        _freq_logvar_max = _loss_cfg.get("freq_logvar_max", None)
+        _spend_logvar_max = _loss_cfg.get("spend_logvar_max", None)
+        _freq_logvar_min = _loss_cfg.get("freq_logvar_min", None)
+        _spend_logvar_min = _loss_cfg.get("spend_logvar_min", None)
         multi_task_loss = KendallMultiTaskLoss(
             n_tasks=2,
             freq_logvar_max=float(_freq_logvar_max) if _freq_logvar_max is not None else None,
             spend_logvar_max=float(_spend_logvar_max) if _spend_logvar_max is not None else None,
+            freq_logvar_min=float(_freq_logvar_min) if _freq_logvar_min is not None else None,
+            spend_logvar_min=float(_spend_logvar_min) if _spend_logvar_min is not None else None,
         ).to(device)
         opt_params += list(multi_task_loss.parameters())
 

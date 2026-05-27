@@ -52,6 +52,8 @@ loss:
   freq_logvar_max: 2.0
   spend_logvar_max: 2.0
   spend_logvar_clamp: [-2.0, 2.0]
+  freq_logvar_min: 0.0
+  spend_logvar_min: 0.0
   frequency_loss:
     enabled: true
     ce_weight: 1.0

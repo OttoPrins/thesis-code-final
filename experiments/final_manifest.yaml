@@ -3,13 +3,13 @@
 # unless a command explicitly requests exploratory runs.
 
 version: 2026-05-20-results-recovery-protocol
-results_status: pending_strict_regeneration_after_fixed_split_rolling_origin_calibration
+results_status: v6_sweep_in_progress_noshrink_calibration_kendall_fix
 archive_dir: results/archive/pre_validity_protocol_20260519
 
 methodology:
   min_active_weeks: 1
   inference_primary: sample
-  seeds: [42, 7, 123]
+  seeds: [42, 7, 2024]
   splits:
     cdnow: {calibration_weeks: 52, holdout_weeks: 26}
     uci: {calibration_weeks: 78, holdout_weeks: 26, required_file: online_retail_II.xlsx}
@@ -33,6 +33,19 @@ runtime_expectations:
       experiments/configs/extension3_transformer_static_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
       experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
       experiments/configs/extension3_transformer_full_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
+      # v6 track — noshrink calibration, sample inference, 100-epoch budget
+      experiments/configs/lstm_base_cdnow_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_base_uci_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_base_tafeng_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_base_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_cdnow_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_uci_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_tafeng_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_cdnow_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_uci_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_tafeng_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
       # v4_soft track — deterministic expected-value inference, 100-epoch budget
       experiments/configs/lstm_base_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
       experiments/configs/lstm_joint_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
@@ -77,6 +90,19 @@ deep_learning_configs:
   - experiments/configs/extension3_transformer_static_dunnhumby.yaml
   - experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml
   - experiments/configs/extension3_transformer_full_dunnhumby.yaml
+  # v6 track — noshrink calibration, Kendall freq_logvar fix (v6b for sparse datasets)
+  - experiments/configs/lstm_base_cdnow_v6.yaml
+  - experiments/configs/lstm_base_uci_v6.yaml
+  - experiments/configs/lstm_base_tafeng_v6.yaml
+  - experiments/configs/lstm_base_dunnhumby_v6.yaml
+  - experiments/configs/lstm_joint_cdnow_v6b.yaml
+  - experiments/configs/lstm_joint_uci_v6b.yaml
+  - experiments/configs/lstm_joint_tafeng_v6b.yaml
+  - experiments/configs/lstm_joint_dunnhumby_v6.yaml
+  - experiments/configs/transformer_joint_cdnow_v6b.yaml
+  - experiments/configs/transformer_joint_uci_v6b.yaml
+  - experiments/configs/transformer_joint_tafeng_v6b.yaml
+  - experiments/configs/transformer_joint_dunnhumby_v6.yaml
   # v4_soft track — main sweep, expected-value inference, 100-epoch budget
   - experiments/configs/lstm_base_cdnow_v4_soft.yaml
   - experiments/configs/lstm_joint_cdnow_v4_soft.yaml
@@ -123,6 +149,19 @@ deep_learning_config_hashes:
   experiments/configs/extension3_transformer_static_dunnhumby.yaml: db028af66dda
   experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 409298d28aa9
   experiments/configs/extension3_transformer_full_dunnhumby.yaml: b9cbe08630d1
+  # v6 track — hashes computed 2026-05-28 before Kaggle launch
+  experiments/configs/lstm_base_cdnow_v6.yaml: 952d421f84f9
+  experiments/configs/lstm_base_uci_v6.yaml: 62c30f13f3aa
+  experiments/configs/lstm_base_tafeng_v6.yaml: 439b37da1351
+  experiments/configs/lstm_base_dunnhumby_v6.yaml: 23188946df06
+  experiments/configs/lstm_joint_cdnow_v6b.yaml: 43305e78becb
+  experiments/configs/lstm_joint_uci_v6b.yaml: 8d358c0bdca1
+  experiments/configs/lstm_joint_tafeng_v6b.yaml: 5eae91b88c96
+  experiments/configs/lstm_joint_dunnhumby_v6.yaml: 9497f7885ca2
+  experiments/configs/transformer_joint_cdnow_v6b.yaml: 459abafa4720
+  experiments/configs/transformer_joint_uci_v6b.yaml: 4f57320cbc5d
+  experiments/configs/transformer_joint_tafeng_v6b.yaml: 01ad7300cadf
+  experiments/configs/transformer_joint_dunnhumby_v6.yaml: 0bec45addf8e
   # v4_soft track — hashes computed locally with src.utils.final_manifest.config_hash
   # before Kaggle launch, to avoid the two-pass dance described in plan Risk 3.
   experiments/configs/lstm_base_cdnow_v4_soft.yaml: 5f2ecaf63f95

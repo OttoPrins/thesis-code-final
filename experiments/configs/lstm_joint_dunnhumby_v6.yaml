@@ -1,0 +1,77 @@
+# v6 — Joint LSTM Dunnhumby (Phase 0.5-B winner + 80x4 protocol + Kendall + hurdle-lognormal).
+dataset:
+  name: dunnhumby
+  raw_dir: data/raw/Dunnhumby datasets
+  calibration_weeks: 80
+  holdout_weeks: 4                 # Changed from v4_soft's 22 — match Extension 3 protocol
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: auto
+  spend_scaler: robust
+  include_covariates: false
+
+validation:
+  mode: rolling_origin
+  origins: [[72, 4], [76, 4]]      # Match 4-week horizon
+
+model:
+  type: lstm
+  max_week: 51
+  max_trans: 3
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.1
+  joint: true
+  spend_head: hurdle_lognormal
+  state_feature_dim: 1
+
+training:
+  epochs: 100
+  max_epochs: 100
+  batch_size: 256
+  lr: 0.0005
+  optimizer: adamw
+  weight_decay: 0.0001
+  early_stopping_patience: 20
+  restore_best_checkpoint: true
+  max_grad_norm: 0.5
+  amp_enabled: false
+  scheduler: {type: cosine, warmup_fraction: 0.05}
+  scheduled_sampling: {enabled: true, start_epoch: 10, max_prob: 0.35, schedule: linear}
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+  warmup_epochs: 5
+  spend_loss: nll
+  spend_loss_normalize: true
+  freq_logvar_max: 2.0
+  spend_logvar_max: 2.0
+  spend_logvar_clamp: [-2.0, 2.0]
+  frequency_loss:
+    enabled: true
+    ce_weight: 1.0
+    class_weights: null
+    activity_bce_weight: 0.05
+    count_huber_weight: 0.10
+    aggregate_bias_weight: 0.10
+    temporal_tail_weight: 0.15
+    temporal_tail_power: 1.0
+
+calibration:
+  temperature_scaling: true
+  aggregate_scaling: true
+  aggregate_shrinkage: 1.0
+
+output: {run_name: lstm_joint_dunnhumby_v6, results_dir: results, save_checkpoint: true}
+inference: {n_scenarios: 30, mode: sample}
+evaluation:
+  weekly_discount_rate: 0.0018
+  warning_abs_bias_pct: 15.0
+  validity_max_abs_bias_pct: 15.0
+  warning_abs_spend_bias_pct: 20.0
+  validity_max_abs_spend_bias_pct: 50.0
+  validity_calibration_factor_range: [0.5, 4.0]
+  fail_on_invalid: false

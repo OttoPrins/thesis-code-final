@@ -1,0 +1,187 @@
+[Kaggle] raw_dir  → /kaggle/working/input/uci-retail
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_uci_v4_soft.yaml
+Run: lstm_base_uci_v4_soft_seed42_expected
+Device: cuda
+Loading dataset: uci ...
+[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
+  Train customers: 4437, Val: 493, Inference: 4930
+[uci] Customers with 0 calibration transactions: 0 / 4930
+  top-bin decode: class_values[-1] = 5.515 (max_trans = 4)
+Model: lstm — 89,780 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:116: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/100 — train_loss: 28.2834  val_loss: 30.3132
+Epoch   2/100 — train_loss: 28.0063  val_loss: 28.9070
+Epoch   3/100 — train_loss: 24.1527  val_loss: 16.4454
+Epoch   4/100 — train_loss: 3.5588  val_loss: 0.4822
+Epoch   5/100 — train_loss: 0.3491  val_loss: 0.2287
+Epoch   6/100 — train_loss: 0.3787  val_loss: 0.2101
+Epoch   7/100 — train_loss: 0.2411  val_loss: 0.2074
+Epoch   8/100 — train_loss: 0.2813  val_loss: 0.2210
+Epoch   9/100 — train_loss: 0.2328  val_loss: 0.2222
+Epoch  10/100 — train_loss: 0.2429  val_loss: 0.2314
+Epoch  11/100 — train_loss: 0.2686  val_loss: 0.2303
+Epoch  12/100 — train_loss: 0.2308  val_loss: 0.2078
+Epoch  13/100 — train_loss: 0.2118  val_loss: 0.2384
+Epoch  14/100 — train_loss: 0.2380  val_loss: 0.2209
+Epoch  15/100 — train_loss: 0.2360  val_loss: 0.2237
+Epoch  16/100 — train_loss: 0.2421  val_loss: 0.2319
+Epoch  17/100 — train_loss: 0.3130  val_loss: 0.3046
+Epoch  18/100 — train_loss: 0.2707  val_loss: 0.2291
+Epoch  19/100 — train_loss: 0.2516  val_loss: 0.2228
+Epoch  20/100 — train_loss: 0.2336  val_loss: 0.1992
+Epoch  21/100 — train_loss: 0.2535  val_loss: 0.2032
+Epoch  22/100 — train_loss: 0.2710  val_loss: 0.2380
+Epoch  23/100 — train_loss: 0.3265  val_loss: 0.2431
+Epoch  24/100 — train_loss: 0.2833  val_loss: 0.2109
+Epoch  25/100 — train_loss: 0.2620  val_loss: 0.1992
+Epoch  26/100 — train_loss: 0.2500  val_loss: 0.2051
+Epoch  27/100 — train_loss: 0.2540  val_loss: 0.2840
+Epoch  28/100 — train_loss: 0.2759  val_loss: 0.3787
+Epoch  29/100 — train_loss: 0.3275  val_loss: 0.2003
+Epoch  30/100 — train_loss: 0.3222  val_loss: 0.1964
+Epoch  31/100 — train_loss: 0.2517  val_loss: 0.2601
+Epoch  32/100 — train_loss: 0.2310  val_loss: 0.1963
+Epoch  33/100 — train_loss: 0.2383  val_loss: 0.2346
+Epoch  34/100 — train_loss: 0.3835  val_loss: 0.1981
+Epoch  35/100 — train_loss: 0.2639  val_loss: 0.1992
+Epoch  36/100 — train_loss: 0.2648  val_loss: 0.1993
+Epoch  37/100 — train_loss: 0.2323  val_loss: 0.3289
+Epoch  38/100 — train_loss: 0.2693  val_loss: 0.1946
+Epoch  39/100 — train_loss: 0.2875  val_loss: 0.2111
+Epoch  40/100 — train_loss: 0.2622  val_loss: 0.2300
+Epoch  41/100 — train_loss: 0.2307  val_loss: 0.1939
+Epoch  42/100 — train_loss: 0.2191  val_loss: 0.3216
+Epoch  43/100 — train_loss: 0.2941  val_loss: 0.2257
+Epoch  44/100 — train_loss: 0.2657  val_loss: 0.1937
+Epoch  45/100 — train_loss: 0.2368  val_loss: 0.2010
+Epoch  46/100 — train_loss: 0.2436  val_loss: 0.2415
+Epoch  47/100 — train_loss: 0.2814  val_loss: 0.2241
+Epoch  48/100 — train_loss: 0.2124  val_loss: 0.2231
+Epoch  49/100 — train_loss: 0.2089  val_loss: 0.2237
+Epoch  50/100 — train_loss: 0.2261  val_loss: 0.2483
+Epoch  51/100 — train_loss: 0.2549  val_loss: 0.2054
+Epoch  52/100 — train_loss: 0.2139  val_loss: 0.2045
+Epoch  53/100 — train_loss: 0.2200  val_loss: 0.1952
+Epoch  54/100 — train_loss: 0.2375  val_loss: 0.2410
+Epoch  55/100 — train_loss: 0.2324  val_loss: 0.2266
+Epoch  56/100 — train_loss: 0.2772  val_loss: 0.1950
+Epoch  57/100 — train_loss: 0.2465  val_loss: 0.3112
+Epoch  58/100 — train_loss: 0.3252  val_loss: 0.1925
+Epoch  59/100 — train_loss: 0.2254  val_loss: 0.1956
+Epoch  60/100 — train_loss: 0.2150  val_loss: 0.2376
+Epoch  61/100 — train_loss: 0.2502  val_loss: 0.2255
+Epoch  62/100 — train_loss: 0.2613  val_loss: 0.2053
+Epoch  63/100 — train_loss: 0.2364  val_loss: 0.1989
+Epoch  64/100 — train_loss: 0.2223  val_loss: 0.1932
+Epoch  65/100 — train_loss: 0.2234  val_loss: 0.2442
+Epoch  66/100 — train_loss: 0.2316  val_loss: 0.2193
+Epoch  67/100 — train_loss: 0.2184  val_loss: 0.1924
+Epoch  68/100 — train_loss: 0.2336  val_loss: 0.2133
+Epoch  69/100 — train_loss: 0.2268  val_loss: 0.1922
+Epoch  70/100 — train_loss: 0.2482  val_loss: 0.2061
+Epoch  71/100 — train_loss: 0.2414  val_loss: 0.1953
+Epoch  72/100 — train_loss: 0.2261  val_loss: 0.1956
+Epoch  73/100 — train_loss: 0.2088  val_loss: 0.1937
+Epoch  74/100 — train_loss: 0.2253  val_loss: 0.2371
+Epoch  75/100 — train_loss: 0.2548  val_loss: 0.2012
+Epoch  76/100 — train_loss: 0.2282  val_loss: 0.1923
+Epoch  77/100 — train_loss: 0.2313  val_loss: 0.1968
+Epoch  78/100 — train_loss: 0.2113  val_loss: 0.1970
+Epoch  79/100 — train_loss: 0.2368  val_loss: 0.1919
+Epoch  80/100 — train_loss: 0.2568  val_loss: 0.1910
+Epoch  81/100 — train_loss: 0.2175  val_loss: 0.2041
+Epoch  82/100 — train_loss: 0.2251  val_loss: 0.1920
+Epoch  83/100 — train_loss: 0.2019  val_loss: 0.1908
+Epoch  84/100 — train_loss: 0.2076  val_loss: 0.1934
+Epoch  85/100 — train_loss: 0.2162  val_loss: 0.1937
+Epoch  86/100 — train_loss: 0.2102  val_loss: 0.1934
+Epoch  87/100 — train_loss: 0.2193  val_loss: 0.1951
+Epoch  88/100 — train_loss: 0.2375  val_loss: 0.1924
+Epoch  89/100 — train_loss: 0.2027  val_loss: 0.1928
+Epoch  90/100 — train_loss: 0.2441  val_loss: 0.1926
+Epoch  91/100 — train_loss: 0.2358  val_loss: 0.1933
+Epoch  92/100 — train_loss: 0.1984  val_loss: 0.1952
+Epoch  93/100 — train_loss: 0.2161  val_loss: 0.1952
+Epoch  94/100 — train_loss: 0.2199  val_loss: 0.1974
+Epoch  95/100 — train_loss: 0.2255  val_loss: 0.1961
+Epoch  96/100 — train_loss: 0.2271  val_loss: 0.1961
+Epoch  97/100 — train_loss: 0.2320  val_loss: 0.1952
+Epoch  98/100 — train_loss: 0.2179  val_loss: 0.1950
+Epoch  99/100 — train_loss: 0.2101  val_loss: 0.1951
+Epoch 100/100 — train_loss: 0.2109  val_loss: 0.1950
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_uci_v4_soft_seed42_expected.pt
+Validation-fitted softmax temperature: 0.7500
+Validation aggregate calibration: freq_factor=1.4798, spend_factor=1.0000
+
+Running autoregressive inference on holdout period ...
+  inference mode: expected  n_scenarios: 1  temperature: 0.7500
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.0187
+  Mean actual freq/week:       0.0656
+  Over-prediction ratio:       0.284x
+  Customers predicted as zero total:  1.000
+  Customers actually zero total:      0.484
+  Non-zero rate (pred, avg > 0.05):  0.000
+  Non-zero rate (true):               0.055
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_uci_v4_soft_seed42_expected_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_uci_v4_soft_seed42_expected_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 4.2370
+  freq_mae: 1.6831
+  freq_normalized_gini: 0.5622
+  freq_calibration_factor: 1.4798
+  freq_horizon_abs_bias_pct: 57.9484
+  bias_pct: -57.9484
+  freq_weekly_mae: 187.5077
+  freq_weekly_total_true: 8413.0000
+  freq_weekly_total_pred: 3537.8000
+  freq_valendin_mape: 57.9484
+  freq_horizon_bias_pct: -57.9484
+  freq_weekly_mean_pct_mape: 56.5169
+  freq_weekly_mean_pct_bias_pct: -56.5169
+  freq_weekly_bias_pct: -57.9484
+  freq_weekly_mape: 57.9484
+  freq_mape: 57.9484
+  freq_mase: 0.7864
+  freq_mase_scale: 0.1146
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.7500
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 662.0000
+  validation_freq_pred_total: 226.7765
+  validation_spend_true_total: 0.0000
+  validation_spend_pred_total: 0.0000
+  validation_freq_calibration_factor: 1.4798
+  validation_spend_calibration_factor: 1.0000
+  validation_rolling_origin_count: 2
+  protocol_name: uci_configured_78x26
+  cohort_size: 4930
+  calibration_weeks: 78
+  holdout_weeks: 26
+  inference_mode: expected
+  n_scenarios: 1
+  final_manifest_version: 2026-05-20-results-recovery-protocol
+  final_manifest_run_name: lstm_base_uci_v4_soft_seed42_expected
+  final_manifest_config: experiments/configs/lstm_base_uci_v4_soft.yaml
+  final_manifest_config_hash: 470fcda40290
+  final_manifest_actual_config_hash: 85cfa3dcaa9b
+  final_manifest_seed: 42
+  final_manifest_epochs: 100
+  final_manifest_inference_mode: expected
+  final_manifest_n_scenarios: 1
+  run_valid: False
+  run_invalid_reason: absolute frequency bias -57.9% exceeds 15.0%
+  run_warning: large frequency bias (-57.9%); expected inference mode is diagnostic-only for Valendin-style reporting
+  diagnostic_only: True
+  epochs_completed: 100
+  max_epochs_configured: 100
+History saved: /kaggle/working/results/tables/lstm_base_uci_v4_soft_seed42_expected_history.json

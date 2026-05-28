@@ -1,0 +1,173 @@
+[Kaggle] raw_dir  → /kaggle/working/input/tafeng-dataset
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_tafeng_v4_soft.yaml
+Run: lstm_base_tafeng_v4_soft_seed42_expected
+Device: cuda
+Loading dataset: tafeng ...
+[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
+  Train customers: 25029, Val: 2780, Inference: 27809
+[tafeng] Customers with 0 calibration transactions: 0 / 27809
+  top-bin decode: class_values[-1] = 4.473 (max_trans = 4)
+Model: lstm — 89,780 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:116: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+
+Training failed with a repairable error: FloatingPointError: Non-finite gradients in freq_head.bias
+Metrics saved: /kaggle/working/results/tables/lstm_base_tafeng_v4_soft_seed42_expected_metrics.json
+Retrying once as robustness repair (amp_disabled; lr_0.0005; grad_clip_0.5) ...
+Config: experiments/configs/lstm_base_tafeng_v4_soft.yaml
+Run: lstm_base_tafeng_v4_soft_seed42_expected_repair
+Device: cuda
+Loading dataset: tafeng ...
+[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
+  Train customers: 25029, Val: 2780, Inference: 27809
+[tafeng] Customers with 0 calibration transactions: 0 / 27809
+  top-bin decode: class_values[-1] = 4.473 (max_trans = 4)
+Model: lstm — 89,780 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:116: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/100 — train_loss: 8.0079  val_loss: 7.8631
+Epoch   2/100 — train_loss: 6.3931  val_loss: 2.0992
+Epoch   3/100 — train_loss: 0.7744  val_loss: 0.5188
+Epoch   4/100 — train_loss: 0.4867  val_loss: 0.4629
+Epoch   5/100 — train_loss: 0.4677  val_loss: 0.4370
+Epoch   6/100 — train_loss: 0.4305  val_loss: 0.4265
+Epoch   7/100 — train_loss: 0.4195  val_loss: 0.4296
+Epoch   8/100 — train_loss: 0.4140  val_loss: 0.4289
+Epoch   9/100 — train_loss: 0.4002  val_loss: 0.4012
+Epoch  10/100 — train_loss: 0.4051  val_loss: 0.4038
+Epoch  11/100 — train_loss: 0.3975  val_loss: 0.4055
+Epoch  12/100 — train_loss: 0.3913  val_loss: 0.4469
+Epoch  13/100 — train_loss: 0.3928  val_loss: 0.4752
+Epoch  14/100 — train_loss: 0.3892  val_loss: 0.3787
+Epoch  15/100 — train_loss: 0.3849  val_loss: 0.4458
+Epoch  16/100 — train_loss: 0.3865  val_loss: 0.3699
+Epoch  17/100 — train_loss: 0.3771  val_loss: 0.3697
+Epoch  18/100 — train_loss: 0.3778  val_loss: 0.3909
+Epoch  19/100 — train_loss: 0.3771  val_loss: 0.3764
+Epoch  20/100 — train_loss: 0.3737  val_loss: 0.3668
+Epoch  21/100 — train_loss: 0.3718  val_loss: 0.3662
+Epoch  22/100 — train_loss: 0.3961  val_loss: 0.4076
+Epoch  23/100 — train_loss: 0.3814  val_loss: 0.3655
+Epoch  24/100 — train_loss: 0.3673  val_loss: 0.3643
+Epoch  25/100 — train_loss: 0.3685  val_loss: 0.3642
+Epoch  26/100 — train_loss: 0.3727  val_loss: 0.4035
+Epoch  27/100 — train_loss: 0.3764  val_loss: 0.3667
+Epoch  28/100 — train_loss: 0.3755  val_loss: 0.4011
+Epoch  29/100 — train_loss: 0.3727  val_loss: 0.3640
+Epoch  30/100 — train_loss: 0.3670  val_loss: 0.3664
+Epoch  31/100 — train_loss: 0.3667  val_loss: 0.3655
+Epoch  32/100 — train_loss: 0.3738  val_loss: 0.3816
+Epoch  33/100 — train_loss: 0.3775  val_loss: 0.3786
+Epoch  34/100 — train_loss: 0.3745  val_loss: 0.3636
+Epoch  35/100 — train_loss: 0.3695  val_loss: 0.3650
+Epoch  36/100 — train_loss: 0.3679  val_loss: 0.3682
+Epoch  37/100 — train_loss: 0.3719  val_loss: 0.3758
+Epoch  38/100 — train_loss: 0.3715  val_loss: 0.3641
+Epoch  39/100 — train_loss: 0.3669  val_loss: 0.3840
+Epoch  40/100 — train_loss: 0.3721  val_loss: 0.3643
+Epoch  41/100 — train_loss: 0.3721  val_loss: 0.3638
+Epoch  42/100 — train_loss: 0.3677  val_loss: 0.3627
+Epoch  43/100 — train_loss: 0.3654  val_loss: 0.3829
+Epoch  44/100 — train_loss: 0.3833  val_loss: 0.3631
+Epoch  45/100 — train_loss: 0.3718  val_loss: 0.3785
+Epoch  46/100 — train_loss: 0.3719  val_loss: 0.3650
+Epoch  47/100 — train_loss: 0.3712  val_loss: 0.3724
+Epoch  48/100 — train_loss: 0.3775  val_loss: 0.3749
+Epoch  49/100 — train_loss: 0.3751  val_loss: 0.3650
+Epoch  50/100 — train_loss: 0.3697  val_loss: 0.3684
+Epoch  51/100 — train_loss: 0.3728  val_loss: 0.3687
+Epoch  52/100 — train_loss: 0.3714  val_loss: 0.3699
+Epoch  53/100 — train_loss: 0.3758  val_loss: 0.3707
+Epoch  54/100 — train_loss: 0.3814  val_loss: 0.3875
+Epoch  55/100 — train_loss: 0.3730  val_loss: 0.3667
+Epoch  56/100 — train_loss: 0.3707  val_loss: 0.3628
+Epoch  57/100 — train_loss: 0.3742  val_loss: 0.3632
+Epoch  58/100 — train_loss: 0.3723  val_loss: 0.3645
+Epoch  59/100 — train_loss: 0.3693  val_loss: 0.3638
+Epoch  60/100 — train_loss: 0.3747  val_loss: 0.3757
+Epoch  61/100 — train_loss: 0.3736  val_loss: 0.3627
+Epoch  62/100 — train_loss: 0.3714  val_loss: 0.3639
+Early stopping triggered at epoch 62.
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_tafeng_v4_soft_seed42_expected_repair.pt
+Validation-fitted softmax temperature: 0.7500
+Validation aggregate calibration: freq_factor=1.2370, spend_factor=1.0000
+
+Running autoregressive inference on holdout period ...
+  inference mode: expected  n_scenarios: 1  temperature: 0.7500
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.1551
+  Mean actual freq/week:       0.2167
+  Over-prediction ratio:       0.716x
+  Customers predicted as zero total:  0.721
+  Customers actually zero total:      0.504
+  Non-zero rate (pred, avg > 0.05):  0.722
+  Non-zero rate (true):               0.175
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_tafeng_v4_soft_seed42_expected_repair_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_tafeng_v4_soft_seed42_expected_repair_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 1.3473
+  freq_mae: 0.8750
+  freq_normalized_gini: 0.6504
+  freq_calibration_factor: 1.2370
+  freq_horizon_abs_bias_pct: 11.4522
+  bias_pct: -11.4522
+  freq_weekly_mae: 2232.3417
+  freq_weekly_total_true: 30127.0000
+  freq_weekly_total_pred: 26676.7908
+  freq_valendin_mape: 37.0489
+  freq_horizon_bias_pct: -11.4522
+  freq_weekly_mean_pct_mape: 41.1416
+  freq_weekly_mean_pct_bias_pct: -3.8339
+  freq_weekly_bias_pct: -11.4522
+  freq_weekly_mape: 37.0489
+  freq_mape: 37.0489
+  freq_mase: 0.7863
+  freq_mase_scale: 0.3519
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.7500
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 2897.0000
+  validation_freq_pred_total: 1487.2141
+  validation_spend_true_total: 0.0000
+  validation_spend_pred_total: 0.0000
+  validation_freq_calibration_factor: 1.2370
+  validation_spend_calibration_factor: 1.0000
+  validation_rolling_origin_count: 2
+  protocol_name: tafeng_configured_12x5
+  cohort_size: 27809
+  calibration_weeks: 12
+  holdout_weeks: 5
+  inference_mode: expected
+  n_scenarios: 1
+  repair_attempted: True
+  repair_strategy: amp_disabled; lr_0.0005; grad_clip_0.5
+  repair_source_failure_type: FloatingPointError
+  training_lr_after_repair: 0.0005
+  training_max_grad_norm_after_repair: 0.5000
+  training_amp_enabled_after_repair: False
+  final_manifest_version: 2026-05-20-results-recovery-protocol
+  final_manifest_run_name: lstm_base_tafeng_v4_soft_seed42_expected_repair
+  final_manifest_config: experiments/configs/lstm_base_tafeng_v4_soft.yaml
+  final_manifest_config_hash: 044b9257a1a2
+  final_manifest_actual_config_hash: ef02b2bb2c1c
+  final_manifest_seed: 42
+  final_manifest_epochs: 100
+  final_manifest_inference_mode: expected
+  final_manifest_n_scenarios: 1
+  run_valid: True
+  run_invalid_reason: 
+  run_warning: expected inference mode is diagnostic-only for Valendin-style reporting
+  diagnostic_only: True
+  epochs_completed: 62
+  max_epochs_configured: 100
+History saved: /kaggle/working/results/tables/lstm_base_tafeng_v4_soft_seed42_expected_repair_history.json

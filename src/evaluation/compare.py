@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 _DATASETS = ("cdnow", "uci", "tafeng", "dunnhumby")
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
-_VERSION_RE = re.compile(r"_(v\d+|final)$")
+_VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final)$")
 _REPAIR_SUFFIX = "_repair"
 
 # Canonical model order for table rows (GPPM removed — stub descoped, see limitations)

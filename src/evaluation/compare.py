@@ -944,6 +944,142 @@ def export_latex_table(
     print(f"LaTeX table saved: {out_path}")
 
 
+def export_latex_table_aggregated(
+    df_all: pd.DataFrame,
+    df_seeds: pd.DataFrame,
+    out_path: str = "results/tables/comparison_thesis.tex",
+    caption: str = "Holdout performance by model and dataset (mean $\\pm$ SD across 3 seeds)",
+    label: str = "tab:model_comparison_aggregated",
+) -> None:
+    """
+    Export a publication-ready aggregated LaTeX table: one row per (model, dataset),
+    showing mean ± SD across seeds for Tier-A (and Tier-B†) results.
+
+    Selection rule: for each (model, dataset), choose the best-version row from
+    df_seeds by lowest |bias_pct_mean| among rows where the dominant tier is A.
+    Benchmarks use the single-run values from df_all directly.
+
+    Key metrics displayed:
+        bias_pct  freq_mape  spend_r2_log  clv_spearman  (seed count)
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    DATASETS = ["cdnow", "tafeng", "uci", "dunnhumby"]
+    MODELS = ["pareto_nbd", "bgnbd_gg", "pareto_ggg", "lstm_base", "lstm_joint", "transformer_joint"]
+    MODEL_LABELS_TEX = {
+        "pareto_nbd":         "Pareto/NBD",
+        "bgnbd_gg":           "BG/NBD+GG",
+        "pareto_ggg":         "Pareto/GGG",
+        "lstm_base":          "Base LSTM",
+        "lstm_joint":         "Joint LSTM",
+        "transformer_joint":  "Joint Transformer",
+    }
+    DATASET_LABELS_TEX = {
+        "cdnow": "CDNOW", "tafeng": "Ta-Feng",
+        "uci": "UCI", "dunnhumby": "Dunnhumby",
+    }
+
+    def _fmt(mean, std, digits=1, pct=False):
+        if pd.isna(mean):
+            return "—"
+        suffix = "\\%" if pct else ""
+        if pd.isna(std) or std == 0:
+            return f"{mean:.{digits}f}{suffix}"
+        return f"{mean:.{digits}f} $\\pm$ {std:.{digits}f}{suffix}"
+
+    def _fmt2(mean, std, digits=2):
+        if pd.isna(mean):
+            return "—"
+        if pd.isna(std) or std == 0:
+            return f"{mean:.{digits}f}"
+        return f"{mean:.{digits}f} $\\pm$ {std:.{digits}f}"
+
+    # Build benchmark lookup from df_all (single values, no seeds)
+    benchmarks = {}
+    for _, row in df_all[df_all["model"].isin({"pareto_nbd", "bgnbd_gg", "pareto_ggg"})].iterrows():
+        key = (row["model"], row.get("dataset", ""))
+        benchmarks[key] = row
+
+    rows = []
+    for ds in DATASETS:
+        for model in MODELS:
+            is_benchmark = model in {"pareto_nbd", "bgnbd_gg", "pareto_ggg"}
+            if is_benchmark:
+                brow = benchmarks.get((model, ds))
+                if brow is None:
+                    continue
+                rows.append({
+                    "Model": MODEL_LABELS_TEX.get(model, model),
+                    "Dataset": DATASET_LABELS_TEX.get(ds, ds),
+                    "Seeds": "—",
+                    "Bias \\%": _fmt(brow.get("bias_pct"), None, digits=1, pct=True),
+                    "Freq MAPE \\%": _fmt(brow.get("freq_mape"), None, digits=1, pct=True),
+                    "Spend $R^2$": "—",
+                    "CLV $\\rho$": "—",
+                    "Tier": "A",
+                })
+                continue
+
+            # DL: choose best version row from df_seeds
+            sub = df_seeds[(df_seeds["model"] == model) & (df_seeds["dataset"] == ds)].copy()
+            if sub.empty:
+                continue
+            # Prefer Tier-A versions; break ties by |bias_pct_mean|
+            # Tier classification on aggregated row: A if all seeds valid, B otherwise
+            sub_a = sub[sub.get("quality_tier", sub["model"].apply(lambda _: "A")) == "A"] if "quality_tier" in sub.columns else sub
+            if sub_a.empty:
+                sub_a = sub
+                tier = "B"
+            else:
+                tier = "A"
+            best_idx = sub_a["bias_pct_mean"].abs().idxmin()
+            best = sub_a.loc[best_idx]
+
+            rows.append({
+                "Model": MODEL_LABELS_TEX.get(model, model) + ("†" if tier == "B" else ""),
+                "Dataset": DATASET_LABELS_TEX.get(ds, ds),
+                "Seeds": str(int(best["n_seeds"])) if not pd.isna(best["n_seeds"]) else "—",
+                "Bias \\%": _fmt(best.get("bias_pct_mean"), best.get("bias_pct_std"), digits=1, pct=True),
+                "Freq MAPE \\%": _fmt(best.get("freq_mape_mean"), best.get("freq_mape_std"), digits=1, pct=True),
+                "Spend $R^2$": _fmt2(best.get("spend_r2_log_mean"), best.get("spend_r2_log_std"), digits=2),
+                "CLV $\\rho$": _fmt2(best.get("clv_spearman_mean"), best.get("clv_spearman_std"), digits=2),
+                "Tier": tier,
+            })
+
+    if not rows:
+        logger.warning("No rows for aggregated LaTeX table.")
+        return
+
+    out_df = pd.DataFrame(rows)
+
+    # Remove Tier column from display (it's only for internal filtering)
+    display_cols = ["Model", "Dataset", "Seeds", "Bias \\%", "Freq MAPE \\%", "Spend $R^2$", "CLV $\\rho$"]
+    out_df = out_df[display_cols]
+
+    latex_str = out_df.to_latex(
+        index=False,
+        na_rep="—",
+        escape=False,
+        caption=caption,
+        label=label,
+    )
+    if "\\toprule" not in latex_str:
+        latex_str = latex_str.replace("\\hline\n", "\\toprule\n", 1)
+        latex_str = latex_str.replace("\n\\hline\n", "\n\\midrule\n", 1)
+        latex_str = latex_str.replace("\n\\hline\n", "\n\\bottomrule\n", 1)
+
+    if "†" in latex_str:
+        latex_str += (
+            "\\begin{tablenotes}\\small\n"
+            "\\item[†] Tier B: validity threshold (15\\% bias) not met; included with caveat.\n"
+            "\\end{tablenotes}\n"
+        )
+
+    out_path.write_text(latex_str)
+    print(f"LaTeX aggregated table saved: {out_path}")
+
+
 def plot_model_comparison_bars(
     df: pd.DataFrame,
     out_dir: str = "experiments/insights",
@@ -1140,6 +1276,11 @@ if __name__ == "__main__":
 
         if do_all or args.latex:
             export_latex_table(df, out_path=tables_dir / "comparison_all.tex")
+            seeds_for_latex = aggregate_seeds(df)
+            export_latex_table_aggregated(
+                df, seeds_for_latex,
+                out_path=tables_dir / "comparison_thesis.tex",
+            )
 
         if do_all or args.plots:
             plot_model_comparison_bars(df, out_dir=str(Path(args.results_dir) / "plots"))

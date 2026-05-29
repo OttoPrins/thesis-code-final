@@ -1,0 +1,91 @@
+# v8 — Extension 3 ablation: Transformer, dynamic campaign variables only (Dunnhumby 80/4).
+#
+# Changes from v4_soft:
+#   1. freq_logvar_max: -1.0  (v8 Kendall fix; consistent with all v8 configs)
+#   2. spend_loss_scale: 0.1  (reduce spend NLL gradient magnitude 10×)
+#   3. max_epochs: 120        (from 100)
+#   4. inference: sample, n_scenarios: 30  (production mode; v4_soft was expected/1)
+#      Note: use_kv_cache dropped — KV-cache is not valid in multi-scenario sample mode
+dataset:
+  name: dunnhumby
+  raw_dir: "data/raw/Dunnhumby datasets"
+  calibration_weeks: 80
+  holdout_weeks: 4
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: auto
+  spend_scaler: robust
+  include_covariates: true
+  covariate_mode: dynamic
+
+validation:
+  mode: rolling_origin
+  origins: [[72, 4], [76, 4]]
+
+model:
+  type: transformer
+  max_week: 51
+  max_trans: 3
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
+  joint: true
+  spend_head: hurdle_lognormal
+  state_feature_dim: 1
+  dynamic_cov_dim: 2
+  cov_emb_dim: 8
+
+training:
+  epochs: 120
+  max_epochs: 120
+  batch_size: 256
+  lr: 0.0005
+  optimizer: adamw
+  weight_decay: 0.0001
+  early_stopping_patience: 20
+  restore_best_checkpoint: true
+  max_grad_norm: 0.5
+  amp_enabled: false
+  scheduler: {type: cosine, warmup_fraction: 0.05}
+  scheduled_sampling: {enabled: true, start_epoch: 10, max_prob: 0.25, schedule: linear}
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+  warmup_epochs: 5
+  spend_loss: nll
+  spend_loss_normalize: true
+  spend_loss_scale: 0.1          # v8 FIX: reduce spend NLL gradient magnitude 10×
+  freq_logvar_max: -1.0          # v8 FIX: tighter cap → freq weight ≥ exp(1)/2≈1.36
+  spend_logvar_max: 2.0
+  spend_logvar_clamp: [-2.0, 2.0]
+  frequency_loss:
+    enabled: true
+    ce_weight: 1.0
+    class_weights: null
+    activity_bce_weight: 0.05
+    count_huber_weight: 0.10
+    aggregate_bias_weight: 0.10
+    temporal_tail_weight: 0.15
+    temporal_tail_power: 1.0
+
+calibration:
+  temperature_scaling: true
+  aggregate_scaling: true
+  aggregate_shrinkage: 0.25
+
+output: {run_name: extension3_transformer_dynamic_dunnhumby_v8, results_dir: results, save_checkpoint: true}
+inference: {n_scenarios: 30, mode: sample}
+evaluation:
+  weekly_discount_rate: 0.0018
+  warning_abs_bias_pct: 15.0
+  validity_max_abs_bias_pct: 15.0
+  warning_abs_spend_bias_pct: 20.0
+  validity_max_abs_spend_bias_pct: 50.0
+  validity_calibration_factor_range: [0.67, 1.50]
+  fail_on_invalid: false

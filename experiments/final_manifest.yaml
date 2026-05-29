@@ -2,9 +2,19 @@
 # Comparison tables should include only run names generated from these configs
 # unless a command explicitly requests exploratory runs.
 
-version: 2026-05-20-results-recovery-protocol
-results_status: v6_sweep_in_progress_noshrink_calibration_kendall_fix
+version: 2026-05-29-v7-v8-extension3-sweep
+results_status: v7_complete_v8_extension3_pending
 archive_dir: results/archive/pre_validity_protocol_20260519
+# Change log:
+# 2026-05-29: Bumped version for v7/v8/extension3 sweep.
+#   - Added v7 and v7_twostage joint configs for all 4 datasets (16 configs).
+#   - Added Extension 3 sample-mode configs (8 configs, 3 seeds each).
+#   - v8 CDNOW/UCI/TaFeng joint configs placeholder (to be finalised before Kaggle run).
+#   - Removed gppm_cdnow from benchmark_run_names (scipy stub is not a real GPPM;
+#     see benchmarks.py and thesis Limitations section).
+#   - GPPM stub files archived to results/archive/gppm_stub/.
+#   - compare.py now implements 3-tier quality gate (A/B/C) instead of binary valid/invalid.
+# 2026-05-20: v6 sweep recovery protocol (previous version).
 
 methodology:
   min_active_weeks: 1
@@ -46,6 +56,36 @@ runtime_expectations:
       experiments/configs/transformer_joint_uci_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
       experiments/configs/transformer_joint_tafeng_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
       experiments/configs/transformer_joint_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
+      # v7 track — spend_loss_scale=0.1 fix; 120-epoch budget; two-stage variants
+      experiments/configs/lstm_joint_cdnow_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_cdnow_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_uci_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_uci_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_tafeng_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_tafeng_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_dunnhumby_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_cdnow_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_cdnow_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_uci_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_uci_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_tafeng_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_tafeng_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_dunnhumby_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      # v8 LSTM joint fix track
+      experiments/configs/lstm_joint_cdnow_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_uci_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/lstm_joint_tafeng_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      # Extension 3 sample-mode track — 3 seeds × 8 configs (replaces v4_soft expected-only)
+      experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
+      experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
       # v4_soft track — deterministic expected-value inference, 100-epoch budget
       experiments/configs/lstm_base_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
       experiments/configs/lstm_joint_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
@@ -127,6 +167,36 @@ deep_learning_configs:
   - experiments/configs/extension3_transformer_full_dunnhumby_v4_soft.yaml
   # CDNOW 39+39 sensitivity check
   - experiments/configs/lstm_base_cdnow_39x39_v4_soft.yaml
+  # v7 track — spend_loss_scale=0.1 joint training fix; all 4 datasets × LSTM+Transformer × single-stage+two-stage
+  - experiments/configs/lstm_joint_cdnow_v7.yaml
+  - experiments/configs/lstm_joint_cdnow_v7_twostage.yaml
+  - experiments/configs/lstm_joint_uci_v7.yaml
+  - experiments/configs/lstm_joint_uci_v7_twostage.yaml
+  - experiments/configs/lstm_joint_tafeng_v7.yaml
+  - experiments/configs/lstm_joint_tafeng_v7_twostage.yaml
+  - experiments/configs/lstm_joint_dunnhumby_v7.yaml
+  - experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml
+  - experiments/configs/transformer_joint_cdnow_v7.yaml
+  - experiments/configs/transformer_joint_cdnow_v7_twostage.yaml
+  - experiments/configs/transformer_joint_uci_v7.yaml
+  - experiments/configs/transformer_joint_uci_v7_twostage.yaml
+  - experiments/configs/transformer_joint_tafeng_v7.yaml
+  - experiments/configs/transformer_joint_tafeng_v7_twostage.yaml
+  - experiments/configs/transformer_joint_dunnhumby_v7.yaml
+  - experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml
+  # v8 track — freq_logvar_max=-1.0 + spend_loss_scale=0.1 targeted fix
+  - experiments/configs/lstm_joint_cdnow_v8.yaml
+  - experiments/configs/lstm_joint_uci_v8.yaml
+  - experiments/configs/lstm_joint_tafeng_v8.yaml
+  # Extension 3 sample-mode track — proper 3-seed sample inference (replaces v4_soft expected-only)
+  - experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml
+  - experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml
+  - experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml
+  - experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml
+  - experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml
+  - experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml
+  - experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml
+  - experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml
 
 deep_learning_config_hashes:
   experiments/configs/lstm_base_cdnow_v2.yaml: d61a76eef5f0
@@ -185,12 +255,43 @@ deep_learning_config_hashes:
   experiments/configs/extension3_transformer_static_dunnhumby_v4_soft.yaml: 18c537f01f4c
   experiments/configs/extension3_transformer_dynamic_dunnhumby_v4_soft.yaml: 57937f5f9607
   experiments/configs/extension3_transformer_full_dunnhumby_v4_soft.yaml: 8d142d6bba9d
+  # v7 track — hashes computed 2026-05-29 before Kaggle launch
+  experiments/configs/lstm_joint_cdnow_v7.yaml: 58dba097329f
+  experiments/configs/lstm_joint_cdnow_v7_twostage.yaml: d40fa6c03917
+  experiments/configs/lstm_joint_dunnhumby_v7.yaml: c88179f736ba
+  experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml: b1f3dabe9f50
+  experiments/configs/lstm_joint_tafeng_v7.yaml: b59c86d07cc4
+  experiments/configs/lstm_joint_tafeng_v7_twostage.yaml: 3aa4c76570bc
+  experiments/configs/lstm_joint_uci_v7.yaml: b1a925d93d3e
+  experiments/configs/lstm_joint_uci_v7_twostage.yaml: fe3b86ec7136
+  experiments/configs/transformer_joint_cdnow_v7.yaml: 2cbde21da7a6
+  experiments/configs/transformer_joint_cdnow_v7_twostage.yaml: 4152a80ae183
+  experiments/configs/transformer_joint_dunnhumby_v7.yaml: 2a91986d1efd
+  experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml: 79da3c4dbb92
+  experiments/configs/transformer_joint_tafeng_v7.yaml: fd2a35807e8f
+  experiments/configs/transformer_joint_tafeng_v7_twostage.yaml: 3dbbb0eea481
+  experiments/configs/transformer_joint_uci_v7.yaml: 17f7c3d1c885
+  experiments/configs/transformer_joint_uci_v7_twostage.yaml: 10cd3b59400e
+  # v8 track — freq_logvar_max=-1.0 + spend_loss_scale=0.1 + 120 epochs
+  experiments/configs/lstm_joint_cdnow_v8.yaml: e83cfad5cee4
+  experiments/configs/lstm_joint_uci_v8.yaml: 5e3ec8b80869
+  experiments/configs/lstm_joint_tafeng_v8.yaml: 53643b4fce1d
+  # Extension 3 v8 sample-mode track — hashes computed 2026-05-29
+  experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml: a6c8b27cc354
+  experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml: c3e64bd07bed
+  experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml: 726b916e8ffa
+  experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml: 4fe5bd90b96c
+  experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml: 2a0038a6265d
+  experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml: c51a978cb57a
+  experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml: a03ffd8a221c
+  experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml: 903eca536891
 
 benchmark_run_names:
   - pareto_nbd_cdnow
   - bgnbd_gg_cdnow
   - pareto_ggg_cdnow
-  - gppm_cdnow
+  # gppm_cdnow intentionally removed — scipy Gamma-Poisson stub is not a real GPPM;
+  # archived to results/archive/gppm_stub/; see benchmarks.py and thesis Limitations section.
   - pareto_nbd_uci
   - bgnbd_gg_uci
   - pareto_nbd_tafeng

@@ -60,7 +60,9 @@ class Trainer:
         scheduler=None,
         restore_best_checkpoint: bool = True,
         spend_loss_normalize: bool = False,
+        spend_loss_scale: float = 1.0,
         scheduled_sampling: dict | None = None,
+        two_stage_mode: dict | None = None,
         frequency_loss_config: dict | None = None,
         class_values: torch.Tensor | None = None,
         amp_enabled: bool = True,
@@ -100,6 +102,23 @@ class Trainer:
         self._spend_norm_sum: float = 0.0
         self._spend_norm_count: int = 0
         self._spend_norm_frozen: bool = False
+        # Fixed multiplicative scale applied to spend_loss after spend-norm and
+        # before the Kendall combiner. The hurdle-lognormal NLL is unbounded
+        # below (Gaussian-style 0.5·exp(-log_var)·residual² + 0.5·log_var) while
+        # frequency CE is bounded ≥ 0, so on sparse data the spend gradient
+        # dominates at raw magnitude even when Kendall task weights are pinned
+        # equal. spend_loss_scale<1 shrinks that gradient. Default 1.0 preserves
+        # prior behavior exactly.
+        self.spend_loss_scale = float(spend_loss_scale)
+        # Two-stage training (optional). Stage 1 = frequency-only (spend head
+        # forward but not in optimized loss); Stage 2 = freeze backbone +
+        # freq_head + spend_proj, train spend_head + Kendall log_vars only.
+        # Decouples multi-task interference from the joint encoder benefit so
+        # the two variants can be compared empirically. Default off; existing
+        # single-stage configs see no behavior change.
+        self.two_stage_cfg = two_stage_mode or {}
+        self.two_stage_enabled = bool(self.two_stage_cfg.get("enabled", False))
+        self.current_stage: int = 0  # 0=single-stage, 1 or 2 in two-stage mode
         # Scheduled sampling (Bengio et al. 2015) — exposure-bias mitigation so
         # the autoregressive rollout stops collapsing on sparse data. LSTM-only,
         # config-gated, default OFF (preserves paper-faithful teacher forcing).
@@ -554,16 +573,29 @@ class Trainer:
                     self._spend_norm_sum += float(spend_loss.detach())
                     self._spend_norm_count += 1
                 spend_loss = spend_loss / self._spend_norm
-            total_loss = self.multi_task_loss([freq_loss, spend_loss])
-
-            # Log Kendall task weights (exp(-log_var) per task)
-            weights = self.multi_task_loss.task_weights.cpu().tolist()
-            out_metrics = {
-                "total_loss": total_loss.item(),
-                "spend_loss": spend_loss.item(),
-                "task_weight_freq": weights[0],
-                "task_weight_spend": weights[1],
-            }
+            if self.spend_loss_scale != 1.0:
+                spend_loss = spend_loss * self.spend_loss_scale
+            if self.two_stage_enabled and self.current_stage == 1:
+                # Stage 1: optimize frequency only. Spend head still runs
+                # forward so spend_loss remains in the logged metrics, but it
+                # does not contribute to the optimized loss — no gradient flows
+                # to spend_head params or Kendall log_vars from this graph.
+                total_loss = freq_loss
+                out_metrics = {
+                    "total_loss": total_loss.item(),
+                    "spend_loss": spend_loss.item(),
+                    "task_weight_freq": 1.0,
+                    "task_weight_spend": 0.0,
+                }
+            else:
+                total_loss = self.multi_task_loss([freq_loss, spend_loss])
+                weights = self.multi_task_loss.task_weights.cpu().tolist()
+                out_metrics = {
+                    "total_loss": total_loss.item(),
+                    "spend_loss": spend_loss.item(),
+                    "task_weight_freq": weights[0],
+                    "task_weight_spend": weights[1],
+                }
             out_metrics.update(freq_metrics)
             out_metrics["freq_loss"] = freq_loss.item()
             return total_loss, out_metrics
@@ -658,10 +690,123 @@ class Trainer:
         """
         Full training loop with optional early stopping.
 
+        Dispatches to two-stage training when `two_stage_mode.enabled` is true
+        (the external `early_stopping` arg is ignored in that path; per-stage
+        EarlyStopping instances are constructed internally using
+        `stage1_patience` / `stage2_patience` from the config).
+
         Returns:
             history: dict with per-epoch lists:
                 train_loss, val_loss, and (if joint) task_weight_freq, task_weight_spend
+                (plus `stage_boundary_epoch` in two-stage mode)
         """
+        if self.two_stage_enabled:
+            return self._fit_two_stage(train_loader, val_loader)
+        return self._fit_single_stage(train_loader, val_loader, epochs, early_stopping)
+
+    def _fit_two_stage(self, train_loader, val_loader) -> dict:
+        """Two-stage training orchestrator.
+
+        Stage 1: frequency-only (spend head runs forward for metrics but does
+            not contribute to the optimized loss; see `_compute_loss`).
+        Stage 2: freeze backbone (encoder + freq_head + spend_proj), rebuild
+            optimizer over `spend_head.*` + Kendall log_vars, then train.
+        """
+        from src.training.callbacks import EarlyStopping
+
+        stage1_epochs = int(self.two_stage_cfg.get("stage1_epochs", 60))
+        stage2_epochs = int(self.two_stage_cfg.get("stage2_epochs", 60))
+        stage1_patience = int(self.two_stage_cfg.get("stage1_patience", 8))
+        stage2_patience = int(self.two_stage_cfg.get("stage2_patience", 8))
+
+        # Stage 1 — frequency-only
+        print(
+            f"\n[two-stage] Stage 1: frequency-only for up to {stage1_epochs} "
+            f"epochs (patience={stage1_patience}) ..."
+        )
+        self.current_stage = 1
+        es1 = EarlyStopping(patience=stage1_patience)
+        history1 = self._fit_single_stage(train_loader, val_loader, stage1_epochs, es1)
+        print("[two-stage] Stage 1 complete.")
+
+        # Stage 2 — spend head only, backbone frozen
+        self._enter_stage_two()
+        self.current_stage = 2
+        self.current_epoch = 0  # reset so stage-2 Kendall warm-up runs fresh
+        print(
+            f"\n[two-stage] Stage 2: spend-only, backbone frozen, for up to "
+            f"{stage2_epochs} epochs (patience={stage2_patience}) ..."
+        )
+        es2 = EarlyStopping(patience=stage2_patience)
+        history2 = self._fit_single_stage(train_loader, val_loader, stage2_epochs, es2)
+        print("[two-stage] Stage 2 complete.")
+
+        # Restore default so subsequent fit() / inference paths see joint behavior.
+        self.current_stage = 0
+
+        merged: dict = {}
+        for k in set(list(history1.keys()) + list(history2.keys())):
+            merged[k] = list(history1.get(k, [])) + list(history2.get(k, []))
+        merged["stage_boundary_epoch"] = int(len(history1.get("train_loss", [])))
+        merged["stage1_epochs_completed"] = int(len(history1.get("train_loss", [])))
+        merged["stage2_epochs_completed"] = int(len(history2.get("train_loss", [])))
+        return merged
+
+    def _enter_stage_two(self) -> None:
+        """Freeze backbone (encoder + freq_head + spend_proj) and rebuild the
+        optimizer over `spend_head.*` + Kendall log_vars only.
+
+        Also: re-initialize AMP scaler (optimizer was rebuilt), reset the
+        spend-loss normalizer (warm-up re-collects with backbone frozen), and
+        cancel the LR scheduler (stage-1 cosine progress is no longer meaningful;
+        stage-2 trains at the optimizer's current LR).
+        """
+        frozen, trainable = 0, 0
+        for name, p in self.model.named_parameters():
+            if name.startswith("spend_head."):
+                p.requires_grad = True
+                trainable += 1
+            else:
+                p.requires_grad = False
+                frozen += 1
+        if self.multi_task_loss is not None:
+            for p in self.multi_task_loss.parameters():
+                p.requires_grad = True
+
+        new_params = [p for p in self.model.parameters() if p.requires_grad]
+        if self.multi_task_loss is not None:
+            new_params += [p for p in self.multi_task_loss.parameters() if p.requires_grad]
+
+        old_pg = self.optimizer.param_groups[0]
+        optimizer_cls = type(self.optimizer)
+        self.optimizer = optimizer_cls(
+            new_params,
+            lr=old_pg["lr"],
+            weight_decay=old_pg.get("weight_decay", 0.0),
+        )
+
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+
+        self._spend_norm = 1.0
+        self._spend_norm_sum = 0.0
+        self._spend_norm_count = 0
+        self._spend_norm_frozen = False
+
+        self.scheduler = None
+
+        print(
+            f"[two-stage] Stage 2 transition: froze {frozen} backbone params, "
+            f"training {trainable} spend-head params."
+        )
+
+    def _fit_single_stage(
+        self,
+        train_loader,
+        val_loader,
+        epochs: int,
+        early_stopping=None,
+    ) -> dict:
+        """Single-stage training loop. Identical to the prior `fit()` body."""
         self._total_epochs = int(epochs)  # used by the scheduled-sampling ε schedule
         history: dict = {"train_loss": [], "val_loss": []}
         if self.joint:

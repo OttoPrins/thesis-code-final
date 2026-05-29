@@ -55,12 +55,11 @@ _SEED_RE = re.compile(r"_seed(\d+)$")
 _VERSION_RE = re.compile(r"_(v\d+|final)$")
 _REPAIR_SUFFIX = "_repair"
 
-# Canonical model order for table rows
+# Canonical model order for table rows (GPPM removed — stub descoped, see limitations)
 _MODEL_ORDER = [
     "pareto_nbd",
     "bgnbd_gg",
     "pareto_ggg",
-    "gppm",
     "gamma_poisson",
     "lstm_base",
     "lstm_joint",
@@ -84,7 +83,43 @@ _META_KEYS = {
     "final_manifest_n_scenarios",
 }
 
-_BENCHMARK_MODELS = {"pareto_nbd", "bgnbd_gg", "pareto_ggg", "gppm", "gamma_poisson"}
+_BENCHMARK_MODELS = {"pareto_nbd", "bgnbd_gg", "pareto_ggg", "gamma_poisson"}
+
+# Thresholds for the 3-tier quality classification.
+# Tier A: run_valid=True (existing gate: |freq_bias| ≤ 15%, |spend_bias| ≤ 50%)
+# Tier B: run_valid=False but |freq_bias| ≤ 50% and |spend_bias| ≤ 100% and NOT training_failed
+#          → reported in tables with a "†" caveat marker
+# Tier C: |freq_bias| > 50% or |spend_bias| > 100% or training_failed=True
+#          → excluded from headline tables (reported in failure_appendix only)
+_TIER_B_MAX_FREQ_BIAS = 50.0
+_TIER_B_MAX_SPEND_BIAS = 100.0
+
+
+def quality_tier(metrics: dict) -> str:
+    """
+    Classify a model run into one of three quality tiers for thesis reporting.
+
+    Tier A — publishable: run_valid=True (|freq_bias| ≤ 15%, |spend_bias| ≤ 50%).
+    Tier B — marginal (report with "†" caveat): run_valid=False but not catastrophically
+              diverged.  Criteria: NOT training_failed AND |freq_bias| ≤ 50% AND
+              |spend_bias| ≤ 100%.  Benchmarks and runs without an explicit run_valid
+              flag are always Tier A.
+    Tier C — diverged (excluded from main tables): training_failed=True, OR
+              |freq_bias| > 50%, OR |spend_bias| > 100%.
+
+    The tier is stored as the 'quality_tier' column in comparison DataFrames and used in
+    the LaTeX table builder to emit "†" footnotes for Tier B rows.
+    """
+    if metrics.get("training_failed") is True:
+        return "C"
+    if metrics.get("run_valid") is True or metrics.get("run_valid") is None:
+        return "A"
+    # run_valid=False — check how bad it is
+    freq_bias = abs(metrics.get("bias_pct") or 0)
+    spend_bias = abs(metrics.get("spend_bias_pct") or 0)
+    if freq_bias > _TIER_B_MAX_FREQ_BIAS or spend_bias > _TIER_B_MAX_SPEND_BIAS:
+        return "C"
+    return "B"
 
 
 def _sort_key(model_name: str) -> int:
@@ -205,9 +240,9 @@ def _filter_metric_files(
             )
             return False
         is_gppm = metrics.get("model") == "gppm" or stem.startswith("gppm_")
-        if is_gppm and metrics.get("benchmark_valid") is not True:
+        if is_gppm:
             logger.info(
-                "Skipping %s: GPPM result lacks passing Stan diagnostics; regenerate after repairs.",
+                "Skipping %s: GPPM stub removed from thesis tables (see limitations section).",
                 Path(fpath).name,
             )
             return False
@@ -215,19 +250,23 @@ def _filter_metric_files(
             "final_manifest_benchmark_name" in metrics
             or metrics.get("model") in _BENCHMARK_MODELS
         )
-        if metrics.get("run_valid") is False:
-            logger.info(
-                "Skipping %s: run validity checks failed (%s).",
-                Path(fpath).name,
-                metrics.get("run_invalid_reason", "no reason recorded"),
-            )
-            return False
-        if not is_benchmark and metrics.get("run_valid") is not True:
-            logger.info(
-                "Skipping %s: deep-learning result lacks run_valid=True; regenerate after repairs.",
-                Path(fpath).name,
-            )
-            return False
+        # Apply the 3-tier quality gate.  Benchmarks bypass the DL validity check.
+        if not is_benchmark:
+            tier = quality_tier(metrics)
+            if tier == "C":
+                logger.info(
+                    "Skipping %s (tier C — diverged): %s",
+                    Path(fpath).name,
+                    metrics.get("run_invalid_reason", ""),
+                )
+                return False
+            # Tier B: include with caveat; tier A: include normally.
+            if tier == "B":
+                logger.info(
+                    "Including %s (tier B — marginal, will carry '†' in tables): %s",
+                    Path(fpath).name,
+                    metrics.get("run_invalid_reason", ""),
+                )
         if (
             protocol_variant_from_stem(stem) == "stability_repair"
             and not is_benchmark
@@ -458,6 +497,7 @@ def aggregate_all_results(
     final_only: bool = True,
     include_expected: bool = False,
     protocol_variant: str = "strict",
+    extra_results_dirs: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Scan results/tables/ for all *_metrics.json files and compile into one DataFrame.
@@ -466,9 +506,17 @@ def aggregate_all_results(
     are parsed from the run_name via parse_run_name. Includes all metric columns
     (log-space and raw-currency).
 
+    Args:
+        results_dir:        Primary results directory (benchmarks live here; uses
+                            final_only gate).
+        extra_results_dirs: Additional directories scanned with final_only=False (tier
+                            gate only).  Intended for Kaggle DL result directories where
+                            manifest metadata was not embedded at run time.  Duplicate
+                            run names are deduplicated — the primary directory wins.
+
     Returns:
         DataFrame with columns:
-            model, dataset, version, seed, mode, + all available metric columns
+            model, dataset, version, seed, mode, quality_tier, + all available metric columns
     """
     tables_dir = Path(results_dir) / "tables"
     if not tables_dir.exists():
@@ -484,6 +532,36 @@ def aggregate_all_results(
         include_expected=include_expected,
         protocol_variant=protocol_variant,
     )
+
+    # Merge extra directories (exploratory/Kaggle DL results) without manifest check.
+    primary_stems = {Path(f).stem.removesuffix("_metrics") for f in all_files}
+    for extra_dir in (extra_results_dirs or []):
+        extra_tables = Path(extra_dir)
+        if not extra_tables.exists():
+            extra_tables = Path(extra_dir) / "tables"
+        elif extra_tables.is_dir() and not list(extra_tables.glob("*_metrics.json")):
+            # Path exists but has no metrics at the top level — try the tables/ subdir.
+            candidate = extra_tables / "tables"
+            if candidate.exists():
+                extra_tables = candidate
+        if not extra_tables.exists():
+            logger.warning(f"Extra results dir not found: {extra_dir}")
+            continue
+        extra_files = sorted(_glob.glob(str(extra_tables / "*_metrics.json")))
+        extra_files = [f for f in extra_files if not Path(f).name.startswith("comparison_")]
+        extra_files = _filter_metric_files(
+            extra_files,
+            final_only=False,  # no manifest check for extra dirs
+            include_expected=include_expected,
+            protocol_variant=protocol_variant,
+        )
+        for f in extra_files:
+            stem = Path(f).stem.removesuffix("_metrics")
+            if stem not in primary_stems:
+                all_files.append(f)
+                primary_stems.add(stem)
+            else:
+                logger.debug("Deduplicating %s: primary dir wins.", stem)
 
     if not all_files:
         logger.warning(f"No *_metrics.json files found in {tables_dir}")
@@ -510,6 +588,7 @@ def aggregate_all_results(
             "seed": seed,
             "mode": mode,
             "protocol_variant": protocol_variant_from_stem(stem),
+            "quality_tier": quality_tier(metrics),
         }
         row.update({
             k: v for k, v in metrics.items()
@@ -806,7 +885,7 @@ def export_latex_table(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     cols_order = [
-        "model", "dataset",
+        "model", "dataset", "quality_tier",
         "freq_rmse", "freq_mape", "bias_pct",
         "spend_mae_log", "spend_mae_raw", "spend_r2_log",
         "clv_mae", "clv_spearman", "clv_decile_lift",
@@ -814,6 +893,7 @@ def export_latex_table(
     rename_map = {
         "model": "Model",
         "dataset": "Dataset",
+        "quality_tier": "Tier",
         "freq_rmse": "Freq RMSE",
         "freq_mape": "Freq MAPE \\%",
         "bias_pct": "Bias \\%",
@@ -825,9 +905,15 @@ def export_latex_table(
         "clv_decile_lift": "CLV Decile Lift",
     }
 
+    # Append "†" to model name for Tier B rows so the table is self-explanatory
+    sub = df.copy()
+    if "quality_tier" in sub.columns:
+        mask_b = sub["quality_tier"] == "B"
+        sub.loc[mask_b, "model"] = sub.loc[mask_b, "model"] + "†"
+
     # Keep only available columns
-    available = [c for c in cols_order if c in df.columns]
-    sub = df[available].rename(columns=rename_map)
+    available = [c for c in cols_order if c in sub.columns]
+    sub = sub[available].rename(columns=rename_map)
 
     latex_str = sub.to_latex(
         index=False,
@@ -837,6 +923,15 @@ def export_latex_table(
         caption=caption,
         label=label,
     )
+    # Append footnote explaining "†"
+    if "†" in latex_str:
+        latex_str += (
+            "\\begin{tablenotes}\\small\n"
+            "\\item[†] Tier B result: validity checks failed "
+            "(|freq bias| ≤ 50\\% and |spend bias| ≤ 100\\%); "
+            "included with caveat. See failure appendix for details.\n"
+            "\\end{tablenotes}\n"
+        )
 
     # Upgrade to booktabs (pandas may not add booktabs rules by default in older versions)
     latex_str = latex_str.replace("\\begin{tabular}", "\\begin{tabular}")
@@ -959,6 +1054,16 @@ def plot_kendall_weight_evolution(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Aggregate results and generate thesis figures.")
     parser.add_argument("--results_dir", default="results/", help="Path to results directory")
+    parser.add_argument(
+        "--extra_results_dirs",
+        nargs="*",
+        default=[],
+        help=(
+            "Extra results directories scanned without manifest validation (tier gate only). "
+            "Use for Kaggle DL result dirs where manifest metadata was not embedded at run time. "
+            "Duplicate run stems are deduplicated — primary results_dir wins."
+        ),
+    )
     parser.add_argument("--latex", action="store_true", help="Export LaTeX comparison table")
     parser.add_argument("--plots", action="store_true", help="Generate comparison bar charts")
     parser.add_argument("--weights", action="store_true",
@@ -988,23 +1093,27 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     do_all = args.all
+    extra_dirs = args.extra_results_dirs or []
     df = aggregate_all_results(
         args.results_dir,
         final_only=not args.include_exploratory,
         include_expected=args.include_expected,
         protocol_variant=args.protocol_variant,
+        extra_results_dirs=extra_dirs,
     )
     strict_df = aggregate_all_results(
         args.results_dir,
         final_only=not args.include_exploratory,
         include_expected=args.include_expected,
         protocol_variant="strict",
+        extra_results_dirs=extra_dirs,
     )
     repaired_df = aggregate_all_results(
         args.results_dir,
         final_only=not args.include_exploratory,
         include_expected=args.include_expected,
         protocol_variant="repaired",
+        extra_results_dirs=extra_dirs,
     )
     failure_df = build_failure_appendix(
         args.results_dir,

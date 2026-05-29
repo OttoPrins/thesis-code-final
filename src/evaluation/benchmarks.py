@@ -1,12 +1,18 @@
 """
 Probabilistic benchmarks for CLV prediction.
 
-Models:
+Active models (included in thesis comparison tables):
 - ParetoNBDModel: frequency-only (lifetimes)
 - BGNBDGammaGammaModel: frequency + spend (lifetimes)
 - ParetoGGGModel: frequency with regularity (rpy2 → R BTYDplus)
-- GPPMModel: true Gaussian process propensity model (Stan/cmdstanpy)
-- GammaPoissonPropensityModel: non-thesis diagnostic proxy
+
+Excluded models:
+- GPPMModel: descoped — requires a full PyMC/Stan GP implementation with
+  synthetic-data recovery test (Dew & Ansari 2018); the scipy Gamma-Poisson
+  approximation that was labelled "GPPM" is not a GP model and has been
+  removed from the thesis comparison.  The class is kept for reference.
+  See Limitations section of the thesis for the acknowledgement.
+- GammaPoissonPropensityModel: diagnostic proxy only, not a thesis benchmark.
 """
 
 from abc import ABC, abstractmethod
@@ -649,13 +655,16 @@ class GPPMModel(BenchmarkModel):
         return "gppm"
 
 
-# Registry of available models
+# Registry of active thesis benchmark models.
+# GPPMModel is intentionally absent: the scipy Gamma-Poisson approximation
+# previously labelled "gppm" is not a valid Dew/Ansari (2018) GP model and
+# has been removed from the thesis comparison.  The class is kept above for
+# reference.  GammaPoissonPropensityModel is a diagnostic proxy, not a thesis
+# benchmark.
 BENCHMARK_MODELS = {
     "pareto_nbd": ParetoNBDModel,
     "bgnbd_gg": BGNBDGammaGammaModel,
     "pareto_ggg": ParetoGGGModel,
-    "gppm": GPPMModel,
-    "gamma_poisson": GammaPoissonPropensityModel,
 }
 
 

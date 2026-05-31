@@ -211,6 +211,42 @@ def build_model(config: dict) -> torch.nn.Module:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
 
 
+def _neutralize_unseen_week_embeddings(model, calibration_weeks: int) -> int:
+    """
+    Replace week-of-year embedding rows never seen during calibration with the
+    mean of the rows that WERE seen.
+
+    The week feature is week-of-year (position % 52). A calibration window shorter
+    than 52 weeks (e.g. CDNOW's 39 weeks) therefore only ever trains rows
+    {0 .. calibration_weeks-1}; rows {calibration_weeks .. 51} keep their random
+    N(0,1) init. At autoregressive inference the holdout feeds those untrained
+    rows ((calibration_weeks + h - 1) % 52), injecting noise for the first
+    (52 - calibration_weeks) holdout weeks. Setting unseen rows to the seen-row
+    mean makes them a trained-neutral input instead of random noise.
+
+    Valendin's reference avoids this only because its demo calibration spans
+    multiple full years (all 52 rows train). No-op when calibration covers >= 52
+    weeks. Returns the number of rows neutralized.
+    """
+    embed = getattr(model, "embed_week", None)
+    if embed is None:
+        return 0
+    num_rows = embed.num_embeddings
+    seen = {p % 52 for p in range(calibration_weeks)}
+    seen = {r for r in seen if 0 <= r < num_rows}
+    unseen = [r for r in range(num_rows) if r not in seen]
+    if not unseen or not seen:
+        return 0
+    with torch.no_grad():
+        seen_mean = embed.weight[sorted(seen)].mean(dim=0)
+        embed.weight[unseen] = seen_mean
+    print(
+        f"  neutralized {len(unseen)} unseen week-of-year embedding rows "
+        f"{unseen[0]}..{unseen[-1]} (calibration_weeks={calibration_weeks})"
+    )
+    return len(unseen)
+
+
 def _count_zero_calibration_customers(dataset) -> int | None:
     seed_trans = getattr(dataset, "seed_trans", None)
     if seed_trans is not None:
@@ -955,6 +991,13 @@ def run_experiment(
         history["final_finetune_val_loss"] = finetune_history["val_loss"]
         history["train_loss"].extend(finetune_history["train_loss"])
         history["val_loss"].extend(finetune_history["val_loss"])
+
+    # Fix untrained week-of-year embedding rows for sub-52-week calibrations
+    # (e.g. CDNOW 39x39) before saving/inference. Gated; no-op otherwise.
+    if model_cfg.get("neutralize_unseen_week_embeddings", False):
+        _neutralize_unseen_week_embeddings(
+            model, int(dataset_cfg["calibration_weeks"])
+        )
 
     # Save checkpoint
     results_dir = Path(output_cfg["results_dir"])

@@ -1,0 +1,77 @@
+# Clean paper-faithful CDNOW replication of Valendin et al. (2022).
+#
+# Matches the reference implementation (github.com/valendin/rfm2lstm,
+# banking_transactions_demo.ipynb) and the paper's CDNOW protocol (Table 3):
+#   - Full 23,570-customer master cohort (acquired Q1 1997)
+#   - 39 calibration weeks + 39 holdout weeks
+#   - Softmax over ALL observed weekly transaction classes (max_trans = max+1),
+#     NOT clipped at [0,1,2,3]
+#   - Single LSTM(128) -> Dense(128) -> softmax, week + transaction embeddings only
+#   - Plain Adam, sparse categorical cross-entropy, seq2seq (predict every step)
+#   - EarlyStopping(restore_best, patience=5)
+#   - Autoregressive multinomial sampling at temperature 1.0, ~30 scenarios averaged
+#
+# Deliberately STRIPS the non-Valendin machinery present in other configs:
+#   - no temperature_scaling / aggregate_scaling / aggregate_shrinkage
+#   - no scheduled_sampling
+#   - no cosine scheduler / weight decay
+#   - final_finetune disabled (paper-described in App. B.2 but absent from the
+#     reference code; kept off here to isolate the clean baseline)
+dataset:
+  name: cdnow
+  raw_dir: data/raw
+  raw_file: CDNOW_master.txt
+  prefer_sample_file: false
+  protocol_name: valendin_cdnow_master_39x39
+  calibration_weeks: 39
+  holdout_weeks: 39
+  origin_date: "1997-01-01"
+  cohort_end_date: "1997-03-31"
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: observed          # all observed weekly classes (Valendin: max_trans = max+1)
+
+model:
+  type: lstm
+  max_week: 51                # week-of-year 0..51 -> Embedding(52, 8)
+  hidden_size: 128
+  dense_units: 128
+  num_layers: 1
+  dropout: 0.0
+  joint: false
+  # max_trans is set automatically from the calibration data (freq_cap: observed).
+  neutralize_unseen_week_embeddings: true  # fix untrained week-of-year rows (39..51)
+
+training:
+  epochs: 150
+  max_epochs: 150
+  batch_size: 256
+  lr: 0.001
+  optimizer: adam
+  weight_decay: 0.0
+  early_stopping_patience: 5
+  restore_best_checkpoint: true
+  final_finetune:
+    enabled: false
+  seed: 42
+
+loss:
+  type: cross_entropy
+
+output:
+  run_name: lstm_base_cdnow_replication
+  results_dir: results
+  save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  mode: sample
+  temperature: 1.0
+
+evaluation:
+  weekly_discount_rate: 0.0018
+  valendin_reference_rmse: 1.86
+  valendin_reference_bias_pct: -0.7
+  valendin_reference_mape: 13.8
+  fail_on_invalid: false

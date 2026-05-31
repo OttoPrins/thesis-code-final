@@ -1,3 +1,6 @@
+# Reference implementations (cloned, not part of this repo)
+reference/
+
 # Data
 data/raw/*
 data/processed/*

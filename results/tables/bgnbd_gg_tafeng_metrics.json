@@ -53,7 +53,7 @@
   "final_manifest_run_name": "bgnbd_gg_tafeng",
   "final_manifest_benchmark_name": "bgnbd_gg_tafeng",
   "final_manifest_config": "experiments/configs/lstm_base_tafeng_v6.yaml",
-  "final_manifest_config_hash": "439b37da1351",
-  "final_manifest_actual_config_hash": "f4f76fd07490",
+  "final_manifest_config_hash": "286f58211bd3",
+  "final_manifest_actual_config_hash": "6f0f8e275d2c",
   "arrays_file": "bgnbd_gg_tafeng_arrays.npz"
 }

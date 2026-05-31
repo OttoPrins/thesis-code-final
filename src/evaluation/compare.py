@@ -50,10 +50,16 @@ logger = logging.getLogger(__name__)
 # where <model> ∈ {lstm_base, lstm_joint, transformer_joint, extension3, ...}
 # and <dataset> ∈ {cdnow, uci, tafeng, dunnhumby}
 _DATASETS = ("cdnow", "uci", "tafeng", "dunnhumby")
+# Aliases map run_name suffixes that aren't in _DATASETS to canonical dataset names.
+# Ordered longest-first so _cdnow_full is matched before _cdnow.
+_DATASET_ALIASES: tuple[tuple[str, str], ...] = (
+    ("cdnow_full", "cdnow"),
+)
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
 _VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final)$")
 _REPAIR_SUFFIX = "_repair"
+_RESCORE_SUFFIX = "_rescore"
 
 # Canonical model order for table rows (GPPM removed — stub descoped, see limitations)
 _MODEL_ORDER = [
@@ -135,7 +141,7 @@ def protocol_variant_from_stem(stem: str) -> str:
 
 
 def _strip_variant_suffix(stem: str) -> str:
-    return stem.removesuffix(_REPAIR_SUFFIX)
+    return stem.removesuffix(_RESCORE_SUFFIX).removesuffix(_REPAIR_SUFFIX)
 
 
 def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], Optional[str]]:
@@ -166,11 +172,17 @@ def parse_run_name(stem: str) -> Tuple[str, str, Optional[str], Optional[int], O
         version = m.group(0).lstrip("_")
         s = s[:m.start()]
     dataset = "unknown"
-    for ds in _DATASETS:
-        if s.endswith(f"_{ds}"):
-            dataset = ds
-            s = s[: -(len(ds) + 1)]
+    for suffix, canonical_ds in _DATASET_ALIASES:
+        if s.endswith(f"_{suffix}"):
+            dataset = canonical_ds
+            s = s[: -(len(suffix) + 1)]
             break
+    if dataset == "unknown":
+        for ds in _DATASETS:
+            if s.endswith(f"_{ds}"):
+                dataset = ds
+                s = s[: -(len(ds) + 1)]
+                break
     canonical_model = s
     return canonical_model, dataset, version, seed, mode
 
@@ -208,7 +220,12 @@ def _filter_metric_files(
             return False, f"array sidecar is missing: {arrays_path.name}"
         if metrics.get("ensemble_seeds") is not None:
             return True, "ok"
-        checkpoint_path = metrics_path.parent.parent / "checkpoints" / f"{stem}.pt"
+        # Rescore runs reuse the original sample checkpoint (no new .pt is saved).
+        if stem.endswith(_RESCORE_SUFFIX):
+            ckpt_stem = stem[: -len(_RESCORE_SUFFIX)].replace("_expected", "_sample")
+        else:
+            ckpt_stem = stem
+        checkpoint_path = metrics_path.parent.parent / "checkpoints" / f"{ckpt_stem}.pt"
         if not checkpoint_path.exists():
             return False, f"checkpoint is missing: {checkpoint_path}"
         return True, "ok"

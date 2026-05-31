@@ -53,7 +53,7 @@
   "final_manifest_run_name": "bgnbd_gg_cdnow",
   "final_manifest_benchmark_name": "bgnbd_gg_cdnow",
   "final_manifest_config": "experiments/configs/lstm_base_cdnow_full.yaml",
-  "final_manifest_config_hash": "fb66a1e6473f",
-  "final_manifest_actual_config_hash": "5ba775debf1a",
+  "final_manifest_config_hash": "43a1ed82318d",
+  "final_manifest_actual_config_hash": "85a8a6fadfcd",
   "arrays_file": "bgnbd_gg_cdnow_arrays.npz"
 }

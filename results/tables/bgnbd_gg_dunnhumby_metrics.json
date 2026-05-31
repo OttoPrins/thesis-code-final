@@ -53,7 +53,7 @@
   "final_manifest_run_name": "bgnbd_gg_dunnhumby",
   "final_manifest_benchmark_name": "bgnbd_gg_dunnhumby",
   "final_manifest_config": "experiments/configs/lstm_base_dunnhumby_v6.yaml",
-  "final_manifest_config_hash": "23188946df06",
-  "final_manifest_actual_config_hash": "60760596f05b",
+  "final_manifest_config_hash": "1fe51e0dc106",
+  "final_manifest_actual_config_hash": "6092b4fb35bd",
   "arrays_file": "bgnbd_gg_dunnhumby_arrays.npz"
 }

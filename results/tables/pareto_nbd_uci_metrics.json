@@ -53,7 +53,7 @@
   "final_manifest_run_name": "pareto_nbd_uci",
   "final_manifest_benchmark_name": "pareto_nbd_uci",
   "final_manifest_config": "experiments/configs/lstm_base_uci_v6.yaml",
-  "final_manifest_config_hash": "62c30f13f3aa",
-  "final_manifest_actual_config_hash": "4352d18256a6",
+  "final_manifest_config_hash": "fd028ad50b7c",
+  "final_manifest_actual_config_hash": "a38701d90619",
   "arrays_file": "pareto_nbd_uci_arrays.npz"
 }

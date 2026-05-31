@@ -203,9 +203,16 @@ class BenchmarkModel(ABC):
             cumulative[:, t] = np.asarray(
                 self.predict_freq(rfm_calib, t), dtype=np.float64
             )
-        per_week = np.diff(cumulative, axis=1)
-        # Expected weekly counts cannot be negative; clip tiny numerical/MCMC noise.
-        return np.clip(per_week, 0.0, None).astype(np.float32)
+        per_week = np.clip(np.diff(cumulative, axis=1), 0.0, None)
+        # Clipping can inflate per-week sums above the direct predict_freq(H) total
+        # (happens with MCMC-backed models like Pareto/GGG whose cumulative expectations
+        # are not perfectly monotone). Rescale so each customer's row sums to the direct
+        # horizon prediction, keeping the Valendin MAPE consistent with individual bias.
+        direct_total = cumulative[:, H]  # == predict_freq(rfm, H) for each customer
+        row_sums = per_week.sum(axis=1)
+        safe = np.where(row_sums > 0, row_sums, 1.0)
+        per_week = per_week * (direct_total / safe)[:, None]
+        return per_week.astype(np.float32)
 
     def predict_spend_per_week(
         self, rfm_calib: pd.DataFrame, holdout_weeks: int

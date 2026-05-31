@@ -527,6 +527,8 @@ def compute_all_metrics(
     y_spend_pred_raw_total: Optional[np.ndarray] = None,
     y_spend_true_per_week: Optional[np.ndarray] = None,
     y_spend_pred_per_week: Optional[np.ndarray] = None,
+    y_spend_true_per_week_raw: Optional[np.ndarray] = None,
+    y_spend_pred_per_week_raw: Optional[np.ndarray] = None,
     customer_ids: Optional[np.ndarray] = None,
     scaler=None,
     pred_activity_per_week: Optional[np.ndarray] = None,
@@ -627,6 +629,18 @@ def compute_all_metrics(
             activity_weights=pred_activity_per_week,
             smearing_factor=smearing_factor,
             calibration_factor=spend_calibration_factor,
+        )
+        true_raw_total = true_raw_matrix.sum(axis=1).astype(np.float32)
+        pred_raw_total = pred_raw_matrix.sum(axis=1).astype(np.float32)
+    elif y_spend_true_per_week_raw is not None and y_spend_pred_per_week_raw is not None:
+        # Benchmark path: per-week spend is already in raw currency (BTYD frequency x
+        # Gamma-Gamma E[spend/txn]), so no scaler inversion is needed. This unlocks the
+        # same per-week spend metrics and per-customer CLV that the deep models get.
+        true_raw_matrix = np.clip(
+            np.asarray(y_spend_true_per_week_raw, dtype=np.float64), 0.0, None
+        )
+        pred_raw_matrix = np.clip(
+            np.asarray(y_spend_pred_per_week_raw, dtype=np.float64), 0.0, None
         )
         true_raw_total = true_raw_matrix.sum(axis=1).astype(np.float32)
         pred_raw_total = pred_raw_matrix.sum(axis=1).astype(np.float32)

@@ -31,6 +31,11 @@ training:
   weight_decay: 0.0001
   early_stopping_patience: 20
   restore_best_checkpoint: true
+  final_finetune:
+    enabled: true
+    epochs: 5
+    lr_multiplier: 0.1
+    batch_size_multiplier: 4
   max_grad_norm: 0.5
   scheduler: {type: cosine, warmup_fraction: 0.05}
   scheduled_sampling: {enabled: true, start_epoch: 10, max_prob: 0.35, schedule: linear}
@@ -39,15 +44,6 @@ training:
 
 loss:
   type: cross_entropy
-  frequency_loss:
-    enabled: true
-    ce_weight: 1.0
-    class_weights: null
-    activity_bce_weight: 0.05
-    count_huber_weight: 0.10
-    aggregate_bias_weight: 0.10
-    temporal_tail_weight: 0.15
-    temporal_tail_power: 1.0
 
 calibration:
   temperature_scaling: true

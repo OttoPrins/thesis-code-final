@@ -28,6 +28,44 @@ import re
 logger = logging.getLogger(__name__)
 
 
+def _fit_gamma_gamma(rfm_calib: pd.DataFrame):
+    """
+    Fit a Gamma-Gamma spend sub-model (Fader, Hardie & Lee 2005b) on repeat buyers.
+
+    Returns the fitted GammaGammaFitter, or None when no repeat buyer with positive
+    monetary value exists. Shared by every frequency benchmark that is paired with
+    Gamma-Gamma to produce a CLV (frequency x spend) forecast.
+    """
+    from lifetimes import GammaGammaFitter
+
+    mask = (rfm_calib["frequency"] > 0) & (rfm_calib["monetary_value"] > 0)
+    if mask.sum() == 0:
+        logger.warning("No repeat buyers with positive spend; Gamma-Gamma skipped")
+        return None
+    ggf = GammaGammaFitter(penalizer_coef=0.01)
+    ggf.fit(
+        frequency=rfm_calib.loc[mask, "frequency"].values,
+        monetary_value=rfm_calib.loc[mask, "monetary_value"].values,
+    )
+    return ggf
+
+
+def _gamma_gamma_spend_per_txn(ggf, rfm_calib: pd.DataFrame) -> np.ndarray:
+    """E[spend per transaction] per customer (0 for one-timers). Shape (N,)."""
+    spend_per_txn = np.zeros(len(rfm_calib), dtype=np.float32)
+    if ggf is None:
+        return spend_per_txn
+    repeat_mask = (rfm_calib["frequency"] > 0).values
+    if repeat_mask.sum() > 0:
+        spend_per_txn[repeat_mask] = np.asarray(
+            ggf.conditional_expected_average_profit(
+                frequency=rfm_calib.loc[repeat_mask, "frequency"].values,
+                monetary_value=rfm_calib.loc[repeat_mask, "monetary_value"].values,
+            )
+        ).astype(np.float32)
+    return spend_per_txn
+
+
 def _count_stan_divergences(diagnose_text: str) -> int:
     """Parse CmdStan diagnose text for divergent transition counts."""
     text = diagnose_text or ""
@@ -143,9 +181,53 @@ class BenchmarkModel(ABC):
         """Model name for results file."""
         pass
 
+    def predict_freq_per_week(
+        self, rfm_calib: pd.DataFrame, holdout_weeks: int
+    ) -> np.ndarray:
+        """
+        Per-week expected transactions, shape (N, H).
+
+        Computed by cumulative differencing: predict_freq(t) returns the expected
+        cumulative transactions up to horizon t, so week h's expected count is
+        predict_freq(h) - predict_freq(h-1). This makes the BTYD benchmarks
+        scoreable on Valendin et al.'s weekly aggregate MAPE -- the same metric the
+        LSTM is scored on (their Fig. 4 plots the Pareto/NBD weekly tracking line).
+
+        The default works for any model whose predict_freq is cumulative-to-horizon
+        (Pareto/NBD, BG/NBD, Pareto/GGG, Gamma-Poisson).
+        """
+        N = len(rfm_calib)
+        H = int(holdout_weeks)
+        cumulative = np.zeros((N, H + 1), dtype=np.float64)
+        for t in range(1, H + 1):
+            cumulative[:, t] = np.asarray(
+                self.predict_freq(rfm_calib, t), dtype=np.float64
+            )
+        per_week = np.diff(cumulative, axis=1)
+        # Expected weekly counts cannot be negative; clip tiny numerical/MCMC noise.
+        return np.clip(per_week, 0.0, None).astype(np.float32)
+
+    def predict_spend_per_week(
+        self, rfm_calib: pd.DataFrame, holdout_weeks: int
+    ) -> np.ndarray | None:
+        """
+        Per-week expected raw-currency spend, shape (N, H), or None.
+
+        Default None (frequency-only models). Models paired with Gamma-Gamma
+        override this as per-week expected frequency x E[spend per transaction].
+        """
+        return None
+
 
 class ParetoNBDModel(BenchmarkModel):
-    """Pareto/NBD frequency-only model via lifetimes."""
+    """
+    Pareto/NBD frequency model via lifetimes, paired with Gamma-Gamma for spend.
+
+    Frequency metrics (RMSE, bias, MAPE) are pure Pareto/NBD. Spend and CLV columns
+    use the canonical Pareto/NBD x Gamma-Gamma CLV construction (Fader et al. 2005b):
+    expected transactions x E[spend per transaction]. This lets the workhorse BTYD
+    model be scored on the same CLV metrics as the joint deep models.
+    """
 
     def __init__(self):
         try:
@@ -153,15 +235,17 @@ class ParetoNBDModel(BenchmarkModel):
         except ImportError:
             raise ImportError("Install lifetimes: pip install lifetimes")
         self.fitter = ParetoNBDFitter(penalizer_coef=0.01)
+        self.ggf = None
         self.fitted = False
 
     def fit(self, rfm_calib: pd.DataFrame) -> None:
-        """Fit Pareto/NBD on calibration RFM."""
+        """Fit Pareto/NBD frequency and the Gamma-Gamma spend sub-model."""
         self.fitter.fit(
             frequency=rfm_calib["frequency"].values,
             recency=rfm_calib["recency"].values,
             T=rfm_calib["T"].values,
         )
+        self.ggf = _fit_gamma_gamma(rfm_calib)
         self.fitted = True
         logger.info(f"Fitted {self.name()} on {len(rfm_calib)} customers")
 
@@ -180,9 +264,22 @@ class ParetoNBDModel(BenchmarkModel):
         result = np.nan_to_num(np.asarray(result, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
         return result.astype(np.float32)
 
-    def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> None:
-        """Pareto/NBD does not predict spend."""
-        return None
+    def predict_spend(self, rfm_calib: pd.DataFrame, holdout_weeks: int) -> np.ndarray | None:
+        """Total holdout spend via Gamma-Gamma E[spend/txn] x predicted transactions."""
+        if self.ggf is None:
+            return None
+        spend_per_txn = _gamma_gamma_spend_per_txn(self.ggf, rfm_calib)
+        return (spend_per_txn * self.predict_freq(rfm_calib, holdout_weeks)).astype(np.float32)
+
+    def predict_spend_per_week(
+        self, rfm_calib: pd.DataFrame, holdout_weeks: int
+    ) -> np.ndarray | None:
+        """Per-week spend: per-week expected transactions x E[spend/txn]."""
+        if self.ggf is None:
+            return None
+        spend_per_txn = _gamma_gamma_spend_per_txn(self.ggf, rfm_calib)
+        per_week_freq = self.predict_freq_per_week(rfm_calib, holdout_weeks)
+        return (per_week_freq * spend_per_txn[:, None]).astype(np.float32)
 
     def name(self) -> str:
         return "pareto_nbd"
@@ -297,6 +394,16 @@ class BGNBDGammaGammaModel(BenchmarkModel):
         # Total predicted spend = predicted_freq * E[spend per txn]
         pred_freq = self.predict_freq(rfm_calib, holdout_weeks)
         return (spend_per_txn * pred_freq).astype(np.float32)
+
+    def predict_spend_per_week(
+        self, rfm_calib: pd.DataFrame, holdout_weeks: int
+    ) -> np.ndarray | None:
+        """Per-week spend: per-week expected transactions x E[spend/txn]."""
+        if not self.has_gamma_gamma:
+            return None
+        spend_per_txn = _gamma_gamma_spend_per_txn(self.ggf, rfm_calib)
+        per_week_freq = self.predict_freq_per_week(rfm_calib, holdout_weeks)
+        return (per_week_freq * spend_per_txn[:, None]).astype(np.float32)
 
     def name(self) -> str:
         return "bgnbd_gg"

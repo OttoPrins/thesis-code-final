@@ -1,0 +1,151 @@
+[Kaggle] raw_dir  → /kaggle/working/input/tafeng-dataset
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/transformer_joint_tafeng_v6b.yaml
+Run: transformer_joint_tafeng_v6b_seed42_sample
+Device: cuda
+Loading dataset: tafeng ...
+[pipeline] freq_cap=4 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=5)
+  Train customers: 25029, Val: 2780, Inference: 27809
+[tafeng] Customers with 0 calibration transactions: 0 / 27809
+  top-bin decode: class_values[-1] = 4.473 (max_trans = 4)
+Model: transformer — 102,086 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:135: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+[Kendall] log_vars frozen for 10 warm-up epochs.
+Epoch   1/100 — train_loss: 1.6132  val_loss: 0.7195  freq: 1.1842  spend: 0.2549  w_freq: 0.500  w_spend: 0.500
+Epoch   2/100 — train_loss: 0.5068  val_loss: 0.4174  freq: 0.6469  spend: 0.1878  w_freq: 0.500  w_spend: 0.500
+Epoch   3/100 — train_loss: 0.4197  val_loss: 0.3838  freq: 0.6286  spend: 0.1390  w_freq: 0.500  w_spend: 0.500
+Epoch   4/100 — train_loss: 0.3874  val_loss: 0.3603  freq: 0.6137  spend: 0.1069  w_freq: 0.500  w_spend: 0.500
+Epoch   5/100 — train_loss: 0.3694  val_loss: 0.3503  freq: 0.6009  spend: 0.0998  w_freq: 0.500  w_spend: 0.500
+Epoch   6/100 — train_loss: 0.3596  val_loss: 0.3485  freq: 0.5937  spend: 0.1033  w_freq: 0.500  w_spend: 0.500
+Epoch   7/100 — train_loss: 0.3527  val_loss: 0.3406  freq: 0.5853  spend: 0.0960  w_freq: 0.500  w_spend: 0.500
+Epoch   8/100 — train_loss: 0.3494  val_loss: 0.3380  freq: 0.5830  spend: 0.0930  w_freq: 0.500  w_spend: 0.500
+Epoch   9/100 — train_loss: 0.3465  val_loss: 0.3361  freq: 0.5805  spend: 0.0918  w_freq: 0.500  w_spend: 0.500
+Epoch  10/100 — train_loss: 0.3454  val_loss: 0.3350  freq: 0.5786  spend: 0.0914  w_freq: 0.500  w_spend: 0.500
+[Kendall] log_vars unfrozen at epoch 11.
+[spend-norm] frozen at 0.1517 (absolute val-loss magnitude shifts accordingly; early stopping is relative so this is safe)
+Epoch  11/100 — train_loss: 0.6171  val_loss: 0.5750  freq: 0.5792  spend: 0.5876  w_freq: 0.506  w_spend: 0.505
+Epoch  12/100 — train_loss: 0.5965  val_loss: 0.5752  freq: 0.5790  spend: 0.6060  w_freq: 0.518  w_spend: 0.515
+Epoch  13/100 — train_loss: 0.5913  val_loss: 0.5512  freq: 0.5783  spend: 0.5748  w_freq: 0.529  w_spend: 0.525
+Epoch  14/100 — train_loss: 0.5858  val_loss: 0.5603  freq: 0.5772  spend: 0.6061  w_freq: 0.541  w_spend: 0.535
+Epoch  15/100 — train_loss: 0.5762  val_loss: 0.5362  freq: 0.5790  spend: 0.5705  w_freq: 0.550  w_spend: 0.542
+Epoch  16/100 — train_loss: 0.5634  val_loss: 0.5339  freq: 0.5762  spend: 0.5816  w_freq: 0.561  w_spend: 0.552
+Epoch  17/100 — train_loss: 0.5486  val_loss: 0.5145  freq: 0.5784  spend: 0.5567  w_freq: 0.573  w_spend: 0.562
+Epoch  18/100 — train_loss: 0.5439  val_loss: 0.5059  freq: 0.5768  spend: 0.5537  w_freq: 0.583  w_spend: 0.572
+Epoch  19/100 — train_loss: 0.5444  val_loss: 0.5039  freq: 0.5762  spend: 0.5604  w_freq: 0.594  w_spend: 0.581
+Epoch  20/100 — train_loss: 0.5293  val_loss: 0.5046  freq: 0.5765  spend: 0.5702  w_freq: 0.605  w_spend: 0.590
+Epoch  21/100 — train_loss: 0.5256  val_loss: 0.4926  freq: 0.5800  spend: 0.5538  w_freq: 0.615  w_spend: 0.598
+Epoch  22/100 — train_loss: 0.5126  val_loss: 0.5179  freq: 0.5771  spend: 0.6055  w_freq: 0.625  w_spend: 0.606
+Epoch  23/100 — train_loss: 0.5121  val_loss: 0.4896  freq: 0.5758  spend: 0.5680  w_freq: 0.635  w_spend: 0.615
+Epoch  24/100 — train_loss: 0.5040  val_loss: 0.4759  freq: 0.5769  spend: 0.5508  w_freq: 0.644  w_spend: 0.624
+Epoch  25/100 — train_loss: 0.5027  val_loss: 0.4698  freq: 0.5761  spend: 0.5479  w_freq: 0.654  w_spend: 0.632
+Epoch  26/100 — train_loss: 0.5001  val_loss: 0.4595  freq: 0.5762  spend: 0.5372  w_freq: 0.663  w_spend: 0.640
+Epoch  27/100 — train_loss: 0.4976  val_loss: 0.4615  freq: 0.5759  spend: 0.5456  w_freq: 0.672  w_spend: 0.648
+Epoch  28/100 — train_loss: 0.4859  val_loss: 0.4714  freq: 0.5758  spend: 0.5655  w_freq: 0.681  w_spend: 0.656
+Epoch  29/100 — train_loss: 0.4882  val_loss: 0.4636  freq: 0.5755  spend: 0.5572  w_freq: 0.689  w_spend: 0.663
+Epoch  30/100 — train_loss: 0.4797  val_loss: 0.4539  freq: 0.5760  spend: 0.5462  w_freq: 0.697  w_spend: 0.670
+Early stopping triggered at epoch 30.
+
+Checkpoint saved: /kaggle/working/results/checkpoints/transformer_joint_tafeng_v6b_seed42_sample.pt
+Validation-fitted softmax temperature: 0.7500
+
+Duan's smearing factor (val): 1.7296
+Validation aggregate calibration: freq_factor=1.7420, spend_factor=1.5809
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 30  temperature: 0.7500
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.2035
+  Mean actual freq/week:       0.2167
+  Over-prediction ratio:       0.939x
+  Customers predicted as zero total:  0.490
+  Customers actually zero total:      0.504
+  Non-zero rate (pred, avg > 0.05):  0.694
+  Non-zero rate (true):               0.175
+
+Metrics saved: /kaggle/working/results/tables/transformer_joint_tafeng_v6b_seed42_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/transformer_joint_tafeng_v6b_seed42_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 2.0952
+  freq_mae: 1.2337
+  freq_normalized_gini: 0.6309
+  freq_calibration_factor: 1.7420
+  freq_horizon_abs_bias_pct: 63.6196
+  bias_pct: 63.6196
+  freq_weekly_mae: 3833.3333
+  freq_weekly_total_true: 30127.0000
+  freq_weekly_total_pred: 49293.6665
+  freq_valendin_mape: 63.6196
+  freq_horizon_bias_pct: 63.6196
+  freq_weekly_mean_pct_mape: 65.4917
+  freq_weekly_mean_pct_bias_pct: 65.4917
+  freq_weekly_bias_pct: 63.6196
+  freq_weekly_mape: 63.6196
+  freq_mape: 63.6196
+  freq_mase: 1.0189
+  freq_mase_scale: 0.3519
+  smearing_factor: 1.7296
+  spend_calibration_factor: 1.5809
+  spend_mae_raw: 1444.8970
+  spend_rmse_raw: 3486.6580
+  spend_normalized_gini: 0.5530
+  spend_mae_log: 3.7632
+  spend_rmse_log: 4.7310
+  spend_r2_log: -0.7957
+  spend_bias_pct: 114.2620
+  spend_weekly_mae: 5373396.9052
+  spend_weekly_total_true: 23513493.8879
+  spend_weekly_total_pred: 50380478.4141
+  spend_valendin_mape: 114.2620
+  spend_horizon_abs_bias_pct: 114.2620
+  spend_horizon_bias_pct: 114.2620
+  spend_weekly_mean_pct_mape: 115.0351
+  spend_weekly_mean_pct_bias_pct: 115.0351
+  spend_weekly_bias_pct: 114.2620
+  spend_weekly_mape: 114.2620
+  spend_mase: 1.3262
+  spend_mase_scale: 289.2989
+  clv_mae: 1444.8970
+  clv_rmse: 3486.6580
+  clv_spearman: 0.4079
+  clv_decile_lift: 3.4657
+  clv_normalized_gini: 0.5530
+  clv_total_true: 23513494.0000
+  clv_total_pred: 50380480.0000
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.7500
+  smearing_source: rolling_origin_autoregressive
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 2897.0000
+  validation_freq_pred_total: 1663.0712
+  validation_spend_true_total: 3010621.0000
+  validation_spend_pred_total: 1904379.1250
+  validation_freq_calibration_factor: 1.7420
+  validation_spend_calibration_factor: 1.5809
+  validation_rolling_origin_count: 2
+  protocol_name: tafeng_configured_12x5
+  cohort_size: 27809
+  calibration_weeks: 12
+  holdout_weeks: 5
+  inference_mode: sample
+  n_scenarios: 30
+  final_manifest_version: 2026-05-29-v7-v8-extension3-sweep
+  final_manifest_run_name: transformer_joint_tafeng_v6b_seed42_sample
+  final_manifest_config: experiments/configs/transformer_joint_tafeng_v6b.yaml
+  final_manifest_config_hash: 01ad7300cadf
+  final_manifest_actual_config_hash: 175825af783b
+  final_manifest_seed: 42
+  final_manifest_epochs: 100
+  final_manifest_inference_mode: sample
+  final_manifest_n_scenarios: 30
+  run_valid: False
+  run_invalid_reason: absolute frequency bias 63.6% exceeds 15.0%; absolute spend bias 114.3% exceeds 50.0%
+  run_warning: large frequency bias (63.6%); large spend bias (114.3%)
+  epochs_completed: 30
+  max_epochs_configured: 100
+History saved: /kaggle/working/results/tables/transformer_joint_tafeng_v6b_seed42_sample_history.json

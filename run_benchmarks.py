@@ -78,6 +78,59 @@ def _calibration_weekly_counts_for_gppm(pipeline, config: dict):
     return calib
 
 
+def _holdout_weekly_matrices(pipeline, config: dict, customer_ids: np.ndarray):
+    """
+    Build true holdout weekly frequency and raw-spend matrices, shape (N, H).
+
+    Rows are aligned to `customer_ids` (the calibration RFM order); columns are
+    holdout weeks 0..H-1 (the splitter numbers holdout weeks from calibration_weeks,
+    so we subtract it). These give benchmarks the per-week ground truth needed to
+    score Valendin's weekly MAPE and per-customer CLV on the same basis as the LSTM.
+    """
+    import pandas as pd
+
+    dataset_cfg = config["dataset"]
+    pipeline._current_dataset_cfg = dataset_cfg
+    raw_dir = dataset_cfg.get("raw_dir", "data/raw")
+    clean_df = pipeline.clean(pipeline.load_raw(raw_dir))
+
+    cohort_end = dataset_cfg.get("cohort_end_date")
+    if cohort_end is not None:
+        cohort_end = pd.to_datetime(cohort_end)
+        first_purchase = clean_df.groupby("customer_id")["date"].min()
+        cohort_ids = first_purchase[first_purchase <= cohort_end].index
+        clean_df = clean_df[clean_df["customer_id"].isin(cohort_ids)].copy()
+
+    sample_n = dataset_cfg.get("sample_n")
+    if sample_n is not None:
+        all_custs = np.sort(clean_df["customer_id"].unique())
+        if len(all_custs) > sample_n:
+            rng_samp = np.random.RandomState(dataset_cfg.get("sample_seed", 0))
+            sampled = rng_samp.choice(all_custs, size=sample_n, replace=False)
+            clean_df = clean_df[clean_df["customer_id"].isin(sampled)].copy()
+
+    agg = WeeklyAggregator().fit_transform(
+        clean_df, origin_date=dataset_cfg.get("origin_date")
+    )
+    calib_weeks = int(dataset_cfg["calibration_weeks"])
+    holdout_weeks = int(dataset_cfg["holdout_weeks"])
+    _, holdout = TemporalSplitter(calib_weeks, holdout_weeks).split(agg)
+
+    cid_to_idx = {cid: i for i, cid in enumerate(customer_ids)}
+    N, H = len(customer_ids), holdout_weeks
+    freq_m = np.zeros((N, H), dtype=np.float32)
+    spend_m = np.zeros((N, H), dtype=np.float32)
+
+    holdout = holdout[holdout["customer_id"].isin(cid_to_idx)]
+    if not holdout.empty:
+        rows = holdout["customer_id"].map(cid_to_idx).values.astype(int)
+        cols = holdout["week"].values.astype(int) - calib_weeks
+        valid = (cols >= 0) & (cols < H)
+        freq_m[rows[valid], cols[valid]] = holdout["weekly_freq"].values.astype(np.float32)[valid]
+        spend_m[rows[valid], cols[valid]] = holdout["weekly_spend"].values.astype(np.float32)[valid]
+    return freq_m, spend_m
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fit and evaluate probabilistic benchmarks on CLV datasets."
@@ -156,26 +209,40 @@ def main():
             else:
                 model.fit(rfm_calib)
 
-            # Predict frequency
+            # Predict frequency (per-customer holdout total, for individual-level RMSE)
             pred_freq = model.predict_freq(rfm_calib, holdout_weeks)
             true_freq = rfm_holdout["actual_freq"].values
 
-            # Predict spend (optional; None for frequency-only models).
-            # Benchmarks return raw-currency totals directly, so we pass them to
-            # compute_all_metrics via the *_raw_total path (no scaler inversion).
-            pred_spend = model.predict_spend(rfm_calib, holdout_weeks)
-            true_spend = rfm_holdout["actual_spend"].values if pred_spend is not None else None
+            # True holdout weekly matrices (N, H), aligned to the calibration RFM order.
+            true_freq_per_week, true_spend_per_week_raw = _holdout_weekly_matrices(
+                pipeline, config, customer_ids
+            )
+            # Benchmark per-week expected transactions (cumulative differencing) so the
+            # SAME Valendin weekly MAPE is computed for benchmarks and the LSTM.
+            pred_freq_per_week = model.predict_freq_per_week(rfm_calib, holdout_weeks)
 
+            freq_week_kwargs = {
+                "y_freq_true_per_week": true_freq_per_week,
+                "y_freq_pred_per_week": pred_freq_per_week,
+            }
+
+            # Predict spend per week (raw currency). Frequency-only models return None.
+            # Passing per-week raw matrices (not just totals) unlocks per-customer CLV.
+            pred_spend_per_week = model.predict_spend_per_week(rfm_calib, holdout_weeks)
             spend_kwargs = {}
-            if true_spend is not None and pred_spend is not None:
-                spend_kwargs["y_spend_true_raw_total"] = true_spend.astype(np.float32)
-                spend_kwargs["y_spend_pred_raw_total"] = pred_spend.astype(np.float32)
+            if pred_spend_per_week is not None:
+                spend_kwargs["y_spend_true_per_week_raw"] = true_spend_per_week_raw
+                spend_kwargs["y_spend_pred_per_week_raw"] = pred_spend_per_week.astype(np.float32)
 
             # Compute metrics
             metrics = compute_all_metrics(
                 y_freq_true=true_freq.astype(np.float32),
                 y_freq_pred=pred_freq,
                 customer_ids=customer_ids,
+                weekly_discount_rate=config.get("evaluation", {}).get(
+                    "weekly_discount_rate", 0.0
+                ),
+                **freq_week_kwargs,
                 **spend_kwargs,
             )
             diagnostics = getattr(model, "diagnostics", None)

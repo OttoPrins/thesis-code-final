@@ -1,0 +1,231 @@
+[Kaggle] raw_dir  → /kaggle/working/input/dunnhumby
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/transformer_joint_dunnhumby_v7.yaml
+Run: transformer_joint_dunnhumby_v7_seed2024_sample
+Device: cuda
+Loading dataset: dunnhumby ...
+[pipeline] freq_cap=10 (auto q=0.99) → freq_bins=[0, 1, 2, 3]... (n_classes=11)
+  Train customers: 2249, Val: 249, Inference: 2498
+[dunnhumby] Customers with 0 calibration transactions: 0 / 2498
+  top-bin decode: class_values[-1] = 13.099 (max_trans = 10)
+Model: transformer — 102,569 parameters
+
+Training for up to 120 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:135: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+[Kendall] log_vars frozen for 5 warm-up epochs.
+Epoch   1/120 — train_loss: 2.6293  val_loss: 2.4113  freq: 4.5745  spend: 0.2481  w_freq: 0.500  w_spend: 0.500
+Epoch   2/120 — train_loss: 2.2797  val_loss: 1.8820  freq: 3.5604  spend: 0.2036  w_freq: 0.500  w_spend: 0.500
+Epoch   3/120 — train_loss: 1.7247  val_loss: 1.2634  freq: 2.3558  spend: 0.1710  w_freq: 0.500  w_spend: 0.500
+Epoch   4/120 — train_loss: 1.1864  val_loss: 0.8658  freq: 1.6001  spend: 0.1315  w_freq: 0.500  w_spend: 0.500
+Epoch   5/120 — train_loss: 0.8987  val_loss: 0.7728  freq: 1.4541  spend: 0.0914  w_freq: 0.500  w_spend: 0.500
+[Kendall] log_vars unfrozen at epoch 6.
+[spend-norm] frozen at 0.1944 (absolute val-loss magnitude shifts accordingly; early stopping is relative so this is safe)
+Epoch   6/120 — train_loss: 0.9938  val_loss: 0.8225  freq: 1.3711  spend: 0.2784  w_freq: 0.499  w_spend: 0.501
+Epoch   7/120 — train_loss: 0.8887  val_loss: 0.7548  freq: 1.3553  spend: 0.1641  w_freq: 0.497  w_spend: 0.503
+Epoch   8/120 — train_loss: 0.8231  val_loss: 0.6697  freq: 1.3470  spend: 0.0084  w_freq: 0.495  w_spend: 0.505
+Epoch   9/120 — train_loss: 0.7503  val_loss: 0.6062  freq: 1.3368  spend: -0.1014  w_freq: 0.494  w_spend: 0.507
+Epoch  10/120 — train_loss: 0.6970  val_loss: 0.5612  freq: 1.3299  spend: -0.1759  w_freq: 0.492  w_spend: 0.509
+Epoch  11/120 — train_loss: 0.6495  val_loss: 0.5229  freq: 1.3238  spend: -0.2362  w_freq: 0.490  w_spend: 0.512
+Epoch  12/120 — train_loss: 0.6227  val_loss: 0.5044  freq: 1.3125  spend: -0.2533  w_freq: 0.487  w_spend: 0.515
+Epoch  13/120 — train_loss: 0.6079  val_loss: 0.4860  freq: 1.3027  spend: -0.2731  w_freq: 0.485  w_spend: 0.518
+Epoch  14/120 — train_loss: 0.5895  val_loss: 0.4856  freq: 1.2962  spend: -0.2630  w_freq: 0.484  w_spend: 0.520
+Epoch  15/120 — train_loss: 0.5723  val_loss: 0.4618  freq: 1.2977  spend: -0.3050  w_freq: 0.482  w_spend: 0.522
+Epoch  16/120 — train_loss: 0.5630  val_loss: 0.4563  freq: 1.2912  spend: -0.3035  w_freq: 0.481  w_spend: 0.524
+Epoch  17/120 — train_loss: 0.5411  val_loss: 0.4371  freq: 1.2832  spend: -0.3254  w_freq: 0.479  w_spend: 0.526
+Epoch  18/120 — train_loss: 0.5324  val_loss: 0.4258  freq: 1.2824  spend: -0.3386  w_freq: 0.477  w_spend: 0.529
+Epoch  19/120 — train_loss: 0.5220  val_loss: 0.4153  freq: 1.2763  spend: -0.3461  w_freq: 0.476  w_spend: 0.532
+Epoch  20/120 — train_loss: 0.5048  val_loss: 0.4025  freq: 1.2741  spend: -0.3607  w_freq: 0.474  w_spend: 0.534
+Epoch  21/120 — train_loss: 0.4940  val_loss: 0.3940  freq: 1.2733  spend: -0.3678  w_freq: 0.472  w_spend: 0.537
+Epoch  22/120 — train_loss: 0.4864  val_loss: 0.3800  freq: 1.2680  spend: -0.3821  w_freq: 0.470  w_spend: 0.540
+Epoch  23/120 — train_loss: 0.4695  val_loss: 0.3739  freq: 1.2656  spend: -0.3853  w_freq: 0.469  w_spend: 0.543
+Epoch  24/120 — train_loss: 0.4633  val_loss: 0.3644  freq: 1.2625  spend: -0.3946  w_freq: 0.468  w_spend: 0.545
+Epoch  25/120 — train_loss: 0.4588  val_loss: 0.3645  freq: 1.2624  spend: -0.3888  w_freq: 0.466  w_spend: 0.547
+Epoch  26/120 — train_loss: 0.4519  val_loss: 0.3545  freq: 1.2604  spend: -0.3996  w_freq: 0.465  w_spend: 0.549
+Epoch  27/120 — train_loss: 0.4400  val_loss: 0.3430  freq: 1.2585  spend: -0.4122  w_freq: 0.464  w_spend: 0.551
+Epoch  28/120 — train_loss: 0.4336  val_loss: 0.3413  freq: 1.2564  spend: -0.4064  w_freq: 0.462  w_spend: 0.554
+Epoch  29/120 — train_loss: 0.4250  val_loss: 0.3324  freq: 1.2542  spend: -0.4139  w_freq: 0.461  w_spend: 0.557
+Epoch  30/120 — train_loss: 0.4197  val_loss: 0.3287  freq: 1.2543  spend: -0.4140  w_freq: 0.460  w_spend: 0.559
+Epoch  31/120 — train_loss: 0.4147  val_loss: 0.3230  freq: 1.2528  spend: -0.4165  w_freq: 0.458  w_spend: 0.562
+Epoch  32/120 — train_loss: 0.4089  val_loss: 0.3164  freq: 1.2517  spend: -0.4209  w_freq: 0.457  w_spend: 0.565
+Epoch  33/120 — train_loss: 0.4056  val_loss: 0.3167  freq: 1.2520  spend: -0.4139  w_freq: 0.456  w_spend: 0.567
+Epoch  34/120 — train_loss: 0.3949  val_loss: 0.3082  freq: 1.2510  spend: -0.4214  w_freq: 0.454  w_spend: 0.570
+Epoch  35/120 — train_loss: 0.3879  val_loss: 0.3014  freq: 1.2486  spend: -0.4252  w_freq: 0.453  w_spend: 0.573
+Epoch  36/120 — train_loss: 0.3866  val_loss: 0.2994  freq: 1.2483  spend: -0.4231  w_freq: 0.452  w_spend: 0.575
+Epoch  37/120 — train_loss: 0.3792  val_loss: 0.2950  freq: 1.2491  spend: -0.4267  w_freq: 0.451  w_spend: 0.577
+Epoch  38/120 — train_loss: 0.3766  val_loss: 0.2913  freq: 1.2477  spend: -0.4266  w_freq: 0.450  w_spend: 0.580
+Epoch  39/120 — train_loss: 0.3733  val_loss: 0.2868  freq: 1.2465  spend: -0.4284  w_freq: 0.449  w_spend: 0.582
+Epoch  40/120 — train_loss: 0.3657  val_loss: 0.2839  freq: 1.2468  spend: -0.4289  w_freq: 0.448  w_spend: 0.584
+Epoch  41/120 — train_loss: 0.3653  val_loss: 0.2843  freq: 1.2457  spend: -0.4227  w_freq: 0.447  w_spend: 0.586
+Epoch  42/120 — train_loss: 0.3557  val_loss: 0.2746  freq: 1.2456  spend: -0.4346  w_freq: 0.446  w_spend: 0.588
+Epoch  43/120 — train_loss: 0.3550  val_loss: 0.2730  freq: 1.2442  spend: -0.4315  w_freq: 0.445  w_spend: 0.590
+Epoch  44/120 — train_loss: 0.3437  val_loss: 0.2652  freq: 1.2430  spend: -0.4382  w_freq: 0.444  w_spend: 0.592
+Epoch  45/120 — train_loss: 0.3532  val_loss: 0.2624  freq: 1.2434  spend: -0.4387  w_freq: 0.443  w_spend: 0.595
+Epoch  46/120 — train_loss: 0.3429  val_loss: 0.2697  freq: 1.2426  spend: -0.4214  w_freq: 0.442  w_spend: 0.597
+Epoch  47/120 — train_loss: 0.3440  val_loss: 0.2641  freq: 1.2444  spend: -0.4283  w_freq: 0.442  w_spend: 0.599
+Epoch  48/120 — train_loss: 0.3417  val_loss: 0.2580  freq: 1.2444  spend: -0.4344  w_freq: 0.441  w_spend: 0.600
+Epoch  49/120 — train_loss: 0.3382  val_loss: 0.2581  freq: 1.2417  spend: -0.4283  w_freq: 0.440  w_spend: 0.602
+Epoch  50/120 — train_loss: 0.3332  val_loss: 0.2563  freq: 1.2437  spend: -0.4289  w_freq: 0.440  w_spend: 0.604
+Epoch  51/120 — train_loss: 0.3250  val_loss: 0.2500  freq: 1.2425  spend: -0.4351  w_freq: 0.439  w_spend: 0.606
+Epoch  52/120 — train_loss: 0.3275  val_loss: 0.2504  freq: 1.2426  spend: -0.4305  w_freq: 0.438  w_spend: 0.607
+Epoch  53/120 — train_loss: 0.3202  val_loss: 0.2484  freq: 1.2413  spend: -0.4289  w_freq: 0.438  w_spend: 0.609
+Epoch  54/120 — train_loss: 0.3198  val_loss: 0.2413  freq: 1.2413  spend: -0.4364  w_freq: 0.437  w_spend: 0.611
+Epoch  55/120 — train_loss: 0.3149  val_loss: 0.2365  freq: 1.2407  spend: -0.4397  w_freq: 0.436  w_spend: 0.613
+Epoch  56/120 — train_loss: 0.3173  val_loss: 0.2311  freq: 1.2401  spend: -0.4442  w_freq: 0.436  w_spend: 0.615
+Epoch  57/120 — train_loss: 0.3073  val_loss: 0.2361  freq: 1.2406  spend: -0.4326  w_freq: 0.435  w_spend: 0.617
+Epoch  58/120 — train_loss: 0.3091  val_loss: 0.2328  freq: 1.2410  spend: -0.4345  w_freq: 0.434  w_spend: 0.619
+Epoch  59/120 — train_loss: 0.3102  val_loss: 0.2276  freq: 1.2408  spend: -0.4393  w_freq: 0.434  w_spend: 0.620
+Epoch  60/120 — train_loss: 0.3079  val_loss: 0.2216  freq: 1.2386  spend: -0.4442  w_freq: 0.433  w_spend: 0.622
+Epoch  61/120 — train_loss: 0.2972  val_loss: 0.2227  freq: 1.2393  spend: -0.4395  w_freq: 0.432  w_spend: 0.624
+Epoch  62/120 — train_loss: 0.3011  val_loss: 0.2220  freq: 1.2386  spend: -0.4369  w_freq: 0.432  w_spend: 0.625
+Epoch  63/120 — train_loss: 0.2965  val_loss: 0.2172  freq: 1.2392  spend: -0.4419  w_freq: 0.431  w_spend: 0.627
+Epoch  64/120 — train_loss: 0.2938  val_loss: 0.2173  freq: 1.2385  spend: -0.4381  w_freq: 0.431  w_spend: 0.628
+Epoch  65/120 — train_loss: 0.2918  val_loss: 0.2149  freq: 1.2390  spend: -0.4392  w_freq: 0.430  w_spend: 0.630
+Epoch  66/120 — train_loss: 0.2898  val_loss: 0.2168  freq: 1.2404  spend: -0.4344  w_freq: 0.430  w_spend: 0.631
+Epoch  67/120 — train_loss: 0.2934  val_loss: 0.2190  freq: 1.2397  spend: -0.4283  w_freq: 0.429  w_spend: 0.633
+Epoch  68/120 — train_loss: 0.2900  val_loss: 0.2145  freq: 1.2385  spend: -0.4327  w_freq: 0.429  w_spend: 0.634
+Epoch  69/120 — train_loss: 0.2825  val_loss: 0.2110  freq: 1.2385  spend: -0.4360  w_freq: 0.429  w_spend: 0.635
+Epoch  70/120 — train_loss: 0.2820  val_loss: 0.2060  freq: 1.2387  spend: -0.4416  w_freq: 0.428  w_spend: 0.636
+Epoch  71/120 — train_loss: 0.2800  val_loss: 0.2080  freq: 1.2377  spend: -0.4355  w_freq: 0.428  w_spend: 0.637
+Epoch  72/120 — train_loss: 0.2885  val_loss: 0.2056  freq: 1.2384  spend: -0.4376  w_freq: 0.428  w_spend: 0.638
+Epoch  73/120 — train_loss: 0.2796  val_loss: 0.2035  freq: 1.2381  spend: -0.4386  w_freq: 0.427  w_spend: 0.639
+Epoch  74/120 — train_loss: 0.2775  val_loss: 0.2049  freq: 1.2387  spend: -0.4346  w_freq: 0.427  w_spend: 0.640
+Epoch  75/120 — train_loss: 0.2779  val_loss: 0.2000  freq: 1.2369  spend: -0.4390  w_freq: 0.427  w_spend: 0.642
+Epoch  76/120 — train_loss: 0.2716  val_loss: 0.2000  freq: 1.2394  spend: -0.4386  w_freq: 0.426  w_spend: 0.643
+Epoch  77/120 — train_loss: 0.2711  val_loss: 0.2023  freq: 1.2376  spend: -0.4318  w_freq: 0.426  w_spend: 0.644
+Epoch  78/120 — train_loss: 0.2688  val_loss: 0.2000  freq: 1.2371  spend: -0.4329  w_freq: 0.426  w_spend: 0.645
+Epoch  79/120 — train_loss: 0.2725  val_loss: 0.1945  freq: 1.2367  spend: -0.4394  w_freq: 0.425  w_spend: 0.646
+Epoch  80/120 — train_loss: 0.2675  val_loss: 0.1989  freq: 1.2377  spend: -0.4315  w_freq: 0.425  w_spend: 0.647
+Epoch  81/120 — train_loss: 0.2723  val_loss: 0.1919  freq: 1.2366  spend: -0.4397  w_freq: 0.425  w_spend: 0.648
+Epoch  82/120 — train_loss: 0.2673  val_loss: 0.1946  freq: 1.2369  spend: -0.4343  w_freq: 0.424  w_spend: 0.649
+Epoch  83/120 — train_loss: 0.2676  val_loss: 0.1927  freq: 1.2374  spend: -0.4360  w_freq: 0.424  w_spend: 0.649
+Epoch  84/120 — train_loss: 0.2652  val_loss: 0.1923  freq: 1.2362  spend: -0.4345  w_freq: 0.424  w_spend: 0.650
+Epoch  85/120 — train_loss: 0.2653  val_loss: 0.1912  freq: 1.2374  spend: -0.4358  w_freq: 0.424  w_spend: 0.651
+Epoch  86/120 — train_loss: 0.2673  val_loss: 0.1892  freq: 1.2365  spend: -0.4371  w_freq: 0.424  w_spend: 0.651
+Epoch  87/120 — train_loss: 0.2594  val_loss: 0.1903  freq: 1.2370  spend: -0.4345  w_freq: 0.423  w_spend: 0.652
+Epoch  88/120 — train_loss: 0.2613  val_loss: 0.1904  freq: 1.2374  spend: -0.4334  w_freq: 0.423  w_spend: 0.653
+Epoch  89/120 — train_loss: 0.2617  val_loss: 0.1872  freq: 1.2364  spend: -0.4366  w_freq: 0.423  w_spend: 0.653
+Epoch  90/120 — train_loss: 0.2565  val_loss: 0.1901  freq: 1.2366  spend: -0.4311  w_freq: 0.423  w_spend: 0.654
+Epoch  91/120 — train_loss: 0.2623  val_loss: 0.1881  freq: 1.2374  spend: -0.4338  w_freq: 0.423  w_spend: 0.655
+Epoch  92/120 — train_loss: 0.2613  val_loss: 0.1867  freq: 1.2374  spend: -0.4349  w_freq: 0.422  w_spend: 0.655
+Epoch  93/120 — train_loss: 0.2533  val_loss: 0.1872  freq: 1.2366  spend: -0.4328  w_freq: 0.422  w_spend: 0.656
+Epoch  94/120 — train_loss: 0.2581  val_loss: 0.1858  freq: 1.2359  spend: -0.4339  w_freq: 0.422  w_spend: 0.656
+Epoch  95/120 — train_loss: 0.2630  val_loss: 0.1879  freq: 1.2378  spend: -0.4311  w_freq: 0.422  w_spend: 0.656
+Epoch  96/120 — train_loss: 0.2599  val_loss: 0.1856  freq: 1.2364  spend: -0.4331  w_freq: 0.422  w_spend: 0.657
+Epoch  97/120 — train_loss: 0.2554  val_loss: 0.1850  freq: 1.2367  spend: -0.4336  w_freq: 0.422  w_spend: 0.657
+Epoch  98/120 — train_loss: 0.2614  val_loss: 0.1861  freq: 1.2369  spend: -0.4314  w_freq: 0.422  w_spend: 0.657
+Epoch  99/120 — train_loss: 0.2631  val_loss: 0.1855  freq: 1.2366  spend: -0.4316  w_freq: 0.422  w_spend: 0.658
+Epoch 100/120 — train_loss: 0.2570  val_loss: 0.1864  freq: 1.2369  spend: -0.4300  w_freq: 0.422  w_spend: 0.658
+Epoch 101/120 — train_loss: 0.2603  val_loss: 0.1874  freq: 1.2377  spend: -0.4285  w_freq: 0.421  w_spend: 0.658
+Epoch 102/120 — train_loss: 0.2558  val_loss: 0.1856  freq: 1.2370  spend: -0.4304  w_freq: 0.421  w_spend: 0.658
+Epoch 103/120 — train_loss: 0.2580  val_loss: 0.1850  freq: 1.2367  spend: -0.4308  w_freq: 0.421  w_spend: 0.659
+Epoch 104/120 — train_loss: 0.2619  val_loss: 0.1868  freq: 1.2370  spend: -0.4279  w_freq: 0.421  w_spend: 0.659
+Epoch 105/120 — train_loss: 0.2551  val_loss: 0.1858  freq: 1.2367  spend: -0.4290  w_freq: 0.421  w_spend: 0.659
+Epoch 106/120 — train_loss: 0.2582  val_loss: 0.1845  freq: 1.2371  spend: -0.4309  w_freq: 0.421  w_spend: 0.659
+Epoch 107/120 — train_loss: 0.2629  val_loss: 0.1857  freq: 1.2371  spend: -0.4289  w_freq: 0.421  w_spend: 0.659
+Epoch 108/120 — train_loss: 0.2632  val_loss: 0.1873  freq: 1.2376  spend: -0.4266  w_freq: 0.421  w_spend: 0.659
+Epoch 109/120 — train_loss: 0.2552  val_loss: 0.1871  freq: 1.2375  spend: -0.4267  w_freq: 0.421  w_spend: 0.660
+Epoch 110/120 — train_loss: 0.2612  val_loss: 0.1856  freq: 1.2372  spend: -0.4285  w_freq: 0.421  w_spend: 0.660
+Epoch 111/120 — train_loss: 0.2636  val_loss: 0.1854  freq: 1.2371  spend: -0.4288  w_freq: 0.421  w_spend: 0.660
+Epoch 112/120 — train_loss: 0.2612  val_loss: 0.1859  freq: 1.2372  spend: -0.4280  w_freq: 0.421  w_spend: 0.660
+Epoch 113/120 — train_loss: 0.2605  val_loss: 0.1862  freq: 1.2374  spend: -0.4276  w_freq: 0.421  w_spend: 0.660
+Epoch 114/120 — train_loss: 0.2644  val_loss: 0.1868  freq: 1.2376  spend: -0.4268  w_freq: 0.421  w_spend: 0.660
+Epoch 115/120 — train_loss: 0.2621  val_loss: 0.1869  freq: 1.2377  spend: -0.4266  w_freq: 0.421  w_spend: 0.660
+Epoch 116/120 — train_loss: 0.2651  val_loss: 0.1870  freq: 1.2377  spend: -0.4265  w_freq: 0.421  w_spend: 0.660
+Epoch 117/120 — train_loss: 0.2648  val_loss: 0.1870  freq: 1.2377  spend: -0.4263  w_freq: 0.421  w_spend: 0.660
+Epoch 118/120 — train_loss: 0.2606  val_loss: 0.1871  freq: 1.2377  spend: -0.4263  w_freq: 0.421  w_spend: 0.660
+Epoch 119/120 — train_loss: 0.2687  val_loss: 0.1871  freq: 1.2377  spend: -0.4263  w_freq: 0.421  w_spend: 0.660
+Epoch 120/120 — train_loss: 0.2625  val_loss: 0.1871  freq: 1.2377  spend: -0.4263  w_freq: 0.421  w_spend: 0.660
+
+Checkpoint saved: /kaggle/working/results/checkpoints/transformer_joint_dunnhumby_v7_seed2024_sample.pt
+Validation-fitted softmax temperature: 0.7500
+
+Duan's smearing factor (val): 1.4234
+Validation aggregate calibration: freq_factor=1.1952, spend_factor=0.9635
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 30  temperature: 0.7500
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    1.1669
+  Mean actual freq/week:       1.1882
+  Over-prediction ratio:       0.982x
+  Customers predicted as zero total:  0.131
+  Customers actually zero total:      0.188
+  Non-zero rate (pred, avg > 0.05):  0.906
+  Non-zero rate (true):               0.542
+
+Metrics saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v7_seed2024_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v7_seed2024_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 4.5079
+  freq_mae: 2.4807
+  freq_normalized_gini: 0.8418
+  freq_calibration_factor: 1.1952
+  freq_horizon_abs_bias_pct: 17.3815
+  bias_pct: 17.3815
+  freq_weekly_mae: 515.8841
+  freq_weekly_total_true: 11872.0000
+  freq_weekly_total_pred: 13935.5366
+  freq_valendin_mape: 17.3815
+  freq_horizon_bias_pct: 17.3815
+  freq_weekly_mean_pct_mape: 17.4123
+  freq_weekly_mean_pct_bias_pct: 17.4123
+  freq_weekly_bias_pct: 17.3815
+  freq_weekly_mape: 17.3815
+  freq_mape: 17.3815
+  freq_mase: 1.1009
+  freq_mase_scale: 0.8235
+  smearing_factor: 1.4234
+  spend_calibration_factor: 0.9635
+  spend_mae_raw: 66.6654
+  spend_rmse_raw: 106.7301
+  spend_normalized_gini: 0.8246
+  spend_mae_log: 0.9846
+  spend_rmse_log: 1.4749
+  spend_r2_log: 0.5059
+  spend_bias_pct: 4.3887
+  spend_weekly_mae: 5278.9524
+  spend_weekly_total_true: 347125.7605
+  spend_weekly_total_pred: 362359.9022
+  spend_valendin_mape: 6.0830
+  spend_horizon_abs_bias_pct: 4.3887
+  spend_horizon_bias_pct: 4.3887
+  spend_weekly_mean_pct_mape: 6.1584
+  spend_weekly_mean_pct_bias_pct: 4.5688
+  spend_weekly_bias_pct: 4.3887
+  spend_weekly_mape: 6.0830
+  spend_mase: 0.9992
+  spend_mase_scale: 27.5152
+  clv_mae: 66.4871
+  clv_rmse: 106.4424
+  clv_spearman: 0.7865
+  clv_decile_lift: 3.3890
+  clv_normalized_gini: 0.8246
+  clv_total_true: 346205.2188
+  clv_total_pred: 361376.5625
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.7500
+  smearing_source: rolling_origin_autoregressive
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 2215.0000
+  validation_freq_pred_total: 1853.2543
+  validation_spend_true_total: 63355.4414
+  validation_spend_pred_total: 65758.7812
+  validation_freq_calibration_factor: 1.1952
+  validation_spend_calibration_factor: 0.9635
+  validation_rolling_origin_count: 2
+  protocol_name: dunnhumby_configured_80x4
+  cohort_size: 2498
+  calibration_weeks: 80
+  holdout_weeks: 4
+  inference_mode: sample
+  n_scenarios: 30
+  run_valid: False
+  run_invalid_reason: absolute frequency bias 17.4% exceeds 15.0%
+  run_warning: large frequency bias (17.4%)
+  epochs_completed: 120
+  max_epochs_configured: 120
+History saved: /kaggle/working/results/tables/transformer_joint_dunnhumby_v7_seed2024_sample_history.json

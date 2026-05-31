@@ -1009,14 +1009,17 @@ def export_latex_table_aggregated(
                 brow = benchmarks.get((model, ds))
                 if brow is None:
                     continue
+                # Spend/CLV now available for BTYD models paired with Gamma-Gamma
+                # (Pareto/NBD x GG and BG/NBD x GG). Frequency-only models (Pareto/GGG)
+                # still report "—" for spend/CLV.
                 rows.append({
                     "Model": MODEL_LABELS_TEX.get(model, model),
                     "Dataset": DATASET_LABELS_TEX.get(ds, ds),
                     "Seeds": "—",
                     "Bias \\%": _fmt(brow.get("bias_pct"), None, digits=1, pct=True),
                     "Freq MAPE \\%": _fmt(brow.get("freq_mape"), None, digits=1, pct=True),
-                    "Spend $R^2$": "—",
-                    "CLV $\\rho$": "—",
+                    "Spend $R^2$": _fmt2(brow.get("spend_r2_log"), None, digits=2),
+                    "CLV $\\rho$": _fmt2(brow.get("clv_spearman"), None, digits=2),
                     "Tier": "A",
                 })
                 continue

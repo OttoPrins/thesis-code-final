@@ -528,6 +528,49 @@ def _run_final_finetune(
     return history
 
 
+def _resolve_loader_batch_size(
+    setting,
+    *,
+    default: int,
+    dataset_len: int,
+    name: str,
+) -> int:
+    """Resolve integer batch sizes plus the replication-only 'full' shorthand."""
+    dataset_len = max(0, int(dataset_len))
+    if setting is None:
+        value = int(default)
+    elif isinstance(setting, str) and setting.lower() == "full":
+        value = max(1, dataset_len)
+    else:
+        value = int(setting)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive or 'full', got {setting!r}")
+    return max(1, min(value, max(1, dataset_len)))
+
+
+def _build_customer_dataloader(
+    dataset,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    pin_memory: bool,
+    drop_last: bool = False,
+    collate=collate_fn,
+) -> DataLoader:
+    """Centralize DataLoader construction so replication parity switches are testable."""
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+        drop_last=drop_last,
+    )
+
+
 def _model_label(config: dict) -> str:
     model_cfg = config.get("model", {})
     model_type = model_cfg.get("type", "unknown")
@@ -881,23 +924,56 @@ def run_experiment(
         f"class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})"
     )
 
-    batch_size = training_cfg["batch_size"]
+    batch_size = _resolve_loader_batch_size(
+        training_cfg["batch_size"],
+        default=training_cfg["batch_size"],
+        dataset_len=len(train_ds),
+        name="training.batch_size",
+    )
+    val_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("val_batch_size"),
+        default=batch_size,
+        dataset_len=len(val_ds),
+        name="training.val_batch_size",
+    )
+    inference_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("inference_batch_size"),
+        default=batch_size,
+        dataset_len=len(inference_ds),
+        name="training.inference_batch_size",
+    )
+    drop_last_train = bool(training_cfg.get("drop_last_train", False))
     # Cap at 2 workers per subprocess: with 2 parallel GPU runs (run_seeds.py),
     # 2×2=4 workers stays within Kaggle's 4-core allocation without contention.
     _n_workers = int(training_cfg.get("num_workers", min(2, os.cpu_count() or 1)))
     _n_workers = max(0, _n_workers)
     _pin = device.type == "cuda"
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn,
-        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
+    train_loader = _build_customer_dataloader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=_n_workers,
+        pin_memory=_pin,
+        drop_last=drop_last_train,
     )
-    val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
+    val_loader = _build_customer_dataloader(
+        val_ds,
+        batch_size=val_batch_size,
+        shuffle=False,
+        num_workers=_n_workers,
+        pin_memory=_pin,
     )
-    inference_loader = DataLoader(
-        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=_n_workers, pin_memory=_pin, persistent_workers=(_n_workers > 0),
+    inference_loader = _build_customer_dataloader(
+        inference_ds,
+        batch_size=inference_batch_size,
+        shuffle=False,
+        num_workers=_n_workers,
+        pin_memory=_pin,
+    )
+    print(
+        "  loader batch sizes: "
+        f"train={batch_size} (drop_last={drop_last_train}), "
+        f"val={val_batch_size}, inference={inference_batch_size}"
     )
 
     # Model

@@ -114,11 +114,36 @@ def test_cdnow_valendin_master_config_parses_expected_protocol():
     assert cfg["model"]["neutralize_unseen_week_embeddings"] is False
     assert cfg["training"]["optimizer"] == "adam"
     assert cfg["training"]["eps"] == pytest.approx(1e-7)
+    assert cfg["training"]["batch_size"] == 32
+    assert cfg["training"]["val_batch_size"] == "full"
+    assert cfg["training"]["drop_last_train"] is True
+    assert cfg["training"]["amp_enabled"] is False
+    assert cfg["training"]["repair_on_failure"] is False
+    assert cfg["training"]["max_grad_norm"] == pytest.approx(0.0)
     assert cfg["training"]["scheduler"]["type"] == "none"
     assert cfg["training"]["scheduled_sampling"]["enabled"] is False
     assert cfg["inference"]["mode"] == "sample"
     assert cfg["inference"]["n_scenarios"] >= 30
     assert cfg["inference"]["decode_top_bin"] is False
+    assert cfg["calibration"]["temperature_scaling"] is False
+    assert cfg["calibration"]["aggregate_scaling"] is False
+
+
+def test_cdnow_paper_finetune_config_preserves_strict_base_protocol():
+    cfg_path = Path("experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text())
+
+    assert cfg["dataset"]["protocol_name"] == "valendin_cdnow_master_39x39"
+    assert cfg["training"]["batch_size"] == 32
+    assert cfg["training"]["val_batch_size"] == "full"
+    assert cfg["training"]["drop_last_train"] is True
+    assert cfg["training"]["amp_enabled"] is False
+    assert cfg["training"]["repair_on_failure"] is False
+    assert cfg["training"]["max_grad_norm"] == pytest.approx(0.0)
+    assert cfg["training"]["final_finetune"]["enabled"] is True
+    assert cfg["training"]["final_finetune"]["epochs"] == 5
+    assert cfg["training"]["final_finetune"]["lr"] == pytest.approx(1e-4)
+    assert cfg["training"]["final_finetune"]["batch_size"] == 1024
     assert cfg["calibration"]["temperature_scaling"] is False
     assert cfg["calibration"]["aggregate_scaling"] is False
 

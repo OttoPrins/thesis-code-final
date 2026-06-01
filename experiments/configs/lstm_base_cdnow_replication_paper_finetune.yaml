@@ -36,11 +36,16 @@ model:
 training:
   epochs: 150
   max_epochs: 150
-  batch_size: 256
+  batch_size: 32
+  val_batch_size: full
+  drop_last_train: true
   lr: 0.001
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0
+  max_grad_norm: 0.0
+  amp_enabled: false
+  repair_on_failure: false
   early_stopping_patience: 5
   restore_best_checkpoint: true
   scheduler:
@@ -50,8 +55,8 @@ training:
   final_finetune:
     enabled: true
     epochs: 5
-    lr_multiplier: 0.1
-    batch_size_multiplier: 4
+    lr: 1.0e-4
+    batch_size: 1024
   seed: 42
 
 loss:

@@ -8,7 +8,7 @@
 #     NOT clipped at [0,1,2,3]
 #   - Single LSTM(128) -> Dense(128) -> softmax, week + transaction embeddings only
 #   - Keras-style initialization, linear Dense(128), no dropout
-#   - Plain Adam(eps=1e-7), sparse categorical cross-entropy, seq2seq
+#   - Plain FP32 Adam(eps=1e-7), sparse categorical cross-entropy, seq2seq
 #   - EarlyStopping(restore_best, patience=5)
 #   - Autoregressive multinomial sampling at temperature 1.0, ~30 scenarios averaged
 #
@@ -51,11 +51,16 @@ model:
 training:
   epochs: 150
   max_epochs: 150
-  batch_size: 256
+  batch_size: 32
+  val_batch_size: full
+  drop_last_train: true
   lr: 0.001
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0
+  max_grad_norm: 0.0
+  amp_enabled: false
+  repair_on_failure: false
   early_stopping_patience: 5
   restore_best_checkpoint: true
   scheduler:

@@ -54,9 +54,11 @@ from src.utils.final_manifest import (
 from train import (
     _add_result_validity_checks,
     _add_run_metadata,
+    _build_customer_dataloader,
     _build_repair_config,
     _compute_val_smearing,
     _failed_training_metrics,
+    _resolve_loader_batch_size,
 )
 
 
@@ -773,6 +775,44 @@ def test_lstm_replication_mode_is_linear_and_keras_initialized():
     assert torch.count_nonzero(model.lstm.bias_ih_l0[:hidden]).item() == 0
     assert torch.count_nonzero(model.lstm.bias_ih_l0[2 * hidden:]).item() == 0
     assert torch.count_nonzero(model.lstm.bias_hh_l0).item() == 0
+
+
+def test_replication_loader_parity_switches_are_explicit():
+    assert _resolve_loader_batch_size(
+        "full",
+        default=32,
+        dataset_len=2357,
+        name="training.val_batch_size",
+    ) == 2357
+    assert _resolve_loader_batch_size(
+        None,
+        default=32,
+        dataset_len=2357,
+        name="training.inference_batch_size",
+    ) == 32
+
+    dataset = list(range(10))
+    keep_partial = _build_customer_dataloader(
+        dataset,
+        batch_size=4,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False,
+        drop_last=False,
+        collate=lambda rows: rows,
+    )
+    drop_partial = _build_customer_dataloader(
+        dataset,
+        batch_size=4,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False,
+        drop_last=True,
+        collate=lambda rows: rows,
+    )
+
+    assert list(keep_partial) == [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]
+    assert list(drop_partial) == [[0, 1, 2, 3], [4, 5, 6, 7]]
 
 
 def test_scheduled_sampling_forward_equals_teacher_forcing_at_zero_prob():

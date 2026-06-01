@@ -777,6 +777,38 @@ def test_lstm_replication_mode_is_linear_and_keras_initialized():
     assert torch.count_nonzero(model.lstm.bias_hh_l0).item() == 0
 
 
+def test_lstm_keras_cardinality_embedding_and_whole_matrix_init():
+    torch.manual_seed(0)
+    model = LSTMModel(
+        max_week=51,
+        max_trans=24,
+        memory_units=8,
+        dense_units=8,
+        dropout=0.0,
+        dense_activation="linear",
+        keras_initialization=True,
+        embedding_size_mode="keras_cardinality",
+        keras_lstm_init_mode="whole_matrix",
+        freeze_lstm_bias_hh=True,
+    )
+
+    assert model.embed_week.embedding_dim == 8
+    assert model.embed_trans.embedding_dim == 6
+
+    hidden = model.lstm.hidden_size
+    assert torch.allclose(
+        model.lstm.bias_ih_l0[hidden:2 * hidden],
+        torch.ones(hidden),
+    )
+    assert torch.count_nonzero(model.lstm.bias_hh_l0).item() == 0
+    assert model.lstm.bias_hh_l0.requires_grad is False
+
+    week = torch.zeros((2, 3), dtype=torch.long)
+    trans = torch.zeros((2, 3), dtype=torch.long)
+    logits, _ = model(week, trans)
+    assert logits.shape == (2, 3, 25)
+
+
 def test_replication_loader_parity_switches_are_explicit():
     assert _resolve_loader_batch_size(
         "full",
@@ -790,6 +822,13 @@ def test_replication_loader_parity_switches_are_explicit():
         dataset_len=2357,
         name="training.inference_batch_size",
     ) == 32
+    assert _resolve_loader_batch_size(
+        "val",
+        default=32,
+        dataset_len=23570,
+        name="training.inference_batch_size",
+        reference_sizes={"val": 2357},
+    ) == 2357
 
     dataset = list(range(10))
     keep_partial = _build_customer_dataloader(

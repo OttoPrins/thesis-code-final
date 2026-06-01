@@ -36,9 +36,19 @@ import math
 from src.models.heads import make_spend_head
 
 
-def embedding_size(max_val: int) -> int:
-    """Heuristic from Valendin et al. repo: int(max_val ** 0.5) + 1."""
-    return int(math.sqrt(max_val)) + 1
+def embedding_size(max_val: int, *, mode: str = "max_index") -> int:
+    """Valendin embedding-size heuristic, with explicit max-index/cardinality modes."""
+    mode = str(mode).lower()
+    if mode == "max_index":
+        basis = int(max_val)
+    elif mode == "keras_cardinality":
+        basis = int(max_val) + 1
+    else:
+        raise ValueError(
+            "embedding_size mode must be 'max_index' or 'keras_cardinality', "
+            f"got {mode!r}"
+        )
+    return int(math.sqrt(basis)) + 1
 
 
 class LSTMModel(nn.Module):
@@ -71,6 +81,14 @@ class LSTMModel(nn.Module):
                           Valendin/Keras replication path; default keeps existing runs.
         keras_initialization: If true, initialize embeddings, LSTM, Dense and heads
                               to mirror Keras defaults used by the banking demo.
+        embedding_size_mode: Whether to apply the embedding heuristic to the max
+                             observed index ("max_index") or vocabulary cardinality
+                             ("keras_cardinality"). The latter matches Keras input_dim.
+        keras_lstm_init_mode: "gatewise" keeps the previous PyTorch approximation;
+                              "whole_matrix" matches Keras initializers applied to
+                              concatenated LSTM kernels.
+        freeze_lstm_bias_hh: If true, zero and freeze PyTorch's redundant recurrent
+                             LSTM bias so the layer behaves like Keras' single bias.
     """
 
     def __init__(
@@ -89,6 +107,9 @@ class LSTMModel(nn.Module):
         regression_head_hidden: int | None = None,
         dense_activation: str = "relu",
         keras_initialization: bool = False,
+        embedding_size_mode: str = "max_index",
+        keras_lstm_init_mode: str = "gatewise",
+        freeze_lstm_bias_hh: bool = False,
     ):
         super().__init__()
         self.joint = joint
@@ -105,11 +126,24 @@ class LSTMModel(nn.Module):
                 "dense_activation must be one of 'relu', 'linear', 'identity', or 'none'"
             )
         self.dense_activation_name = dense_activation
+        embedding_size_mode = str(embedding_size_mode).lower()
+        if embedding_size_mode not in {"max_index", "keras_cardinality"}:
+            raise ValueError(
+                "embedding_size_mode must be 'max_index' or 'keras_cardinality'"
+            )
+        keras_lstm_init_mode = str(keras_lstm_init_mode).lower()
+        if keras_lstm_init_mode not in {"gatewise", "whole_matrix"}:
+            raise ValueError(
+                "keras_lstm_init_mode must be 'gatewise' or 'whole_matrix'"
+            )
+        self.embedding_size_mode = embedding_size_mode
+        self.keras_lstm_init_mode = keras_lstm_init_mode
+        self.freeze_lstm_bias_hh = bool(freeze_lstm_bias_hh)
         n_classes = max_trans + 1
 
         # Embedding layers (categorical inputs — not raw floats)
-        week_emb_dim = embedding_size(max_week)     # ≈ 8 for max_week=52
-        trans_emb_dim = embedding_size(max_trans)
+        week_emb_dim = embedding_size(max_week, mode=embedding_size_mode)
+        trans_emb_dim = embedding_size(max_trans, mode=embedding_size_mode)
 
         self.embed_week = nn.Embedding(max_week + 1, week_emb_dim)
         self.embed_trans = nn.Embedding(max_trans + 1, trans_emb_dim)
@@ -169,17 +203,20 @@ class LSTMModel(nn.Module):
             )
 
         if keras_initialization:
-            self._reset_parameters_keras()
+            self._reset_parameters_keras(lstm_init_mode=keras_lstm_init_mode)
+        if self.freeze_lstm_bias_hh:
+            self._freeze_recurrent_lstm_bias()
 
-    def _reset_parameters_keras(self) -> None:
+    def _reset_parameters_keras(self, *, lstm_init_mode: str = "gatewise") -> None:
         """
         Approximate Keras defaults used in the Valendin banking demo.
 
         Keras Embedding defaults to Uniform(-0.05, 0.05), Dense uses
-        Glorot/Xavier uniform with zero bias, and LSTM uses gate-wise
-        Glorot input kernels, orthogonal recurrent kernels, zero biases, plus
-        unit forget bias. PyTorch stores LSTM gates concatenated, so initialize
-        each gate slice separately.
+        Glorot/Xavier uniform with zero bias, and LSTM uses Glorot input
+        kernels, orthogonal recurrent kernels, zero biases, plus unit forget
+        bias. PyTorch stores LSTM gates concatenated; "gatewise" initializes
+        slices separately, while "whole_matrix" initializes the concatenated
+        matrices the way Keras does.
         """
 
         def init_linear(module: nn.Module) -> None:
@@ -205,17 +242,36 @@ class LSTMModel(nn.Module):
             self.spend_head.apply(init_linear)
 
         hidden_size = self.lstm.hidden_size
+        lstm_init_mode = str(lstm_init_mode).lower()
         for name, param in self.lstm.named_parameters():
             if "weight_ih" in name:
-                for gate in param.chunk(4, dim=0):
-                    nn.init.xavier_uniform_(gate)
+                if lstm_init_mode == "whole_matrix":
+                    nn.init.xavier_uniform_(param)
+                else:
+                    for gate in param.chunk(4, dim=0):
+                        nn.init.xavier_uniform_(gate)
             elif "weight_hh" in name:
-                for gate in param.chunk(4, dim=0):
-                    nn.init.orthogonal_(gate)
+                if lstm_init_mode == "whole_matrix":
+                    # Keras initializes recurrent_kernel with shape
+                    # (hidden, 4 * hidden); PyTorch stores its transpose.
+                    keras_shape = param.new_empty(hidden_size, 4 * hidden_size)
+                    nn.init.orthogonal_(keras_shape)
+                    param.data.copy_(keras_shape.t())
+                else:
+                    for gate in param.chunk(4, dim=0):
+                        nn.init.orthogonal_(gate)
             elif "bias" in name:
                 nn.init.zeros_(param)
                 if "bias_ih" in name:
                     param.data[hidden_size:2 * hidden_size].fill_(1.0)
+
+    def _freeze_recurrent_lstm_bias(self) -> None:
+        """Emulate Keras' single LSTM bias by disabling PyTorch's bias_hh term."""
+        for name, param in self.lstm.named_parameters():
+            if "bias_hh" in name:
+                with torch.no_grad():
+                    param.zero_()
+                param.requires_grad_(False)
 
     def forward(
         self,

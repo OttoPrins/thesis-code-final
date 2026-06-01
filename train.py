@@ -190,6 +190,9 @@ def build_model(config: dict) -> torch.nn.Module:
             regression_head_hidden=regression_head_hidden,
             dense_activation=model_cfg.get("dense_activation", "relu"),
             keras_initialization=bool(model_cfg.get("keras_initialization", False)),
+            embedding_size_mode=model_cfg.get("embedding_size_mode", "max_index"),
+            keras_lstm_init_mode=model_cfg.get("keras_lstm_init_mode", "gatewise"),
+            freeze_lstm_bias_hh=bool(model_cfg.get("freeze_lstm_bias_hh", False)),
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -534,17 +537,32 @@ def _resolve_loader_batch_size(
     default: int,
     dataset_len: int,
     name: str,
+    reference_sizes: dict[str, int] | None = None,
 ) -> int:
-    """Resolve integer batch sizes plus the replication-only 'full' shorthand."""
+    """Resolve integer batch sizes plus replication-only symbolic shorthands."""
     dataset_len = max(0, int(dataset_len))
+    reference_sizes = reference_sizes or {}
     if setting is None:
         value = int(default)
-    elif isinstance(setting, str) and setting.lower() == "full":
-        value = max(1, dataset_len)
+    elif isinstance(setting, str):
+        key = setting.lower()
+        if key == "full":
+            value = max(1, dataset_len)
+        elif key in reference_sizes:
+            value = int(reference_sizes[key])
+        else:
+            try:
+                value = int(setting)
+            except ValueError as exc:
+                valid = ["full", *sorted(reference_sizes)]
+                raise ValueError(
+                    f"{name} must be positive, 'full', or one of {valid}; "
+                    f"got {setting!r}"
+                ) from exc
     else:
         value = int(setting)
     if value <= 0:
-        raise ValueError(f"{name} must be positive or 'full', got {setting!r}")
+        raise ValueError(f"{name} must be positive or a known shorthand, got {setting!r}")
     return max(1, min(value, max(1, dataset_len)))
 
 
@@ -924,23 +942,31 @@ def run_experiment(
         f"class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})"
     )
 
+    loader_reference_sizes = {
+        "train": len(train_ds),
+        "val": len(val_ds),
+        "inference": len(inference_ds),
+    }
     batch_size = _resolve_loader_batch_size(
         training_cfg["batch_size"],
         default=training_cfg["batch_size"],
         dataset_len=len(train_ds),
         name="training.batch_size",
+        reference_sizes=loader_reference_sizes,
     )
     val_batch_size = _resolve_loader_batch_size(
         training_cfg.get("val_batch_size"),
         default=batch_size,
         dataset_len=len(val_ds),
         name="training.val_batch_size",
+        reference_sizes=loader_reference_sizes,
     )
     inference_batch_size = _resolve_loader_batch_size(
         training_cfg.get("inference_batch_size"),
         default=batch_size,
         dataset_len=len(inference_ds),
         name="training.inference_batch_size",
+        reference_sizes=loader_reference_sizes,
     )
     drop_last_train = bool(training_cfg.get("drop_last_train", False))
     # Cap at 2 workers per subprocess: with 2 parallel GPU runs (run_seeds.py),

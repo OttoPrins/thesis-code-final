@@ -85,8 +85,21 @@ class BasePipeline(ABC):
         rng = np.random.RandomState(self.split_seed(dataset_cfg))
         perm = rng.permutation(int(n_customers))
         n_val = int(int(n_customers) * float(val_fraction))
-        val_idx = perm[:n_val]
-        train_idx = perm[n_val:]
+        if n_val <= 0:
+            return perm, perm[:0]
+
+        mode = str(dataset_cfg.get("validation_split_mode", "shuffled_head")).lower()
+        if mode in {"shuffled_head", "head", "random_head"}:
+            val_idx = perm[:n_val]
+            train_idx = perm[n_val:]
+        elif mode in {"shuffled_tail", "tail", "random_tail", "valendin_tail"}:
+            val_idx = perm[-n_val:]
+            train_idx = perm[:-n_val]
+        else:
+            raise ValueError(
+                "dataset.validation_split_mode must be 'shuffled_head' or "
+                f"'shuffled_tail', got {mode!r}"
+            )
         return train_idx, val_idx
 
     def validate_clean_transactions(self, clean_df: pd.DataFrame, raw_dir: str) -> None:

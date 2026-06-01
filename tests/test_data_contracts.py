@@ -129,6 +129,34 @@ def test_cdnow_valendin_master_config_parses_expected_protocol():
     assert cfg["calibration"]["aggregate_scaling"] is False
 
 
+def test_cdnow_keras_exact_config_parses_expected_ablation_protocol():
+    cfg_path = Path("experiments/configs/lstm_base_cdnow_replication_keras_exact.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text())
+
+    assert cfg["dataset"]["protocol_name"] == "valendin_cdnow_master_39x39"
+    assert cfg["dataset"]["validation_split_mode"] == "shuffled_tail"
+    assert cfg["dataset"]["calibration_weeks"] == 39
+    assert cfg["dataset"]["holdout_weeks"] == 39
+    assert cfg["dataset"]["freq_cap"] == "observed"
+    assert cfg["model"]["dense_activation"] == "linear"
+    assert cfg["model"]["keras_initialization"] is True
+    assert cfg["model"]["embedding_size_mode"] == "keras_cardinality"
+    assert cfg["model"]["keras_lstm_init_mode"] == "whole_matrix"
+    assert cfg["model"]["freeze_lstm_bias_hh"] is True
+    assert cfg["training"]["batch_size"] == 32
+    assert cfg["training"]["val_batch_size"] == "full"
+    assert cfg["training"]["inference_batch_size"] == "val"
+    assert cfg["training"]["drop_last_train"] is True
+    assert cfg["training"]["amp_enabled"] is False
+    assert cfg["training"]["repair_on_failure"] is False
+    assert cfg["training"]["max_grad_norm"] == pytest.approx(0.0)
+    assert cfg["training"]["scheduler"]["type"] == "none"
+    assert cfg["training"]["scheduled_sampling"]["enabled"] is False
+    assert cfg["training"]["final_finetune"]["enabled"] is False
+    assert cfg["calibration"]["temperature_scaling"] is False
+    assert cfg["calibration"]["aggregate_scaling"] is False
+
+
 def test_cdnow_paper_finetune_config_preserves_strict_base_protocol():
     cfg_path = Path("experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml")
     cfg = yaml.safe_load(cfg_path.read_text())
@@ -164,6 +192,17 @@ def test_cdnow_replication_pipeline_preserves_valendin_contract():
     assert holdout_gt["raw_freq"].shape == (23570, 39)
     assert inference_ds.max_trans == int(inference_ds.seed_raw_trans.max().item())
     assert np.allclose(inference_ds.mask.numpy(), 1.0)
+
+
+def test_validation_split_mode_shuffled_tail_uses_demo_tail():
+    pipe = CDNOWPipeline()
+    cfg = {"split_seed": 123, "validation_split_mode": "shuffled_tail"}
+
+    train_idx, val_idx = pipe.train_val_indices(10, 0.3, cfg)
+    perm = np.random.RandomState(123).permutation(10)
+
+    assert val_idx.tolist() == perm[-3:].tolist()
+    assert train_idx.tolist() == perm[:-3].tolist()
 
 
 def test_cdnow_clean_retains_zero_amount_transactions_for_replication():

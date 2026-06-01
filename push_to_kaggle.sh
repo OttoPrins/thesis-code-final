@@ -25,6 +25,29 @@ export KAGGLE_API_TOKEN
 KAGGLE_API_TOKEN=$(python3 -c "import json; print(json.load(open('$KAGGLE_JSON'))['key'])")
 
 echo "=== Pushing notebook to Kaggle ==="
+python3 - << 'PY'
+import json
+from pathlib import Path
+
+k = json.load(open("kernel-metadata.json"))
+code_file = Path(k["code_file"])
+if not code_file.exists():
+    raise SystemExit(f"ERROR: kernel-metadata.json code_file does not exist: {code_file}")
+text = code_file.read_text()
+required = [
+    "lstm_base_cdnow_replication_paper_finetune",
+    "src.evaluation.replication_report",
+    "--build-array-ensembles",
+]
+missing = [needle for needle in required if needle not in text]
+if missing:
+    raise SystemExit(
+        "ERROR: Kaggle code_file is missing the final replication runner updates: "
+        + ", ".join(missing)
+        + f"\nChecked file: {code_file}"
+    )
+print(f"  code_file: {code_file} — final replication runner checks passed")
+PY
 kaggle kernels push -p .
 echo "      Done."
 echo ""

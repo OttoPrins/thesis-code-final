@@ -52,6 +52,17 @@ def _load_arrays(path: Path) -> dict[str, np.ndarray]:
         return {name: data[name] for name in data.files}
 
 
+def _resolve_report_output(path: str | Path, results_dir: str | Path) -> Path:
+    """Resolve governance output paths under the selected results directory."""
+    out = Path(path)
+    if out.is_absolute():
+        return out
+    parts = out.parts
+    if parts and parts[0] == "results":
+        return Path(results_dir).joinpath(*parts[1:])
+    return out
+
+
 def _base_row(label: str, *, role: str, run_name: str = "", note: str = "") -> dict[str, Any]:
     return {
         "label": label,
@@ -302,8 +313,8 @@ def build_replication_interpretation_table(
 
     df = pd.DataFrame(rows)
     if write_outputs:
-        csv_path = Path(report_cfg["output_csv"])
-        md_path = Path(report_cfg["output_markdown"])
+        csv_path = _resolve_report_output(report_cfg["output_csv"], results_dir)
+        md_path = _resolve_report_output(report_cfg["output_markdown"], results_dir)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(csv_path, index=False)
         md_path.write_text(_to_markdown(df), encoding="utf-8")

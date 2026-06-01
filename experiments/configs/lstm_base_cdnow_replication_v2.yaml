@@ -1,0 +1,83 @@
+# Valendin et al. (2022) CDNOW replication — v2 with Appendix B.2 fine-tuning.
+#
+# Identical to lstm_base_cdnow_replication.yaml except:
+#   - final_finetune ENABLED (Appendix B.2 of the paper)
+#
+# Why this matters:
+#   v1 converges to val_loss ~0.1240 on 90% of customers (21,150/23,500) but
+#   produces wildly different per-seed predictions (bias ranging from -45% to
+#   +27%) because the model is stuck in different local minima that look
+#   identical on the held-out 10% validation split.
+#
+#   Appendix B.2: "we restore the model state to the point with lowest
+#   validation loss and perform several fine-tuning training epochs using the
+#   ENTIRE calibration data set including the samples previously left out as
+#   validation, using a large batch size and a reduced learning rate."
+#
+#   The fine-tune pass sees all 23,500 customers at 0.1x LR, nudging the
+#   model's cohort-level parameters toward the full distribution before
+#   autoregressive inference — stabilising the per-seed variance and improving
+#   weekly pattern tracking (MAPE).
+#
+# All other settings are identical to v1 (no aggregate_scaling, no temperature_
+# scaling, no scheduled_sampling, temperature=1.0, 30 scenarios, observed classes).
+dataset:
+  name: cdnow
+  raw_dir: data/raw
+  raw_file: CDNOW_master.txt
+  prefer_sample_file: false
+  protocol_name: valendin_cdnow_master_39x39
+  calibration_weeks: 39
+  holdout_weeks: 39
+  origin_date: "1997-01-01"
+  cohort_end_date: "1997-03-31"
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: observed
+
+model:
+  type: lstm
+  max_week: 51
+  hidden_size: 128
+  dense_units: 128
+  num_layers: 1
+  dropout: 0.0
+  joint: false
+  neutralize_unseen_week_embeddings: true
+
+training:
+  epochs: 150
+  max_epochs: 150
+  batch_size: 256
+  lr: 0.001
+  optimizer: adam
+  weight_decay: 0.0
+  early_stopping_patience: 5
+  restore_best_checkpoint: true
+  final_finetune:
+    enabled: true
+    epochs: 5
+    lr_multiplier: 0.1      # 1e-4 fine-tune LR (paper: "reduced learning rate")
+    batch_size_multiplier: 4 # 1024 batch (paper: "large batch size")
+  seed: 42
+
+loss:
+  type: cross_entropy
+
+output:
+  run_name: lstm_base_cdnow_replication_v2
+  results_dir: results
+  save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  mode: sample
+  temperature: 1.0
+
+evaluation:
+  weekly_discount_rate: 0.0018
+  valendin_reference_rmse: 1.86
+  valendin_reference_bias_pct: -0.7
+  valendin_reference_mape: 13.8
+  fail_on_invalid: false

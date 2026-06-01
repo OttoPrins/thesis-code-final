@@ -1,0 +1,76 @@
+Config: experiments/configs/lstm_base_cdnow_replication.yaml
+Run: lstm_base_cdnow_replication_seed7_sample
+Device: mps
+Loading dataset: cdnow ...
+  Cohort filter <= 1997-03-31: 23500 customers
+[pipeline] freq_cap=22 (observed max) → freq_bins=[0, 1, 2, 3]... (n_classes=23)
+  Train customers: 21150, Val: 2350, Inference: 23500
+[cdnow] Customers with 0 calibration transactions: 0 / 23500
+  top-bin decode: class_values[-1] = 22.000 (max_trans = 22)
+Model: lstm — 93,226 parameters
+
+Training for up to 150 epochs ...
+Epoch   1/150 — train_loss: 0.6012  val_loss: 0.1452
+Epoch   2/150 — train_loss: 0.1452  val_loss: 0.1414
+Epoch   3/150 — train_loss: 0.1420  val_loss: 0.1392
+Epoch   4/150 — train_loss: 0.1396  val_loss: 0.1357
+Epoch   5/150 — train_loss: 0.1329  val_loss: 0.1269
+Epoch   6/150 — train_loss: 0.1289  val_loss: 0.1260
+Epoch   7/150 — train_loss: 0.1284  val_loss: 0.1269
+Epoch   8/150 — train_loss: 0.1279  val_loss: 0.1256
+Epoch   9/150 — train_loss: 0.1273  val_loss: 0.1252
+Epoch  10/150 — train_loss: 0.1271  val_loss: 0.1251
+Epoch  11/150 — train_loss: 0.1272  val_loss: 0.1248
+Epoch  12/150 — train_loss: 0.1267  val_loss: 0.1248
+Epoch  13/150 — train_loss: 0.1267  val_loss: 0.1253
+Epoch  14/150 — train_loss: 0.1265  val_loss: 0.1245
+Epoch  15/150 — train_loss: 0.1263  val_loss: 0.1245
+Epoch  16/150 — train_loss: 0.1264  val_loss: 0.1246
+Epoch  17/150 — train_loss: 0.1260  val_loss: 0.1244
+Epoch  18/150 — train_loss: 0.1261  val_loss: 0.1243
+Epoch  19/150 — train_loss: 0.1259  val_loss: 0.1246
+Epoch  20/150 — train_loss: 0.1260  val_loss: 0.1244
+Epoch  21/150 — train_loss: 0.1259  val_loss: 0.1243
+Epoch  22/150 — train_loss: 0.1261  val_loss: 0.1242
+Epoch  23/150 — train_loss: 0.1259  val_loss: 0.1242
+Epoch  24/150 — train_loss: 0.1257  val_loss: 0.1241
+Epoch  25/150 — train_loss: 0.1258  val_loss: 0.1243
+Traceback (most recent call last):
+  File "/Users/otto/projects/thesis-code/train.py", line 1379, in <module>
+    main()
+  File "/Users/otto/projects/thesis-code/train.py", line 800, in main
+    metrics = run_experiment_with_repair(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/train.py", line 668, in run_experiment_with_repair
+    return run_experiment(
+           ^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/train.py", line 973, in run_experiment
+    history = trainer.fit(
+              ^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/src/training/trainer.py", line 705, in fit
+    return self._fit_single_stage(train_loader, val_loader, epochs, early_stopping)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/src/training/trainer.py", line 837, in _fit_single_stage
+    train_metrics = self.train_epoch(train_loader)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/src/training/trainer.py", line 613, in train_epoch
+    for batch_idx, batch in enumerate(dataloader):
+  File "/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 631, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1329, in _next_data
+    idx, data = self._get_data()
+                ^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1295, in _get_data
+    success, data = self._try_get_data()
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1133, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/otto/projects/thesis-code/venv/lib/python3.12/site-packages/torch/multiprocessing/reductions.py", line 514, in rebuild_storage_filename
+    storage = torch.UntypedStorage._new_shared_filename_cpu(manager, handle, size)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Shared memory manager connection has timed out

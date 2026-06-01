@@ -113,17 +113,34 @@ class WeeklyAggregator:
     Input DataFrame columns: [customer_id, date, transaction_amount]
     Output DataFrame columns: [customer_id, week, weekly_freq, weekly_spend]
 
-    Week numbering: starts at 0 from the first transaction in the dataset.
+    Week numbering defaults to elapsed 7-day bins from the first transaction in
+    the dataset. `calendar_mode="valendin_year_week"` reproduces the reference
+    demo's `dayofyear // 7` calendar rule while still returning absolute period
+    indices for the downstream temporal split.
     """
 
-    def fit_transform(self, df: pd.DataFrame, origin_date: str | None = None) -> pd.DataFrame:
+    def fit_transform(
+        self,
+        df: pd.DataFrame,
+        origin_date: str | None = None,
+        calendar_mode: str = "elapsed_weeks",
+    ) -> pd.DataFrame:
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"])
+        calendar_mode = str(calendar_mode or "elapsed_weeks").lower()
         if origin_date is not None:
             min_date = pd.to_datetime(origin_date)
         else:
             min_date = df["date"].min()
-        df["week"] = ((df["date"] - min_date).dt.days // 7).astype(int)
+
+        if calendar_mode in {"elapsed_weeks", "elapsed", "iso_7day"}:
+            df["week"] = ((df["date"] - min_date).dt.days // 7).astype(int)
+        elif calendar_mode == "valendin_year_week":
+            df["week"] = self._valendin_year_week_index(df, min_date).to_numpy()
+        else:
+            raise ValueError(
+                "calendar_mode must be 'elapsed_weeks' or 'valendin_year_week'"
+            )
 
         agg = (
             df.groupby(["customer_id", "week"])
@@ -132,6 +149,51 @@ class WeeklyAggregator:
             .reset_index()
         )
         return agg
+
+    @staticmethod
+    def _valendin_week(date_series: pd.Series) -> pd.Series:
+        """Reference demo week-of-year: dayofyear // 7, clipped to 51."""
+        return (date_series.dt.dayofyear // 7).clip(upper=51).astype(int)
+
+    @classmethod
+    def _valendin_year_week_index(
+        cls,
+        df: pd.DataFrame,
+        min_date: pd.Timestamp,
+    ) -> pd.Series:
+        """
+        Convert the demo's (year, dayofyear//7) bins into absolute period indices.
+
+        The Keras demo groups by year and the clipped week-of-year, then sorts
+        those bins chronologically. Building the bin map from a daily calendar
+        preserves that behaviour across year boundaries, including the clipped
+        final year-week bucket.
+        """
+        start = pd.to_datetime(min_date).normalize()
+        end = df["date"].max().normalize()
+        calendar = pd.DataFrame({"date": pd.date_range(start, end, freq="D")})
+        calendar["_year"] = calendar["date"].dt.year.astype(int)
+        calendar["_valendin_week"] = cls._valendin_week(calendar["date"])
+        bin_order = (
+            calendar.groupby(["_year", "_valendin_week"], as_index=False)["date"]
+            .min()
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+        bin_order["week"] = np.arange(len(bin_order), dtype=np.int32)
+
+        keyed = df.copy()
+        keyed["_year"] = keyed["date"].dt.year.astype(int)
+        keyed["_valendin_week"] = cls._valendin_week(keyed["date"])
+        merged = keyed.merge(
+            bin_order[["_year", "_valendin_week", "week"]],
+            on=["_year", "_valendin_week"],
+            how="left",
+            validate="many_to_one",
+        )
+        if merged["week"].isna().any():
+            raise ValueError("Failed to map all dates to Valendin year-week bins")
+        return merged["week"].astype(int)
 
     @staticmethod
     def discretise_freq(freq_series: pd.Series, bins: list = None) -> pd.Series:
@@ -271,12 +333,23 @@ class SequenceBuilder:
             the per-step elapsed-time signal used by the Transformer's Time2Vec).
     """
 
-    def __init__(self, calibration_weeks: int = 52, min_active_weeks: int = 1,
-                 freq_bins: list = None):
+    def __init__(
+        self,
+        calibration_weeks: int = 52,
+        min_active_weeks: int = 1,
+        freq_bins: list = None,
+        loss_mask_mode: str = "post_acquisition",
+    ):
         self.calibration_weeks = calibration_weeks
         self.min_active_weeks = min_active_weeks
         self.freq_bins = freq_bins or [0, 1, 2, 3]
         self.max_trans = self.freq_bins[-1]  # e.g. 3 for [0,1,2,3]
+        loss_mask_mode = str(loss_mask_mode or "post_acquisition").lower()
+        if loss_mask_mode == "after_first":
+            loss_mask_mode = "post_acquisition"
+        if loss_mask_mode not in {"post_acquisition", "all"}:
+            raise ValueError("loss_mask_mode must be 'post_acquisition' or 'all'")
+        self.loss_mask_mode = loss_mask_mode
 
     def build(self, df: pd.DataFrame) -> dict:
         """
@@ -369,17 +442,20 @@ class SequenceBuilder:
         y_freq_raw = full_raw_trans[:, 1:]           # (N, T-1)
         y_spend = full_spend[:, 1:]                  # (N, T-1)
 
-        # Mask = 1 only for target steps strictly after the customer's first active week.
-        # This matches BTYD's T₀ conditioning: a customer does not exist in the cohort
-        # until their first purchase, so loss is not computed on the unborn period.
-        first_week_series = (
-            df_valid[df_valid["weekly_freq"] > 0]
-            .groupby("customer_id")["week"]
-            .min()
-        )
-        first_week_idx = first_week_series.reindex(customers).values.astype(np.int32)  # (N,)
-        target_steps = np.arange(1, T, dtype=np.int32)  # (T-1,)
-        mask = (target_steps[None, :] > first_week_idx[:, None]).astype(np.float32)
+        if self.loss_mask_mode == "all":
+            mask = np.ones_like(y_freq, dtype=np.float32)
+        else:
+            # Mask = 1 only for target steps strictly after the customer's first active week.
+            # This matches BTYD's T₀ conditioning: a customer does not exist in the cohort
+            # until their first purchase, so loss is not computed on the unborn period.
+            first_week_series = (
+                df_valid[df_valid["weekly_freq"] > 0]
+                .groupby("customer_id")["week"]
+                .min()
+            )
+            first_week_idx = first_week_series.reindex(customers).values.astype(np.int32)  # (N,)
+            target_steps = np.arange(1, T, dtype=np.int32)  # (T-1,)
+            mask = (target_steps[None, :] > first_week_idx[:, None]).astype(np.float32)
         active_mask = ((y_freq > 0).astype(np.float32) * mask).astype(np.float32)
 
         customer_ids = np.array(customers, dtype=np.int64)

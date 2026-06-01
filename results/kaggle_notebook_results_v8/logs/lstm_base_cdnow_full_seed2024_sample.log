@@ -1,0 +1,160 @@
+[Kaggle] raw_dir  → /kaggle/working/input/cdnow-dataset
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_cdnow_full.yaml
+Run: lstm_base_cdnow_full_seed2024_sample
+Device: cuda
+Loading dataset: cdnow ...
+[pipeline] freq_bins from config: [0, 1, 2, 3]
+  Train customers: 21152, Val: 2350, Inference: 23502
+[cdnow] Customers with 0 calibration transactions: 0 / 23502
+  top-bin decode: class_values[-1] = 3.670 (max_trans = 3)
+Model: lstm — 89,132 parameters
+
+Training for up to 100 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:135: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/100 — train_loss: 1.2818  val_loss: 1.1712
+Epoch   2/100 — train_loss: 0.4328  val_loss: 0.1363
+Epoch   3/100 — train_loss: 0.1414  val_loss: 0.1303
+Epoch   4/100 — train_loss: 0.1382  val_loss: 0.1279
+Epoch   5/100 — train_loss: 0.1351  val_loss: 0.1234
+Epoch   6/100 — train_loss: 0.1298  val_loss: 0.1163
+Epoch   7/100 — train_loss: 0.1235  val_loss: 0.1166
+Epoch   8/100 — train_loss: 0.1219  val_loss: 0.1141
+Epoch   9/100 — train_loss: 0.1218  val_loss: 0.1144
+Epoch  10/100 — train_loss: 0.1207  val_loss: 0.1139
+Epoch  11/100 — train_loss: 0.1199  val_loss: 0.1131
+Epoch  12/100 — train_loss: 0.1202  val_loss: 0.1158
+Epoch  13/100 — train_loss: 0.1197  val_loss: 0.1128
+Epoch  14/100 — train_loss: 0.1198  val_loss: 0.1128
+Epoch  15/100 — train_loss: 0.1196  val_loss: 0.1125
+Epoch  16/100 — train_loss: 0.1197  val_loss: 0.1127
+Epoch  17/100 — train_loss: 0.1194  val_loss: 0.1125
+Epoch  18/100 — train_loss: 0.1193  val_loss: 0.1128
+Epoch  19/100 — train_loss: 0.1192  val_loss: 0.1124
+Epoch  20/100 — train_loss: 0.1196  val_loss: 0.1126
+Epoch  21/100 — train_loss: 0.1193  val_loss: 0.1124
+Epoch  22/100 — train_loss: 0.1192  val_loss: 0.1126
+Epoch  23/100 — train_loss: 0.1193  val_loss: 0.1123
+Epoch  24/100 — train_loss: 0.1192  val_loss: 0.1121
+Epoch  25/100 — train_loss: 0.1193  val_loss: 0.1123
+Epoch  26/100 — train_loss: 0.1195  val_loss: 0.1127
+Epoch  27/100 — train_loss: 0.1196  val_loss: 0.1124
+Epoch  28/100 — train_loss: 0.1193  val_loss: 0.1120
+Epoch  29/100 — train_loss: 0.1193  val_loss: 0.1127
+Epoch  30/100 — train_loss: 0.1194  val_loss: 0.1122
+Epoch  31/100 — train_loss: 0.1197  val_loss: 0.1120
+Epoch  32/100 — train_loss: 0.1193  val_loss: 0.1119
+Epoch  33/100 — train_loss: 0.1200  val_loss: 0.1121
+Epoch  34/100 — train_loss: 0.1197  val_loss: 0.1123
+Epoch  35/100 — train_loss: 0.1194  val_loss: 0.1122
+Epoch  36/100 — train_loss: 0.1196  val_loss: 0.1123
+Epoch  37/100 — train_loss: 0.1196  val_loss: 0.1134
+Epoch  38/100 — train_loss: 0.1197  val_loss: 0.1119
+Epoch  39/100 — train_loss: 0.1198  val_loss: 0.1121
+Epoch  40/100 — train_loss: 0.1197  val_loss: 0.1121
+Epoch  41/100 — train_loss: 0.1201  val_loss: 0.1120
+Epoch  42/100 — train_loss: 0.1198  val_loss: 0.1119
+Epoch  43/100 — train_loss: 0.1198  val_loss: 0.1119
+Epoch  44/100 — train_loss: 0.1200  val_loss: 0.1119
+Epoch  45/100 — train_loss: 0.1200  val_loss: 0.1119
+Epoch  46/100 — train_loss: 0.1199  val_loss: 0.1122
+Epoch  47/100 — train_loss: 0.1200  val_loss: 0.1122
+Epoch  48/100 — train_loss: 0.1198  val_loss: 0.1119
+Epoch  49/100 — train_loss: 0.1200  val_loss: 0.1119
+Epoch  50/100 — train_loss: 0.1199  val_loss: 0.1119
+Epoch  51/100 — train_loss: 0.1200  val_loss: 0.1118
+Epoch  52/100 — train_loss: 0.1200  val_loss: 0.1118
+Epoch  53/100 — train_loss: 0.1202  val_loss: 0.1118
+Epoch  54/100 — train_loss: 0.1202  val_loss: 0.1121
+Epoch  55/100 — train_loss: 0.1202  val_loss: 0.1119
+Epoch  56/100 — train_loss: 0.1202  val_loss: 0.1119
+Epoch  57/100 — train_loss: 0.1203  val_loss: 0.1119
+Epoch  58/100 — train_loss: 0.1204  val_loss: 0.1119
+Epoch  59/100 — train_loss: 0.1203  val_loss: 0.1121
+Epoch  60/100 — train_loss: 0.1204  val_loss: 0.1127
+Epoch  61/100 — train_loss: 0.1207  val_loss: 0.1120
+Epoch  62/100 — train_loss: 0.1206  val_loss: 0.1119
+Epoch  63/100 — train_loss: 0.1206  val_loss: 0.1119
+Epoch  64/100 — train_loss: 0.1204  val_loss: 0.1119
+Epoch  65/100 — train_loss: 0.1206  val_loss: 0.1120
+Epoch  66/100 — train_loss: 0.1208  val_loss: 0.1122
+Epoch  67/100 — train_loss: 0.1207  val_loss: 0.1118
+Epoch  68/100 — train_loss: 0.1208  val_loss: 0.1120
+Epoch  69/100 — train_loss: 0.1207  val_loss: 0.1119
+Epoch  70/100 — train_loss: 0.1209  val_loss: 0.1121
+Epoch  71/100 — train_loss: 0.1211  val_loss: 0.1118
+Early stopping triggered at epoch 71.
+
+Final calibration fine-tuning for 5 epochs on 23502 customers (batch_size=1024, lr=5e-05) ...
+Fine-tune epoch   1/5 - train_loss: 0.1207  full_loss: 0.1172
+Fine-tune epoch   2/5 - train_loss: 0.1207  full_loss: 0.1172
+Fine-tune epoch   3/5 - train_loss: 0.1206  full_loss: 0.1171
+Fine-tune epoch   4/5 - train_loss: 0.1207  full_loss: 0.1171
+Fine-tune epoch   5/5 - train_loss: 0.1207  full_loss: 0.1171
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_cdnow_full_seed2024_sample.pt
+Validation-fitted softmax temperature: 0.7500
+Validation aggregate calibration: freq_factor=3.5624, spend_factor=1.0000
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 30  temperature: 0.7500
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.0047
+  Mean actual freq/week:       0.0209
+  Over-prediction ratio:       0.222x
+  Customers predicted as zero total:  0.972
+  Customers actually zero total:      0.771
+  Non-zero rate (pred, avg > 0.05):  0.015
+  Non-zero rate (true):               0.019
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_cdnow_full_seed2024_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_cdnow_full_seed2024_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 1.4471
+  freq_mae: 0.6420
+  freq_normalized_gini: 0.5469
+  freq_calibration_factor: 3.5624
+  freq_horizon_abs_bias_pct: 20.8122
+  bias_pct: -20.8122
+  freq_weekly_mae: 134.7334
+  freq_weekly_total_true: 12798.0000
+  freq_weekly_total_pred: 10134.4510
+  freq_valendin_mape: 27.3720
+  freq_horizon_bias_pct: -20.8122
+  freq_weekly_mean_pct_mape: 27.4682
+  freq_weekly_mean_pct_bias_pct: -19.9247
+  freq_weekly_bias_pct: -20.8122
+  freq_weekly_mape: 27.3720
+  freq_mape: 27.3720
+  freq_mase: 0.4261
+  freq_mase_scale: 0.0835
+  calibration_temperature_source: rolling_origin_autoregressive
+  validation_temperature: 0.7500
+  calibration_source: rolling_origin_autoregressive
+  validation_freq_true_total: 1410.0000
+  validation_freq_pred_total: 395.8022
+  validation_spend_true_total: 0.0000
+  validation_spend_pred_total: 0.0000
+  validation_freq_calibration_factor: 3.5624
+  validation_spend_calibration_factor: 1.0000
+  validation_rolling_origin_count: 2
+  protocol_name: cdnow_master_52x26
+  cohort_size: 23502
+  calibration_weeks: 52
+  holdout_weeks: 26
+  inference_mode: sample
+  n_scenarios: 30
+  final_finetune_enabled: True
+  final_finetune_epochs: 5
+  final_finetune_lr_multiplier: 0.1000
+  final_finetune_batch_size_multiplier: 4.0000
+  run_valid: False
+  run_invalid_reason: absolute frequency bias -20.8% exceeds 15.0%
+  run_warning: large frequency bias (-20.8%)
+  epochs_completed: 76
+  max_epochs_configured: 100
+History saved: /kaggle/working/results/tables/lstm_base_cdnow_full_seed2024_sample_history.json

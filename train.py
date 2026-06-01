@@ -179,7 +179,7 @@ def build_model(config: dict) -> torch.nn.Module:
             max_week=model_cfg["max_week"],
             max_trans=model_cfg["max_trans"],
             memory_units=model_cfg["hidden_size"],
-            dense_units=model_cfg["hidden_size"],
+            dense_units=model_cfg.get("dense_units", model_cfg["hidden_size"]),
             dropout=model_cfg.get("dropout", 0.0),
             joint=joint,
             static_cov_dim=static_cov_dim,
@@ -188,6 +188,8 @@ def build_model(config: dict) -> torch.nn.Module:
             state_feature_dim=state_feature_dim,
             spend_head=spend_head,
             regression_head_hidden=regression_head_hidden,
+            dense_activation=model_cfg.get("dense_activation", "relu"),
+            keras_initialization=bool(model_cfg.get("keras_initialization", False)),
         )
     elif model_type == "transformer":
         return TransformerModel(
@@ -863,11 +865,21 @@ def run_experiment(
     # pipeline.run() updates model_cfg["max_trans"] from calibration data, so this
     # reads the correct cap even when freq_cap=auto overrides the YAML placeholder.
     _max_trans = model_cfg["max_trans"]
-    _top_bin = getattr(inference_ds, "top_bin_value", float(_max_trans))
+    inference_cfg = config.get("inference", {})
+    decode_top_bin = bool(inference_cfg.get("decode_top_bin", True))
+    _top_bin = (
+        getattr(inference_ds, "top_bin_value", float(_max_trans))
+        if decode_top_bin
+        else float(_max_trans)
+    )
     class_values = torch.tensor(
         list(range(_max_trans)) + [_top_bin], dtype=torch.float32
     )
-    print(f"  top-bin decode: class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})")
+    _top_bin_mode = "conditional mean" if decode_top_bin else "disabled/exact cap"
+    print(
+        f"  top-bin decode ({_top_bin_mode}): "
+        f"class_values[-1] = {_top_bin:.3f} (max_trans = {_max_trans})"
+    )
 
     batch_size = training_cfg["batch_size"]
     # Cap at 2 workers per subprocess: with 2 parallel GPU runs (run_seeds.py),
@@ -915,10 +927,17 @@ def run_experiment(
 
     optimizer_name = training_cfg.get("optimizer", "adam").lower()
     optimizer_cls = torch.optim.AdamW if optimizer_name == "adamw" else torch.optim.Adam
+    optimizer_kwargs = {
+        "lr": training_cfg["lr"],
+        "weight_decay": training_cfg.get("weight_decay", 0.0),
+    }
+    if "eps" in training_cfg:
+        optimizer_kwargs["eps"] = float(training_cfg["eps"])
+    elif "adam_eps" in training_cfg:
+        optimizer_kwargs["eps"] = float(training_cfg["adam_eps"])
     optimizer = optimizer_cls(
         opt_params,
-        lr=training_cfg["lr"],
-        weight_decay=training_cfg.get("weight_decay", 0.0),
+        **optimizer_kwargs,
     )
 
     epochs = int(training_cfg.get("max_epochs", training_cfg.get("epochs", 100)))

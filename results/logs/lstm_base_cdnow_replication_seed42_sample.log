@@ -1,0 +1,29 @@
+Config: experiments/configs/lstm_base_cdnow_replication.yaml
+Run: lstm_base_cdnow_replication_seed42_sample
+Device: mps
+Loading dataset: cdnow ...
+  Cohort filter <= 1997-03-31: 23500 customers
+[pipeline] freq_cap=22 (observed max) → freq_bins=[0, 1, 2, 3]... (n_classes=23)
+  Train customers: 21150, Val: 2350, Inference: 23500
+[cdnow] Customers with 0 calibration transactions: 0 / 23500
+  top-bin decode: class_values[-1] = 22.000 (max_trans = 22)
+Model: lstm — 93,226 parameters
+
+Training for up to 150 epochs ...
+Epoch   1/150 — train_loss: 0.6433  val_loss: 0.1460
+Epoch   2/150 — train_loss: 0.1450  val_loss: 0.1413
+Epoch   3/150 — train_loss: 0.1405  val_loss: 0.1351
+Epoch   4/150 — train_loss: 0.1338  val_loss: 0.1286
+Epoch   5/150 — train_loss: 0.1295  val_loss: 0.1263
+Epoch   6/150 — train_loss: 0.1286  val_loss: 0.1264
+Epoch   7/150 — train_loss: 0.1283  val_loss: 0.1259
+Epoch   8/150 — train_loss: 0.1273  val_loss: 0.1266
+Epoch   9/150 — train_loss: 0.1272  val_loss: 0.1252
+Epoch  10/150 — train_loss: 0.1271  val_loss: 0.1253
+Epoch  11/150 — train_loss: 0.1269  val_loss: 0.1250
+Epoch  12/150 — train_loss: 0.1267  val_loss: 0.1247
+Epoch  13/150 — train_loss: 0.1265  val_loss: 0.1248
+Epoch  14/150 — train_loss: 0.1266  val_loss: 0.1251
+Epoch  15/150 — train_loss: 0.1267  val_loss: 0.1252
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 28 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

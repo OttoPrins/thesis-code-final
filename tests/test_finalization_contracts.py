@@ -747,6 +747,34 @@ def test_live_model_spend_heads_use_small_output_initialization():
     assert torch.count_nonzero(transformer_out.bias).item() == 0
 
 
+def test_lstm_replication_mode_is_linear_and_keras_initialized():
+    torch.manual_seed(0)
+    model = LSTMModel(
+        max_week=51,
+        max_trans=3,
+        memory_units=8,
+        dense_units=8,
+        dropout=0.0,
+        dense_activation="linear",
+        keras_initialization=True,
+    )
+
+    assert isinstance(model.dense_activation, nn.Identity)
+    probe = torch.tensor([-1.0, 0.5])
+    assert torch.equal(model.dense_activation(probe), probe)
+    assert float(model.embed_week.weight.abs().max()) <= 0.050001
+    assert float(model.embed_trans.weight.abs().max()) <= 0.050001
+
+    hidden = model.lstm.hidden_size
+    assert torch.allclose(
+        model.lstm.bias_ih_l0[hidden:2 * hidden],
+        torch.ones(hidden),
+    )
+    assert torch.count_nonzero(model.lstm.bias_ih_l0[:hidden]).item() == 0
+    assert torch.count_nonzero(model.lstm.bias_ih_l0[2 * hidden:]).item() == 0
+    assert torch.count_nonzero(model.lstm.bias_hh_l0).item() == 0
+
+
 def test_scheduled_sampling_forward_equals_teacher_forcing_at_zero_prob():
     """At ε=0 the stepwise SS unroll must equal the vectorized teacher-forced
     forward (LSTM recurrence equivalence) — guarantees SS adds no bias when off."""

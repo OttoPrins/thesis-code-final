@@ -88,7 +88,12 @@ class CDNOWPipeline(BasePipeline):
 
         # Stage 2: Aggregate to weekly level
         origin_date = dataset_cfg.get("origin_date")
-        agg = WeeklyAggregator().fit_transform(df, origin_date=origin_date)
+        calendar_mode = dataset_cfg.get("calendar_mode", "elapsed_weeks")
+        agg = WeeklyAggregator().fit_transform(
+            df,
+            origin_date=origin_date,
+            calendar_mode=calendar_mode,
+        )
 
         # Stage 3: Temporal split
         splitter = TemporalSplitter(calib_weeks, holdout_weeks)
@@ -106,6 +111,7 @@ class CDNOWPipeline(BasePipeline):
             calibration_weeks=calib_weeks,
             min_active_weeks=min_active,
             freq_bins=freq_bins,
+            loss_mask_mode=dataset_cfg.get("loss_mask_mode", "post_acquisition"),
         )
         data = builder.build(calib)
 
@@ -210,11 +216,18 @@ class CDNOWPipeline(BasePipeline):
         return df
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
+        cfg = getattr(self, "_current_dataset_cfg", {})
+        keep_zero_amount = bool(cfg.get("keep_zero_amount_transactions", False))
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d",
                                     errors="coerce")
         df = df.dropna(subset=["date", "customer_id", "amount"])
-        df = df[df["amount"] > 0]
+        if "num_cds" in df.columns:
+            df = df[df["num_cds"] > 0]
+        if keep_zero_amount:
+            df = df[df["amount"] >= 0]
+        else:
+            df = df[df["amount"] > 0]
         df = df.rename(columns={"amount": "transaction_amount"})
         df["customer_id"] = df["customer_id"].astype(int)
         return df[["customer_id", "date", "transaction_amount"]]

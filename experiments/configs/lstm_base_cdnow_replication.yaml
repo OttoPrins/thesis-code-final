@@ -1,13 +1,14 @@
-# Clean paper-faithful CDNOW replication of Valendin et al. (2022).
+# Demo-pure CDNOW replication of Valendin et al. (2022).
 #
 # Matches the reference implementation (github.com/valendin/rfm2lstm,
 # banking_transactions_demo.ipynb) and the paper's CDNOW protocol (Table 3):
 #   - Full 23,570-customer master cohort (acquired Q1 1997)
 #   - 39 calibration weeks + 39 holdout weeks
-#   - Softmax over ALL observed weekly transaction classes (max_trans = max+1),
+#   - Softmax over ALL observed weekly transaction classes (max_trans = max),
 #     NOT clipped at [0,1,2,3]
 #   - Single LSTM(128) -> Dense(128) -> softmax, week + transaction embeddings only
-#   - Plain Adam, sparse categorical cross-entropy, seq2seq (predict every step)
+#   - Keras-style initialization, linear Dense(128), no dropout
+#   - Plain Adam(eps=1e-7), sparse categorical cross-entropy, seq2seq
 #   - EarlyStopping(restore_best, patience=5)
 #   - Autoregressive multinomial sampling at temperature 1.0, ~30 scenarios averaged
 #
@@ -15,8 +16,7 @@
 #   - no temperature_scaling / aggregate_scaling / aggregate_shrinkage
 #   - no scheduled_sampling
 #   - no cosine scheduler / weight decay
-#   - final_finetune disabled (paper-described in App. B.2 but absent from the
-#     reference code; kept off here to isolate the clean baseline)
+#   - no post-training full-cohort fine-tune
 dataset:
   name: cdnow
   raw_dir: data/raw
@@ -27,10 +27,13 @@ dataset:
   holdout_weeks: 39
   origin_date: "1997-01-01"
   cohort_end_date: "1997-03-31"
+  calendar_mode: valendin_year_week
+  keep_zero_amount_transactions: true
+  loss_mask_mode: all
   min_active_weeks: 1
   val_fraction: 0.1
   split_seed: 42
-  freq_cap: observed          # all observed weekly classes (Valendin: max_trans = max+1)
+  freq_cap: observed          # cap = observed max; n_classes = cap + 1
 
 model:
   type: lstm
@@ -39,9 +42,11 @@ model:
   dense_units: 128
   num_layers: 1
   dropout: 0.0
+  dense_activation: linear
+  keras_initialization: true
   joint: false
   # max_trans is set automatically from the calibration data (freq_cap: observed).
-  neutralize_unseen_week_embeddings: true  # fix untrained week-of-year rows (39..51)
+  neutralize_unseen_week_embeddings: false
 
 training:
   epochs: 150
@@ -49,9 +54,14 @@ training:
   batch_size: 256
   lr: 0.001
   optimizer: adam
+  eps: 1.0e-7
   weight_decay: 0.0
   early_stopping_patience: 5
   restore_best_checkpoint: true
+  scheduler:
+    type: none
+  scheduled_sampling:
+    enabled: false
   final_finetune:
     enabled: false
   seed: 42
@@ -60,7 +70,7 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_cdnow_replication
+  run_name: lstm_base_cdnow_replication_demo_pure
   results_dir: results
   save_checkpoint: true
 
@@ -68,6 +78,12 @@ inference:
   n_scenarios: 30
   mode: sample
   temperature: 1.0
+  decode_top_bin: false
+
+calibration:
+  temperature_scaling: false
+  aggregate_scaling: false
+  aggregate_shrinkage: 1.0
 
 evaluation:
   weekly_discount_rate: 0.0018

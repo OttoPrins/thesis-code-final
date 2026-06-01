@@ -67,6 +67,10 @@ class LSTMModel(nn.Module):
         spend_head:       "regression" for the original scalar spend head, or
                           "hurdle_lognormal" for v2 spend_mu/spend_log_var output.
         regression_head_hidden: Optional hidden size for a one-hidden-layer spend head.
+        dense_activation: Activation after the Dense layer. Use "linear" for the
+                          Valendin/Keras replication path; default keeps existing runs.
+        keras_initialization: If true, initialize embeddings, LSTM, Dense and heads
+                              to mirror Keras defaults used by the banking demo.
     """
 
     def __init__(
@@ -83,6 +87,8 @@ class LSTMModel(nn.Module):
         state_feature_dim: int = 0,
         spend_head: str = "regression",
         regression_head_hidden: int | None = None,
+        dense_activation: str = "relu",
+        keras_initialization: bool = False,
     ):
         super().__init__()
         self.joint = joint
@@ -93,6 +99,12 @@ class LSTMModel(nn.Module):
         self.spend_head_type = spend_head
         if spend_head not in {"regression", "hurdle_lognormal"}:
             raise ValueError("spend_head must be 'regression' or 'hurdle_lognormal'")
+        dense_activation = dense_activation.lower()
+        if dense_activation not in {"relu", "linear", "identity", "none"}:
+            raise ValueError(
+                "dense_activation must be one of 'relu', 'linear', 'identity', or 'none'"
+            )
+        self.dense_activation_name = dense_activation
         n_classes = max_trans + 1
 
         # Embedding layers (categorical inputs — not raw floats)
@@ -137,7 +149,11 @@ class LSTMModel(nn.Module):
 
         # Dense layer after LSTM (matches rfm2lstm Dense(128) before output heads)
         self.dense = nn.Linear(memory_units, dense_units)
-        self.relu = nn.ReLU()
+        self.dense_activation = (
+            nn.ReLU()
+            if dense_activation == "relu"
+            else nn.Identity()
+        )
         self.dropout = nn.Dropout(dropout)
 
         # Frequency head: softmax over n_classes (output logits; apply CE loss directly)
@@ -151,6 +167,55 @@ class LSTMModel(nn.Module):
                 spend_out_dim,
                 hidden_dim=regression_head_hidden,
             )
+
+        if keras_initialization:
+            self._reset_parameters_keras()
+
+    def _reset_parameters_keras(self) -> None:
+        """
+        Approximate Keras defaults used in the Valendin banking demo.
+
+        Keras Embedding defaults to Uniform(-0.05, 0.05), Dense uses
+        Glorot/Xavier uniform with zero bias, and LSTM uses gate-wise
+        Glorot input kernels, orthogonal recurrent kernels, zero biases, plus
+        unit forget bias. PyTorch stores LSTM gates concatenated, so initialize
+        each gate slice separately.
+        """
+
+        def init_linear(module: nn.Module) -> None:
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+        nn.init.uniform_(self.embed_week.weight, -0.05, 0.05)
+        nn.init.uniform_(self.embed_trans.weight, -0.05, 0.05)
+
+        init_linear(self.dense)
+        init_linear(self.freq_head)
+        for module in [
+            self.spend_proj,
+            self.state_proj,
+            self.static_proj,
+            self.dynamic_proj,
+        ]:
+            if module is not None:
+                init_linear(module)
+        if self.joint and hasattr(self, "spend_head"):
+            self.spend_head.apply(init_linear)
+
+        hidden_size = self.lstm.hidden_size
+        for name, param in self.lstm.named_parameters():
+            if "weight_ih" in name:
+                for gate in param.chunk(4, dim=0):
+                    nn.init.xavier_uniform_(gate)
+            elif "weight_hh" in name:
+                for gate in param.chunk(4, dim=0):
+                    nn.init.orthogonal_(gate)
+            elif "bias" in name:
+                nn.init.zeros_(param)
+                if "bias_ih" in name:
+                    param.data[hidden_size:2 * hidden_size].fill_(1.0)
 
     def forward(
         self,
@@ -223,7 +288,7 @@ class LSTMModel(nn.Module):
 
         lstm_out, hidden = self.lstm(x, hidden)  # lstm_out: (B, T, memory_units)
 
-        h = self.dropout(self.relu(self.dense(lstm_out)))  # (B, T, dense_units)
+        h = self.dropout(self.dense_activation(self.dense(lstm_out)))  # (B, T, dense_units)
 
         freq_logits = self.freq_head(h)  # (B, T, n_classes)
 

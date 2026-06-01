@@ -97,7 +97,7 @@ def test_cdnow_valendin_master_protocol_stats_match_paper_order():
 
 
 def test_cdnow_valendin_master_config_parses_expected_protocol():
-    cfg_path = Path("experiments/configs/lstm_base_cdnow_valendin_master_39x39.yaml")
+    cfg_path = Path("experiments/configs/lstm_base_cdnow_replication.yaml")
     cfg = yaml.safe_load(cfg_path.read_text())
 
     assert cfg["dataset"]["protocol_name"] == "valendin_cdnow_master_39x39"
@@ -106,8 +106,57 @@ def test_cdnow_valendin_master_config_parses_expected_protocol():
     assert cfg["dataset"]["calibration_weeks"] == 39
     assert cfg["dataset"]["holdout_weeks"] == 39
     assert cfg["dataset"]["freq_cap"] == "observed"
+    assert cfg["dataset"]["calendar_mode"] == "valendin_year_week"
+    assert cfg["dataset"]["loss_mask_mode"] == "all"
+    assert cfg["dataset"]["keep_zero_amount_transactions"] is True
+    assert cfg["model"]["dense_activation"] == "linear"
+    assert cfg["model"]["keras_initialization"] is True
+    assert cfg["model"]["neutralize_unseen_week_embeddings"] is False
+    assert cfg["training"]["optimizer"] == "adam"
+    assert cfg["training"]["eps"] == pytest.approx(1e-7)
+    assert cfg["training"]["scheduler"]["type"] == "none"
+    assert cfg["training"]["scheduled_sampling"]["enabled"] is False
     assert cfg["inference"]["mode"] == "sample"
     assert cfg["inference"]["n_scenarios"] >= 30
+    assert cfg["inference"]["decode_top_bin"] is False
+    assert cfg["calibration"]["temperature_scaling"] is False
+    assert cfg["calibration"]["aggregate_scaling"] is False
+
+
+def test_cdnow_replication_pipeline_preserves_valendin_contract():
+    raw_path = Path("data/raw/CDNOW_master.txt")
+    if not raw_path.exists():
+        pytest.skip("CDNOW_master.txt is not available in this checkout")
+
+    cfg = yaml.safe_load(Path("experiments/configs/lstm_base_cdnow_replication.yaml").read_text())
+    train_ds, val_ds, inference_ds, holdout_gt, _ = CDNOWPipeline().run(copy.deepcopy(cfg))
+
+    assert len(inference_ds) == 23570
+    assert len(train_ds) + len(val_ds) == 23570
+    assert inference_ds.week.shape[1] == 38
+    assert inference_ds.seed_week.shape[1] == 39
+    assert inference_ds.y_freq.shape[1] == 38
+    assert holdout_gt["raw_freq"].shape == (23570, 39)
+    assert inference_ds.max_trans == int(inference_ds.seed_raw_trans.max().item())
+    assert np.allclose(inference_ds.mask.numpy(), 1.0)
+
+
+def test_cdnow_clean_retains_zero_amount_transactions_for_replication():
+    df = pd.DataFrame({
+        "customer_id": [1, 2, 3, 4],
+        "date": [19970101, 19970102, 19970103, 19970104],
+        "num_cds": [1, 2, 0, 1],
+        "amount": [0.0, 12.5, 99.0, -2.0],
+    })
+
+    default_clean = CDNOWPipeline().clean(df)
+    assert default_clean["customer_id"].tolist() == [2]
+
+    pipe = CDNOWPipeline()
+    pipe._current_dataset_cfg = {"keep_zero_amount_transactions": True}
+    clean = pipe.clean(df)
+    assert clean["customer_id"].tolist() == [1, 2]
+    assert clean.loc[clean["customer_id"] == 1, "transaction_amount"].item() == 0.0
 
 
 def test_cdnow_requested_master_missing_error_is_actionable(tmp_path):
@@ -156,6 +205,30 @@ def test_sequence_builder_uses_calendar_week_and_absolute_position():
     assert data["active_mask"].shape == data["y_freq"].shape
     assert data["state_features"].shape == (1, 59, 1)
     assert data["seed_state_features"].shape == (1, 60, 1)
+
+
+def test_sequence_builder_all_loss_mask_matches_valendin_demo():
+    df = pd.DataFrame({
+        "customer_id": [1, 1],
+        "week": [2, 4],
+        "weekly_freq": [1, 1],
+        "log_spend": [1.0, 1.5],
+    })
+
+    default_data = SequenceBuilder(
+        calibration_weeks=6,
+        min_active_weeks=1,
+        freq_bins=[0, 1, 2, 3],
+    ).build(df)
+    demo_data = SequenceBuilder(
+        calibration_weeks=6,
+        min_active_weeks=1,
+        freq_bins=[0, 1, 2, 3],
+        loss_mask_mode="all",
+    ).build(df)
+
+    assert default_data["mask"].tolist() == [[0.0, 0.0, 1.0, 1.0, 1.0]]
+    assert demo_data["mask"].tolist() == [[1.0, 1.0, 1.0, 1.0, 1.0]]
 
 
 def test_robust_spend_scaler_fits_calibration_only_and_preserves_zero_sentinel():

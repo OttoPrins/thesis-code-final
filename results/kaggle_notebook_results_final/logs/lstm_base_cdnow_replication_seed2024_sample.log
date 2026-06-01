@@ -1,0 +1,96 @@
+[Kaggle] raw_dir  → /kaggle/working/input/cdnow-dataset
+[Kaggle] results  → /kaggle/working/results
+Config: experiments/configs/lstm_base_cdnow_replication.yaml
+Run: lstm_base_cdnow_replication_seed2024_sample
+Device: cuda
+Loading dataset: cdnow ...
+  Cohort filter <= 1997-03-31: 23500 customers
+[pipeline] freq_cap=22 (observed max) → freq_bins=[0, 1, 2, 3]... (n_classes=23)
+  Train customers: 21150, Val: 2350, Inference: 23500
+[cdnow] Customers with 0 calibration transactions: 0 / 23500
+  top-bin decode: class_values[-1] = 22.000 (max_trans = 22)
+Model: lstm — 93,226 parameters
+
+Training for up to 150 epochs ...
+/kaggle/working/thesis-code/src/training/trainer.py:135: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp_enabled)
+Epoch   1/150 — train_loss: 0.5328  val_loss: 0.1449
+Epoch   2/150 — train_loss: 0.1452  val_loss: 0.1421
+Epoch   3/150 — train_loss: 0.1427  val_loss: 0.1394
+Epoch   4/150 — train_loss: 0.1371  val_loss: 0.1295
+Epoch   5/150 — train_loss: 0.1289  val_loss: 0.1265
+Epoch   6/150 — train_loss: 0.1272  val_loss: 0.1251
+Epoch   7/150 — train_loss: 0.1267  val_loss: 0.1251
+Epoch   8/150 — train_loss: 0.1265  val_loss: 0.1247
+Epoch   9/150 — train_loss: 0.1265  val_loss: 0.1251
+Epoch  10/150 — train_loss: 0.1264  val_loss: 0.1247
+Epoch  11/150 — train_loss: 0.1261  val_loss: 0.1244
+Epoch  12/150 — train_loss: 0.1262  val_loss: 0.1245
+Epoch  13/150 — train_loss: 0.1260  val_loss: 0.1243
+Epoch  14/150 — train_loss: 0.1260  val_loss: 0.1243
+Epoch  15/150 — train_loss: 0.1260  val_loss: 0.1244
+Epoch  16/150 — train_loss: 0.1257  val_loss: 0.1245
+Epoch  17/150 — train_loss: 0.1258  val_loss: 0.1243
+Epoch  18/150 — train_loss: 0.1257  val_loss: 0.1245
+Epoch  19/150 — train_loss: 0.1257  val_loss: 0.1241
+Epoch  20/150 — train_loss: 0.1257  val_loss: 0.1241
+Epoch  21/150 — train_loss: 0.1256  val_loss: 0.1246
+Epoch  22/150 — train_loss: 0.1256  val_loss: 0.1240
+Epoch  23/150 — train_loss: 0.1255  val_loss: 0.1244
+Epoch  24/150 — train_loss: 0.1256  val_loss: 0.1244
+Epoch  25/150 — train_loss: 0.1256  val_loss: 0.1243
+Epoch  26/150 — train_loss: 0.1255  val_loss: 0.1242
+Epoch  27/150 — train_loss: 0.1255  val_loss: 0.1242
+Early stopping triggered at epoch 27.
+  neutralized 13 unseen week-of-year embedding rows 39..51 (calibration_weeks=39)
+
+Checkpoint saved: /kaggle/working/results/checkpoints/lstm_base_cdnow_replication_seed2024_sample.pt
+
+Running autoregressive inference on holdout period ...
+  inference mode: sample  n_scenarios: 30  temperature: 1.0000
+
+=== Prediction Diagnostics ===
+  Mean predicted freq/week:    0.0206
+  Mean actual freq/week:       0.0224
+  Over-prediction ratio:       0.918x
+  Customers predicted as zero total:  0.632
+  Customers actually zero total:      0.700
+  Non-zero rate (pred, avg > 0.05):  0.128
+  Non-zero rate (true):               0.020
+
+Metrics saved: /kaggle/working/results/tables/lstm_base_cdnow_replication_seed2024_sample_metrics.json
+Array artifacts saved: /kaggle/working/results/tables/lstm_base_cdnow_replication_seed2024_sample_arrays.npz
+
+=== Holdout Evaluation ===
+  metric_definition_version: valendin_aggregate_mape_v1
+  freq_rmse: 2.0904
+  freq_mae: 0.9066
+  freq_normalized_gini: 0.6387
+  freq_horizon_abs_bias_pct: 8.1622
+  bias_pct: -8.1622
+  freq_weekly_mae: 110.5350
+  freq_weekly_total_true: 20563.0000
+  freq_weekly_total_pred: 18884.6008
+  freq_valendin_mape: 20.9642
+  freq_horizon_bias_pct: -8.1622
+  freq_weekly_mean_pct_mape: 20.7499
+  freq_weekly_mean_pct_bias_pct: -5.6973
+  freq_weekly_bias_pct: -8.1622
+  freq_weekly_mape: 20.9642
+  freq_mape: 20.9642
+  freq_mase: 0.4106
+  freq_mase_scale: 0.0975
+  calibration_temperature_source: config
+  calibration_source: none
+  protocol_name: valendin_cdnow_master_39x39
+  cohort_size: 23500
+  calibration_weeks: 39
+  holdout_weeks: 39
+  inference_mode: sample
+  n_scenarios: 30
+  run_valid: True
+  run_invalid_reason: 
+  run_warning: 
+  epochs_completed: 27
+  max_epochs_configured: 150
+History saved: /kaggle/working/results/tables/lstm_base_cdnow_replication_seed2024_sample_history.json

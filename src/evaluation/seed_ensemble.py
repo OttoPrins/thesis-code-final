@@ -2,7 +2,7 @@
 Seed-ensemble inference for trained deep-learning checkpoints.
 
 Averages the per-week autoregressive predictions of the N trained seeds of one
-config (default {42, 7, 123}) at inference time, then scores the ensembled
+config (default {42, 7, 2024}) at inference time, then scores the ensembled
 prediction with the standard metric stack. This reduces residual cross-seed
 variance once scheduled sampling has corrected the *mean* autoregressive bias —
 it is NOT a substitute for more seeds (the seed count is fixed; this only
@@ -191,9 +191,14 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed-ensemble a trained CLV config.")
     parser.add_argument("--config", required=True)
-    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 7, 123])
+    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 7, 2024])
     parser.add_argument("--mode", choices=["sample", "expected"], default="sample")
-    parser.add_argument("--n-scenarios", type=int, default=200)
+    parser.add_argument(
+        "--n-scenarios",
+        type=int,
+        default=None,
+        help="Default: use inference.n_scenarios from the config.",
+    )
     parser.add_argument("--checkpoint-dir", default="results/checkpoints")
     parser.add_argument("--run-name", default=None,
                         help="Default: <config run_name>_ensemble_<mode>")
@@ -215,7 +220,12 @@ def main() -> None:
     results_dir = base_config.get("output", {}).get("results_dir", "results")
     run_name = args.run_name or f"{base_run}_ensemble_{args.mode}"
     base_config.setdefault("inference", {})["mode"] = args.mode
-    base_config.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
+    n_scenarios = (
+        int(args.n_scenarios)
+        if args.n_scenarios is not None
+        else int(base_config.setdefault("inference", {}).get("n_scenarios", 30))
+    )
+    base_config.setdefault("inference", {})["n_scenarios"] = n_scenarios
     device = _device()
     ckpt_dir = Path(args.checkpoint_dir)
 
@@ -227,12 +237,12 @@ def main() -> None:
             apply_kaggle_overrides(cfg, args.kaggle_data_root)
         cfg.setdefault("training", {})["seed"] = seed
         cfg.setdefault("inference", {})["mode"] = args.mode
-        cfg.setdefault("inference", {})["n_scenarios"] = args.n_scenarios
+        cfg.setdefault("inference", {})["n_scenarios"] = n_scenarios
         ckpt = ckpt_dir / f"{base_run}_seed{seed}_{args.mode}.pt"
         if not ckpt.exists():
             raise FileNotFoundError(f"Missing checkpoint for seed {seed}: {ckpt}")
         out = _run_one_seed(
-            cfg, ckpt, args.mode, args.n_scenarios,
+            cfg, ckpt, args.mode, n_scenarios,
             args.fit_temperature, args.fit_aggregate_calibration, device,
         )
         per_seed.append(out)

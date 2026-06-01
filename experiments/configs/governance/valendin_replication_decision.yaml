@@ -1,0 +1,123 @@
+# Frozen interpretation of the final Valendin CDNOW replication diagnostics.
+#
+# Purpose:
+#   Keep the thesis replication baseline honest after the failed Keras-exact
+#   ablation. This file is read by src.evaluation.replication_report and by
+#   tests that guard against accidentally promoting non-adopted diagnostics.
+
+version: 2026-06-01-valendin-replication-freeze
+status: baseline_frozen
+
+official_baseline:
+  config: experiments/configs/lstm_base_cdnow_replication.yaml
+  run_name: lstm_base_cdnow_replication_demo_pure
+  role: official_demo_pure_replication
+  decision: keep
+
+paper_consistent_variant:
+  config: experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml
+  run_name: lstm_base_cdnow_replication_paper_finetune
+  role: optional_paper_finetune
+  decision: evaluate_separately
+
+rejected_ablations:
+  - config: experiments/configs/lstm_base_cdnow_replication_keras_exact.yaml
+    run_name: lstm_base_cdnow_replication_keras_exact
+    role: keras_parity_diagnostic
+    decision: reject
+    reason: >
+      RMSE improved by less than the promotion threshold while absolute bias and
+      aggregate MAPE worsened materially, so the ablation is evidence against
+      tiny Keras/PyTorch parity details being the remaining bottleneck.
+    promotion_rule:
+      min_freq_mape_improvement_pp: 0.5
+      min_freq_rmse_improvement: 0.03
+      max_abs_bias_pct: 5.0
+    observed_seed42:
+      strict:
+        freq_rmse: 2.1817
+        bias_pct: -2.6899
+        freq_mape: 17.4893
+      ablation:
+        freq_rmse: 2.1688
+        bias_pct: -24.0557
+        freq_mape: 25.9607
+      outcome: reject_abs_bias_exceeded_and_mape_worsened
+
+final_evidence_set:
+  seeds: [42, 7, 2024]
+  inference_mode: sample
+  n_scenarios: 30
+  required_configs:
+    - experiments/configs/lstm_base_cdnow_replication.yaml
+    - experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml
+  diagnostic_only:
+    allowed:
+      - inference_mode: expected
+      - n_scenarios: 100
+    note: >
+      Use exactly one diagnostic to quantify sampling noise. Do not report it
+      as the main Valendin replication result.
+
+baseline_invariants:
+  amp_enabled: false
+  repair_on_failure: false
+  scheduler_type: none
+  max_grad_norm: 0.0
+  temperature_scaling: false
+  aggregate_scaling: false
+  scheduled_sampling_enabled: false
+  optimizer: adam
+  weight_decay: 0.0
+  cohort_size: 23570
+  protocol_name: valendin_cdnow_master_39x39
+
+report:
+  output_csv: results/tables/valendin_replication_interpretation.csv
+  output_markdown: results/tables/valendin_replication_interpretation.md
+  reference:
+    label: Valendin et al. (2022) paper target
+    freq_rmse: 1.86
+    bias_pct: -0.7
+    freq_mape: 13.8
+    note: Paper CDNOW target; compare cautiously against local code.
+  rows:
+    - label: Pareto/NBD local benchmark
+      kind: metrics
+      run_name: pareto_nbd_cdnow
+      note: >
+        Local benchmark currently follows the thesis CDNOW protocol; use as
+        context, not as exact one-to-one evidence for the 39x39 master run.
+    - label: Base LSTM strict seed 42
+      kind: metrics
+      run_name: lstm_base_cdnow_replication_demo_pure_seed42_sample
+      note: Official single-seed diagnostic if present.
+    - label: Base LSTM strict 3-seed mean
+      kind: seed_mean
+      base_run_name: lstm_base_cdnow_replication_demo_pure
+      note: Mean and standard deviation over seeds 42, 7, 2024.
+    - label: Base LSTM strict seed ensemble
+      kind: ensemble
+      run_name: lstm_base_cdnow_replication_demo_pure_ensemble_sample
+      base_run_name: lstm_base_cdnow_replication_demo_pure
+      note: Per-week average of seed predictions.
+    - label: Base LSTM paper-finetune 3-seed mean
+      kind: seed_mean
+      base_run_name: lstm_base_cdnow_replication_paper_finetune
+      note: Mean and standard deviation over seeds 42, 7, 2024.
+    - label: Base LSTM paper-finetune seed ensemble
+      kind: ensemble
+      run_name: lstm_base_cdnow_replication_paper_finetune_ensemble_sample
+      base_run_name: lstm_base_cdnow_replication_paper_finetune
+      note: Per-week average of paper-finetuned seed predictions.
+
+commands:
+  final_seed_sweep: >
+    python run_seeds.py --configs lstm_base_cdnow_replication
+    lstm_base_cdnow_replication_paper_finetune --seeds 42 7 2024 --modes sample
+    --skip_existing
+  build_array_ensembles_and_table: >
+    python -m src.evaluation.replication_report --build-array-ensembles
+  diagnostic_sampling_noise_100_scenarios: >
+    python run_seeds.py --configs lstm_base_cdnow_replication --seeds 42
+    --modes sample --n_scenarios 100

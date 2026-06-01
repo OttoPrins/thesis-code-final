@@ -732,6 +732,10 @@ def split_metric_artifacts(metrics: dict[str, Any]) -> tuple[dict[str, Any], dic
     array_artifacts: dict[str, np.ndarray] = {}
 
     for key, value in metrics.items():
+        if key == "ensemble_seeds" and isinstance(value, (list, tuple)):
+            scalar_metrics[key] = [int(v) for v in value]
+            continue
+
         if isinstance(value, np.generic):
             scalar_metrics[key] = value.item()
             continue

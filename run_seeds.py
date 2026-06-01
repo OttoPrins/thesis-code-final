@@ -5,7 +5,7 @@ For each (config, seed) pair, invokes `python train.py --config <c> --seed_overr
 Each run produces metrics at results/tables/<run_name>_seed<N>_metrics.json.
 
 Usage:
-    # All DL configs, default seeds {42, 7, 123}
+    # All DL configs, default seeds {42, 7, 2024}
     python run_seeds.py
 
     # Specific configs and seeds
@@ -60,7 +60,7 @@ DEFAULT_CONFIGS = [
     "extension3_transformer_full_dunnhumby",
 ]
 
-DEFAULT_SEEDS = [42, 7, 123]
+DEFAULT_SEEDS = [42, 7, 2024]
 
 
 def _default_results_dir() -> Path:

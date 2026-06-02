@@ -35,17 +35,13 @@ if not code_file.exists():
     raise SystemExit(f"ERROR: kernel-metadata.json code_file does not exist: {code_file}")
 text = code_file.read_text()
 required = [
-    "lstm_base_cdnow_replication",
-    "lstm_base_cdnow_replication_fullbatch",
-    "lstm_base_cdnow_replication_paper_finetune",
-    "lstm_base_cdnow_replication_paper_finetune_fullbatch",
-    "lstm_base_cdnow_replication_unseen_week_neutralized",
-    "EXPECTED_CONFIG_SETTINGS",
+    "lstm_base_cdnow_final",
+    "configs_final",
     "src.evaluation.replication_report",
     "src.evaluation.replication_diagnostics",
     "--build-array-ensembles",
     "sample100_rescore",
-    "RUN_EXTENSION_SWEEPS = False",
+    "RUN_ALL_STAGES = True",
 ]
 missing = [needle for needle in required if needle not in text]
 if missing:

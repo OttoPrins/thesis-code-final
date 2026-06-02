@@ -63,12 +63,22 @@ def _resolve_report_output(path: str | Path, results_dir: str | Path) -> Path:
     return out
 
 
-def _base_row(label: str, *, role: str, run_name: str = "", note: str = "") -> dict[str, Any]:
+def _base_row(
+    label: str,
+    *,
+    role: str,
+    run_name: str = "",
+    note: str = "",
+    comparison_scope: str = "",
+    headline_included: bool = False,
+) -> dict[str, Any]:
     return {
         "label": label,
         "role": role,
         "status": "missing",
         "run_name": run_name,
+        "comparison_scope": comparison_scope,
+        "headline_included": bool(headline_included),
         "n_runs": 0,
         "freq_rmse": np.nan,
         "freq_rmse_std": np.nan,
@@ -89,9 +99,21 @@ def _row_from_metrics(
     role: str,
     run_name: str,
     note: str = "",
+    comparison_scope: str = "",
+    headline_included: bool = False,
+    expected_protocol_name: str | None = None,
 ) -> dict[str, Any]:
-    row = _base_row(label, role=role, run_name=run_name, note=note)
+    row = _base_row(
+        label,
+        role=role,
+        run_name=run_name,
+        note=note,
+        comparison_scope=comparison_scope,
+        headline_included=headline_included,
+    )
     if metrics is None:
+        if comparison_scope.startswith("non_comparable") or comparison_scope.startswith("local"):
+            row["status"] = "missing_context"
         return row
     row["status"] = "complete" if metrics.get("run_valid", True) else "invalid"
     row["n_runs"] = 1
@@ -99,6 +121,13 @@ def _row_from_metrics(
         row[col] = metrics.get(col, np.nan)
     row["cohort_size"] = metrics.get("cohort_size", np.nan)
     row["protocol_name"] = metrics.get("protocol_name", "")
+    if (
+        expected_protocol_name
+        and row["protocol_name"]
+        and row["protocol_name"] != expected_protocol_name
+    ):
+        row["status"] = "context_non_comparable"
+        row["headline_included"] = False
     return row
 
 
@@ -112,9 +141,17 @@ def _row_from_seed_mean(
     *,
     role: str,
     note: str = "",
+    comparison_scope: str = "",
+    headline_included: bool = False,
 ) -> dict[str, Any]:
     available = [(run, metrics) for run, metrics in metrics_by_run if metrics is not None]
-    row = _base_row(label, role=role, note=note)
+    row = _base_row(
+        label,
+        role=role,
+        note=note,
+        comparison_scope=comparison_scope,
+        headline_included=headline_included,
+    )
     row["run_name"] = ",".join(run for run, _ in metrics_by_run)
     row["n_runs"] = len(available)
     if not available:
@@ -240,6 +277,8 @@ def build_replication_interpretation_table(
         ref["label"],
         role="paper_reference",
         note=ref.get("note", ""),
+        comparison_scope="paper_reference",
+        headline_included=True,
     )
     ref_row.update({
         "status": "reference",
@@ -255,6 +294,9 @@ def build_replication_interpretation_table(
         kind = spec["kind"]
         label = spec["label"]
         note = spec.get("note", "")
+        comparison_scope = spec.get("comparison_scope", "")
+        headline_included = bool(spec.get("headline_included", False))
+        expected_protocol_name = spec.get("expected_protocol_name")
         if kind == "metrics":
             run_name = spec["run_name"]
             rows.append(_row_from_metrics(
@@ -263,6 +305,9 @@ def build_replication_interpretation_table(
                 role="single_run_or_benchmark",
                 run_name=run_name,
                 note=note,
+                comparison_scope=comparison_scope,
+                headline_included=headline_included,
+                expected_protocol_name=expected_protocol_name,
             ))
         elif kind == "seed_mean":
             base_run = spec["base_run_name"]
@@ -276,6 +321,8 @@ def build_replication_interpretation_table(
                 metrics_by_run,
                 role="seed_mean",
                 note=note,
+                comparison_scope=comparison_scope,
+                headline_included=headline_included,
             ))
         elif kind == "ensemble":
             run_name = spec["run_name"]
@@ -294,6 +341,9 @@ def build_replication_interpretation_table(
                 role="seed_ensemble",
                 run_name=run_name,
                 note=note,
+                comparison_scope=comparison_scope,
+                headline_included=headline_included,
+                expected_protocol_name=expected_protocol_name,
             ))
         else:
             raise ValueError(f"Unknown report row kind: {kind!r}")
@@ -306,6 +356,8 @@ def build_replication_interpretation_table(
             role="rejected_ablation",
             run_name=run_name,
             note=rejected.get("reason", ""),
+            comparison_scope="rejected_ablation",
+            headline_included=False,
         ))
         rows[-1]["status"] = (
             "rejected" if rows[-1]["status"] != "missing" else "missing_rejected"
@@ -336,6 +388,8 @@ def _to_markdown(df: pd.DataFrame) -> str:
     cols = [
         "label",
         "status",
+        "comparison_scope",
+        "headline_included",
         "n_runs",
         "freq_rmse",
         "freq_rmse_std",

@@ -37,6 +37,7 @@ text = code_file.read_text()
 required = [
     "lstm_base_cdnow_replication_paper_finetune",
     "src.evaluation.replication_report",
+    "src.evaluation.replication_diagnostics",
     "--build-array-ensembles",
 ]
 missing = [needle for needle in required if needle not in text]

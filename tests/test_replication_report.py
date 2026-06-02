@@ -12,6 +12,10 @@ from src.evaluation.replication_report import (
     load_replication_decision,
     metrics_path,
 )
+from src.evaluation.replication_diagnostics import (
+    build_per_week_diagnostics,
+    build_seed_diagnostics,
+)
 
 
 def _write_seed_metrics(results_dir: Path, run_name: str, pred_week: np.ndarray) -> None:
@@ -49,6 +53,14 @@ def test_valendin_replication_decision_freezes_baseline_and_rejects_keras_exact(
     )
     assert decision["paper_consistent_variant"]["config"] == (
         "experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml"
+    )
+    assert decision["paper_consistent_variant"]["decision"] == "reject_for_cdnow_final"
+    non_promoted = {item["run_name"]: item["decision"] for item in decision["non_promoted_variants"]}
+    assert non_promoted["lstm_base_cdnow_replication_paper_finetune"] == "reject_for_cdnow_final"
+    assert non_promoted["lstm_base_cdnow_replication_keras_exact"] == "reject"
+    assert decision["observed_final_results"]["strict_demo_pure"]["seed_mean"]["bias_pct"] < -5.0
+    assert decision["observed_final_results"]["paper_finetune"]["seed_mean"]["freq_mape"] > (
+        decision["observed_final_results"]["strict_demo_pure"]["seed_mean"]["freq_mape"]
     )
     rejected = decision["rejected_ablations"][0]
     assert rejected["config"] == (
@@ -112,7 +124,10 @@ def test_replication_interpretation_table_can_render_missing_final_runs(tmp_path
     labels = set(df["label"])
     assert "Valendin et al. (2022) paper target" in labels
     assert "Base LSTM strict 3-seed mean" in labels
-    assert "Base LSTM paper-finetune seed ensemble" in labels
+    assert "Non-promoted Base LSTM paper-finetune seed ensemble" in labels
+    pareto = df[df["label"].str.contains("Pareto/NBD")].iloc[0]
+    assert not bool(pareto["headline_included"])
+    assert pareto["status"] == "missing_context"
     rejected = df[df["role"] == "rejected_ablation"].iloc[0]
     assert rejected["status"] == "missing_rejected"
 
@@ -126,3 +141,52 @@ def test_replication_governance_yaml_commands_are_parseable():
     assert cfg["baseline_invariants"]["repair_on_failure"] is False
     assert cfg["baseline_invariants"]["aggregate_scaling"] is False
     assert cfg["baseline_invariants"]["cohort_size"] == 23570
+    assert "replication_diagnostics" in cfg["commands"]["build_diagnostics_from_sidecars"]
+    assert "expected_rescore" in cfg["commands"]["diagnostic_expected_rescore_all_strict_seeds"]
+    assert "sample100_rescore" in cfg["commands"]["diagnostic_sampling_noise_100_scenarios_all_strict_seeds"]
+    assert "unseen_week_neutralized" in cfg["commands"]["diagnostic_unseen_week_sensitivity"]
+
+
+def test_replication_report_marks_local_benchmark_non_comparable_when_protocol_differs(tmp_path):
+    results_dir = tmp_path / "results"
+    metrics = {
+        "run_valid": True,
+        "freq_rmse": 1.2,
+        "bias_pct": 5.0,
+        "freq_mape": 16.0,
+        "cohort_size": 23502,
+        "protocol_name": "cdnow_52x26",
+    }
+    path = metrics_path(results_dir, "pareto_nbd_cdnow")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(metrics))
+
+    df = build_replication_interpretation_table(results_dir=results_dir, write_outputs=False)
+    row = df[df["label"].str.contains("Pareto/NBD")].iloc[0]
+    assert row["status"] == "context_non_comparable"
+    assert not bool(row["headline_included"])
+    assert row["comparison_scope"] == "non_comparable_local_context"
+
+
+def test_replication_diagnostics_builds_week_and_seed_tables(tmp_path):
+    results_dir = tmp_path / "results"
+    run_name = "lstm_base_cdnow_replication_demo_pure_seed42_sample"
+    pred_week = np.array([[1, 0, 1], [0, 1, 0]], dtype=np.float32)
+    _write_seed_metrics(results_dir, run_name, pred_week)
+    (results_dir / "tables" / f"{run_name}_history.json").write_text(json.dumps({
+        "train_loss": [0.4, 0.2],
+        "val_loss": [0.3, 0.25],
+    }))
+
+    seed_df = build_seed_diagnostics(results_dir=results_dir, write_outputs=False)
+    assert seed_df.loc[0, "best_val_loss"] == 0.25
+    assert seed_df.loc[0, "freq_mape"] >= 0
+
+    week_df, summary_df = build_per_week_diagnostics(
+        results_dir=results_dir,
+        make_plots=False,
+        write_outputs=False,
+    )
+    assert set(["holdout_week", "actual_freq", "pred_freq", "residual"]).issubset(week_df.columns)
+    assert summary_df.loc[0, "n_weeks"] == 3
+    assert "first_13_abs_error_share" in summary_df.columns

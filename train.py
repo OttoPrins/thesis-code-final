@@ -216,18 +216,23 @@ def build_model(config: dict) -> torch.nn.Module:
         raise ValueError(f"Unknown model type: {model_type!r}. Choose 'lstm' or 'transformer'.")
 
 
+def _teacher_forced_week_rows(calibration_weeks: int, num_rows: int) -> set[int]:
+    """Week-of-year rows used as teacher-forced training inputs."""
+    input_steps = max(0, int(calibration_weeks) - 1)
+    return {p % 52 for p in range(input_steps) if 0 <= (p % 52) < num_rows}
+
+
 def _neutralize_unseen_week_embeddings(model, calibration_weeks: int) -> int:
     """
     Replace week-of-year embedding rows never seen during calibration with the
     mean of the rows that WERE seen.
 
-    The week feature is week-of-year (position % 52). A calibration window shorter
-    than 52 weeks (e.g. CDNOW's 39 weeks) therefore only ever trains rows
-    {0 .. calibration_weeks-1}; rows {calibration_weeks .. 51} keep their random
-    N(0,1) init. At autoregressive inference the holdout feeds those untrained
-    rows ((calibration_weeks + h - 1) % 52), injecting noise for the first
-    (52 - calibration_weeks) holdout weeks. Setting unseen rows to the seen-row
-    mean makes them a trained-neutral input instead of random noise.
+    The week feature is week-of-year (position % 52). SequenceBuilder trains on
+    ``full_weeks[:, :-1]`` and predicts the shifted target. For a 39-week
+    calibration this means rows 0..37 are teacher-forced inputs; row 38 appears
+    in the seed at inference but was never an input during training. Rows not in
+    those teacher-forced inputs keep their initializer. Setting unseen rows to
+    the seen-row mean makes them a trained-neutral input instead of random noise.
 
     Valendin's reference avoids this only because its demo calibration spans
     multiple full years (all 52 rows train). No-op when calibration covers >= 52
@@ -237,8 +242,7 @@ def _neutralize_unseen_week_embeddings(model, calibration_weeks: int) -> int:
     if embed is None:
         return 0
     num_rows = embed.num_embeddings
-    seen = {p % 52 for p in range(calibration_weeks)}
-    seen = {r for r in seen if 0 <= r < num_rows}
+    seen = _teacher_forced_week_rows(calibration_weeks, num_rows)
     unseen = [r for r in range(num_rows) if r not in seen]
     if not unseen or not seen:
         return 0

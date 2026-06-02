@@ -5,8 +5,13 @@
 #   ablation. This file is read by src.evaluation.replication_report and by
 #   tests that guard against accidentally promoting non-adopted diagnostics.
 
-version: 2026-06-01-valendin-replication-freeze
+version: 2026-06-02-valendin-replication-freeze
 status: baseline_frozen
+conclusion: >
+  Architecture and protocol have been replicated closely enough for thesis use,
+  but Valendin-level CDNOW aggregate accuracy was not recovered. The strict
+  Base LSTM remains the official clean replication; worse post-hoc variants are
+  reported as non-promoted diagnostics rather than hidden repairs.
 
 official_baseline:
   config: experiments/configs/lstm_base_cdnow_replication.yaml
@@ -18,7 +23,20 @@ paper_consistent_variant:
   config: experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml
   run_name: lstm_base_cdnow_replication_paper_finetune
   role: optional_paper_finetune
-  decision: evaluate_separately
+  decision: reject_for_cdnow_final
+  reason: >
+    The 3-seed paper-finetune run worsened aggregate bias and MAPE relative to
+    the strict demo-pure baseline, including a seed-2024 collapse. It remains a
+    paper-consistent diagnostic, not a promoted CDNOW result.
+  observed_final:
+    seed_mean:
+      freq_rmse: 2.087
+      bias_pct: -14.2
+      freq_mape: 21.5
+    ensemble:
+      freq_rmse: 2.051903
+      bias_pct: -14.192816
+      freq_mape: 20.140206
 
 rejected_ablations:
   - config: experiments/configs/lstm_base_cdnow_replication_keras_exact.yaml
@@ -43,6 +61,81 @@ rejected_ablations:
         bias_pct: -24.0557
         freq_mape: 25.9607
       outcome: reject_abs_bias_exceeded_and_mape_worsened
+
+non_promoted_variants:
+  - config: experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml
+    run_name: lstm_base_cdnow_replication_paper_finetune
+    decision: reject_for_cdnow_final
+    reason: worsened aggregate bias and MAPE across the final 3-seed evidence set
+  - config: experiments/configs/lstm_base_cdnow_replication_keras_exact.yaml
+    run_name: lstm_base_cdnow_replication_keras_exact
+    decision: reject
+    reason: worsened aggregate bias and MAPE in the seed-42 parity ablation
+
+diagnostic_sensitivities:
+  - config: experiments/configs/lstm_base_cdnow_replication_unseen_week_neutralized.yaml
+    run_name: lstm_base_cdnow_replication_unseen_week_neutralized
+    role: diagnostic_only
+    decision: run_only_if_rescoring_indicates_unseen_week_effect
+    allowed_claim: sensitivity_result_only
+    differing_settings:
+      model.neutralize_unseen_week_embeddings: true
+    stop_rule: >
+      Promote only as a clearly labeled sensitivity if MAPE falls below 18 and
+      absolute bias falls below 5%; otherwise stop the Base LSTM repair loop.
+
+observed_final_results:
+  strict_demo_pure:
+    seed_runs:
+      42:
+        freq_rmse: 2.182
+        bias_pct: -2.7
+        freq_mape: 17.5
+      7:
+        freq_rmse: 1.984
+        bias_pct: -11.0
+        freq_mape: 19.7
+      2024:
+        freq_rmse: 2.145
+        bias_pct: -15.5
+        freq_mape: 20.2
+    seed_mean:
+      freq_rmse: 2.104
+      bias_pct: -9.8
+      freq_mape: 19.1
+    ensemble:
+      freq_rmse: 2.047538
+      bias_pct: -9.754830
+      freq_mape: 18.256743
+    interpretation: >
+      Seed 42 was unusually strong on aggregate bias. The 3-seed mean and seed
+      ensemble expose systematic underprediction, so seed 42 alone is not a
+      defensible headline result.
+  paper_finetune:
+    seed_runs:
+      42:
+        freq_rmse: 2.023
+        bias_pct: -5.4
+        freq_mape: 17.5
+      7:
+        freq_rmse: 2.004
+        bias_pct: -13.6
+        freq_mape: 20.8
+      2024:
+        freq_rmse: 2.235
+        bias_pct: -23.6
+        freq_mape: 26.2
+    seed_mean:
+      freq_rmse: 2.087
+      bias_pct: -14.2
+      freq_mape: 21.5
+    ensemble:
+      freq_rmse: 2.051903
+      bias_pct: -14.192816
+      freq_mape: 20.140206
+    interpretation: >
+      The fine-tune reduces RMSE for some seeds but worsens aggregate bias and
+      MAPE, so it is not adopted for CDNOW.
 
 final_evidence_set:
   seeds: [42, 7, 2024]
@@ -82,34 +175,48 @@ report:
     freq_mape: 13.8
     note: Paper CDNOW target; compare cautiously against local code.
   rows:
-    - label: Pareto/NBD local benchmark
+    - label: Pareto/NBD local 52x26 benchmark (context only)
       kind: metrics
       run_name: pareto_nbd_cdnow
+      comparison_scope: non_comparable_local_context
+      expected_protocol_name: valendin_cdnow_master_39x39
+      headline_included: false
       note: >
-        Local benchmark currently follows the thesis CDNOW protocol; use as
-        context, not as exact one-to-one evidence for the 39x39 master run.
+        Local benchmark currently follows the thesis CDNOW 52x26/sample-style
+        protocol when copied into Kaggle results; use as context only, not as an
+        exact 39x39 master comparator.
     - label: Base LSTM strict seed 42
       kind: metrics
       run_name: lstm_base_cdnow_replication_demo_pure_seed42_sample
+      comparison_scope: official_replication
+      headline_included: true
       note: Official single-seed diagnostic if present.
     - label: Base LSTM strict 3-seed mean
       kind: seed_mean
       base_run_name: lstm_base_cdnow_replication_demo_pure
+      comparison_scope: official_replication
+      headline_included: true
       note: Mean and standard deviation over seeds 42, 7, 2024.
     - label: Base LSTM strict seed ensemble
       kind: ensemble
       run_name: lstm_base_cdnow_replication_demo_pure_ensemble_sample
       base_run_name: lstm_base_cdnow_replication_demo_pure
+      comparison_scope: official_replication
+      headline_included: true
       note: Per-week average of seed predictions.
-    - label: Base LSTM paper-finetune 3-seed mean
+    - label: Non-promoted Base LSTM paper-finetune 3-seed mean
       kind: seed_mean
       base_run_name: lstm_base_cdnow_replication_paper_finetune
-      note: Mean and standard deviation over seeds 42, 7, 2024.
-    - label: Base LSTM paper-finetune seed ensemble
+      comparison_scope: non_promoted_paper_finetune
+      headline_included: false
+      note: Mean and standard deviation over seeds 42, 7, 2024; rejected for CDNOW final claim.
+    - label: Non-promoted Base LSTM paper-finetune seed ensemble
       kind: ensemble
       run_name: lstm_base_cdnow_replication_paper_finetune_ensemble_sample
       base_run_name: lstm_base_cdnow_replication_paper_finetune
-      note: Per-week average of paper-finetuned seed predictions.
+      comparison_scope: non_promoted_paper_finetune
+      headline_included: false
+      note: Per-week average of paper-finetuned seed predictions; rejected for CDNOW final claim.
 
 commands:
   final_seed_sweep: >
@@ -118,6 +225,21 @@ commands:
     --skip_existing
   build_array_ensembles_and_table: >
     python -m src.evaluation.replication_report --build-array-ensembles
-  diagnostic_sampling_noise_100_scenarios: >
-    python run_seeds.py --configs lstm_base_cdnow_replication --seeds 42
-    --modes sample --n_scenarios 100
+  build_diagnostics_from_sidecars: >
+    python -m src.evaluation.replication_diagnostics
+    --results-dir results
+  diagnostic_expected_rescore_all_strict_seeds: >
+    for seed in 42 7 2024; do python -m src.evaluation.rescore
+    --config experiments/configs/lstm_base_cdnow_replication.yaml
+    --checkpoint results/checkpoints/lstm_base_cdnow_replication_demo_pure_seed${seed}_sample.pt
+    --run-name lstm_base_cdnow_replication_demo_pure_seed${seed}_expected_rescore
+    --mode expected --n-scenarios 30; done
+  diagnostic_sampling_noise_100_scenarios_all_strict_seeds: >
+    for seed in 42 7 2024; do python -m src.evaluation.rescore
+    --config experiments/configs/lstm_base_cdnow_replication.yaml
+    --checkpoint results/checkpoints/lstm_base_cdnow_replication_demo_pure_seed${seed}_sample.pt
+    --run-name lstm_base_cdnow_replication_demo_pure_seed${seed}_sample100_rescore
+    --mode sample --n-scenarios 100; done
+  diagnostic_unseen_week_sensitivity: >
+    python run_seeds.py --configs lstm_base_cdnow_replication_unseen_week_neutralized
+    --seeds 42 7 2024 --modes sample --skip_existing

@@ -15,6 +15,7 @@ from src.evaluation.calibration import (
     RollingOriginInferenceDataset,
     validate_rolling_origins,
 )
+from train import _teacher_forced_week_rows
 
 
 def test_cdnow_loads_canonical_5_column_sample(tmp_path):
@@ -174,6 +175,29 @@ def test_cdnow_paper_finetune_config_preserves_strict_base_protocol():
     assert cfg["training"]["final_finetune"]["batch_size"] == 1024
     assert cfg["calibration"]["temperature_scaling"] is False
     assert cfg["calibration"]["aggregate_scaling"] is False
+
+
+def test_cdnow_unseen_week_neutralized_config_is_one_switch_sensitivity():
+    strict = yaml.safe_load(Path("experiments/configs/lstm_base_cdnow_replication.yaml").read_text())
+    sensitivity = yaml.safe_load(
+        Path("experiments/configs/lstm_base_cdnow_replication_unseen_week_neutralized.yaml").read_text()
+    )
+
+    assert strict["model"]["neutralize_unseen_week_embeddings"] is False
+    assert sensitivity["model"]["neutralize_unseen_week_embeddings"] is True
+    assert sensitivity["output"]["run_name"] == "lstm_base_cdnow_replication_unseen_week_neutralized"
+
+    strict_cmp = copy.deepcopy(strict)
+    sens_cmp = copy.deepcopy(sensitivity)
+    strict_cmp["model"]["neutralize_unseen_week_embeddings"] = True
+    strict_cmp["output"]["run_name"] = sens_cmp["output"]["run_name"]
+    assert sens_cmp == strict_cmp
+
+
+def test_unseen_week_neutralization_uses_teacher_forced_input_rows():
+    assert _teacher_forced_week_rows(calibration_weeks=39, num_rows=52) == set(range(38))
+    assert 38 not in _teacher_forced_week_rows(calibration_weeks=39, num_rows=52)
+    assert _teacher_forced_week_rows(calibration_weeks=53, num_rows=52) == set(range(52))
 
 
 def test_cdnow_replication_pipeline_preserves_valendin_contract():

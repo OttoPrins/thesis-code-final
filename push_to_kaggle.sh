@@ -35,16 +35,34 @@ if not code_file.exists():
     raise SystemExit(f"ERROR: kernel-metadata.json code_file does not exist: {code_file}")
 text = code_file.read_text()
 required = [
+    "lstm_base_cdnow_replication",
     "lstm_base_cdnow_replication_paper_finetune",
+    "lstm_base_cdnow_replication_unseen_week_neutralized",
     "src.evaluation.replication_report",
     "src.evaluation.replication_diagnostics",
     "--build-array-ensembles",
+    "sample100_rescore",
+    "RUN_EXTENSION_SWEEPS = False",
 ]
 missing = [needle for needle in required if needle not in text]
 if missing:
     raise SystemExit(
         "ERROR: Kaggle code_file is missing the final replication runner updates: "
         + ", ".join(missing)
+        + f"\nChecked file: {code_file}"
+    )
+forbidden = [
+    "lstm_base_cdnow_full",
+    "lstm_joint_cdnow_full",
+    "transformer_joint_cdnow_full",
+    "--fit-temperature",
+    "--fit-aggregate-calibration",
+]
+present_forbidden = [needle for needle in forbidden if needle in text]
+if present_forbidden:
+    raise SystemExit(
+        "ERROR: Kaggle code_file still contains obsolete CDNOW full-run configs: "
+        + ", ".join(present_forbidden)
         + f"\nChecked file: {code_file}"
     )
 print(f"  code_file: {code_file} — final replication runner checks passed")

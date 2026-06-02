@@ -1,22 +1,15 @@
-# Demo-pure CDNOW replication of Valendin et al. (2022).
+# Final — Base LSTM CDNOW replication of Valendin et al. (2022).
 #
-# Matches the reference implementation (github.com/valendin/rfm2lstm,
-# banking_transactions_demo.ipynb) and the paper's CDNOW protocol (Table 3):
-#   - Full 23,570-customer master cohort (acquired Q1 1997)
-#   - 39 calibration weeks + 39 holdout weeks
-#   - Softmax over ALL observed weekly transaction classes (max_trans = max),
-#     NOT clipped at [0,1,2,3]
-#   - Single LSTM(128) -> Dense(128) -> softmax, week + transaction embeddings only
-#   - Keras-style initialization, linear Dense(128), no dropout
-#   - Plain FP32 Adam(eps=1e-7), sparse categorical cross-entropy, seq2seq
-#   - EarlyStopping(restore_best, patience=5)
-#   - Autoregressive multinomial sampling at temperature 1.0, ~30 scenarios averaged
+# Identical to lstm_base_cdnow_replication.yaml (the validated winning config):
+#   - Full 23,570-customer master cohort (Q1 1997 cohort, 39×39 symmetric split)
+#   - Observed softmax classes (freq_cap: observed), no truncation to [0,1,2,3]
+#   - Keras-exact init, linear Dense(128), no dropout, no weight decay
+#   - Plain Adam(eps=1e-7), EarlyStopping(patience=5), 150 epochs
+#   - Autoregressive multinomial sampling, 30 scenarios, temperature=1.0
+#   - No calibration post-processing (temperature_scaling=false)
 #
-# Deliberately STRIPS the non-Valendin machinery present in other configs:
-#   - no temperature_scaling / aggregate_scaling / aggregate_shrinkage
-#   - no scheduled_sampling
-#   - no cosine scheduler / weight decay
-#   - no post-training full-cohort fine-tune
+# Reference targets (Valendin et al. 2022 Table 4):
+#   RMSE=1.86, bias=-0.7%, MAPE=13.8%
 dataset:
   name: cdnow
   raw_dir: data/raw
@@ -33,11 +26,11 @@ dataset:
   min_active_weeks: 1
   val_fraction: 0.1
   split_seed: 42
-  freq_cap: observed          # cap = observed max; n_classes = cap + 1
+  freq_cap: observed
 
 model:
   type: lstm
-  max_week: 51                # week-of-year 0..51 -> Embedding(52, 8)
+  max_week: 51
   hidden_size: 128
   dense_units: 128
   num_layers: 1
@@ -45,7 +38,6 @@ model:
   dense_activation: linear
   keras_initialization: true
   joint: false
-  # max_trans is set automatically from the calibration data (freq_cap: observed).
   neutralize_unseen_week_embeddings: false
 
 training:
@@ -75,7 +67,7 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_cdnow_replication_demo_pure
+  run_name: lstm_base_cdnow_final
   results_dir: results
   save_checkpoint: true
 

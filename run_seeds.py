@@ -97,6 +97,8 @@ def main():
     p = argparse.ArgumentParser(description="Sweep train.py over configs × seeds × inference modes.")
     p.add_argument("--configs", nargs="+", default=DEFAULT_CONFIGS,
                    help="Config basenames (without .yaml). Default: all final DL configs.")
+    p.add_argument("--config_dir", default="experiments/configs",
+                   help="Directory to search for config YAMLs. Default: experiments/configs.")
     p.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS,
                    help="Seeds to sweep over. Default: 42 7 123.")
     p.add_argument("--modes", nargs="+", default=["sample"],
@@ -118,10 +120,12 @@ def main():
                    help="Directory for per-run subprocess logs. Default: <results_dir>/logs.")
     args = p.parse_args()
 
+    configs_dir = Path(args.config_dir)
+
     # Build the full job list and report up front so the user knows what's coming.
     jobs = []
     for cfg_name in args.configs:
-        cfg_path = CONFIGS_DIR / f"{cfg_name}.yaml"
+        cfg_path = configs_dir / f"{cfg_name}.yaml"
         if not cfg_path.exists():
             print(f"WARN: config not found: {cfg_path}", file=sys.stderr, flush=True)
             continue

@@ -1,0 +1,81 @@
+# Final — Transformer Joint UCI Online Retail II (Extension 2).
+#
+# Same Transformer architecture as transformer_joint_cdnow_final, UCI split.
+dataset:
+  name: uci
+  raw_dir: data/raw
+  require_online_retail_ii: true
+  calibration_weeks: 78
+  holdout_weeks: 26
+  loss_mask_mode: all
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  freq_cap: auto
+  spend_scaler: robust
+
+model:
+  type: transformer
+  max_week: 51
+  d_model: 128
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
+  joint: true
+  spend_head: hurdle_lognormal
+  state_feature_dim: 1
+
+training:
+  epochs: 150
+  max_epochs: 150
+  batch_size: 256
+  val_batch_size: full
+  drop_last_train: true
+  lr: 0.0005
+  optimizer: adam
+  eps: 1.0e-7
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  amp_enabled: false
+  early_stopping_patience: 15
+  restore_best_checkpoint: true
+  scheduler:
+    type: none
+  scheduled_sampling:
+    enabled: false
+  final_finetune:
+    enabled: false
+  seed: 42
+
+loss:
+  type: kendall
+  n_tasks: 2
+  warmup_epochs: 10
+  spend_loss: nll
+  spend_loss_normalize: true
+  spend_loss_scale: 0.1
+  freq_logvar_max: -1.0
+  spend_logvar_max: 2.0
+  spend_logvar_clamp: [-2.0, 2.0]
+
+output:
+  run_name: transformer_joint_uci_final
+  results_dir: results
+  save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  mode: sample
+  temperature: 1.0
+  decode_top_bin: false
+
+calibration:
+  temperature_scaling: false
+  aggregate_scaling: false
+  aggregate_shrinkage: 1.0
+
+evaluation:
+  weekly_discount_rate: 0.0018
+  fail_on_invalid: false

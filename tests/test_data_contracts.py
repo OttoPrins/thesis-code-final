@@ -15,7 +15,11 @@ from src.evaluation.calibration import (
     RollingOriginInferenceDataset,
     validate_rolling_origins,
 )
-from train import _teacher_forced_week_rows
+from train import (
+    _resolve_final_finetune_batch_size,
+    _resolve_loader_batch_size,
+    _teacher_forced_week_rows,
+)
 
 
 def test_cdnow_loads_canonical_5_column_sample(tmp_path):
@@ -175,6 +179,63 @@ def test_cdnow_paper_finetune_config_preserves_strict_base_protocol():
     assert cfg["training"]["final_finetune"]["batch_size"] == 1024
     assert cfg["calibration"]["temperature_scaling"] is False
     assert cfg["calibration"]["aggregate_scaling"] is False
+
+
+def test_cdnow_fullbatch_sensitivity_configs_are_explicit_audit_variants():
+    strict = yaml.safe_load(Path("experiments/configs/lstm_base_cdnow_replication.yaml").read_text())
+    fullbatch = yaml.safe_load(
+        Path("experiments/configs/lstm_base_cdnow_replication_fullbatch.yaml").read_text()
+    )
+    paper = yaml.safe_load(
+        Path("experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml").read_text()
+    )
+    paper_full = yaml.safe_load(
+        Path("experiments/configs/lstm_base_cdnow_replication_paper_finetune_fullbatch.yaml").read_text()
+    )
+
+    assert strict["training"]["batch_size"] == 32
+    assert fullbatch["training"]["batch_size"] == "full"
+    assert fullbatch["training"]["val_batch_size"] == "full"
+    assert fullbatch["training"]["repair_on_failure"] is False
+    assert fullbatch["inference"]["mode"] == "sample"
+    assert fullbatch["evaluation"]["diagnostic_only"] is True
+
+    strict_cmp = copy.deepcopy(strict)
+    full_cmp = copy.deepcopy(fullbatch)
+    strict_cmp["training"]["batch_size"] = "full"
+    strict_cmp["output"]["run_name"] = full_cmp["output"]["run_name"]
+    strict_cmp.setdefault("evaluation", {})["diagnostic_only"] = True
+    assert full_cmp == strict_cmp
+
+    assert paper["training"]["batch_size"] == 32
+    assert paper["training"]["final_finetune"]["batch_size"] == 1024
+    assert paper_full["training"]["batch_size"] == "full"
+    assert paper_full["training"]["final_finetune"]["batch_size"] == "full"
+    assert paper_full["evaluation"]["diagnostic_only"] is True
+
+
+def test_symbolic_full_batch_size_resolution():
+    refs = {"train": 21, "val": 3, "inference": 24}
+
+    assert _resolve_loader_batch_size(
+        "full",
+        default=32,
+        dataset_len=refs["train"],
+        name="training.batch_size",
+        reference_sizes=refs,
+    ) == 21
+    assert _resolve_loader_batch_size(
+        "val",
+        default=32,
+        dataset_len=refs["train"],
+        name="training.batch_size",
+        reference_sizes=refs,
+    ) == 3
+    assert _resolve_final_finetune_batch_size(
+        {"final_finetune": {"enabled": True, "batch_size": "full"}},
+        base_batch_size=32,
+        full_dataset_len=23570,
+    ) == 23570
 
 
 def test_cdnow_unseen_week_neutralized_config_is_one_switch_sensitivity():

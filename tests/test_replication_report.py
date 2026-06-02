@@ -44,23 +44,26 @@ def _write_seed_metrics(results_dir: Path, run_name: str, pred_week: np.ndarray)
     save_metrics_with_artifacts(metrics, metrics_path(results_dir, run_name))
 
 
-def test_valendin_replication_decision_freezes_baseline_and_rejects_keras_exact():
+def test_valendin_replication_decision_reopens_audit_and_rejects_keras_exact():
     decision = load_replication_decision()
 
-    assert decision["status"] == "baseline_frozen"
+    assert decision["status"] == "replication_audit_pending"
     assert decision["official_baseline"]["config"] == (
         "experiments/configs/lstm_base_cdnow_replication.yaml"
     )
+    assert decision["official_baseline"]["decision"] == "keep_as_strict_reference"
     assert decision["paper_consistent_variant"]["config"] == (
         "experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml"
     )
-    assert decision["paper_consistent_variant"]["decision"] == "reject_for_cdnow_final"
-    non_promoted = {item["run_name"]: item["decision"] for item in decision["non_promoted_variants"]}
-    assert non_promoted["lstm_base_cdnow_replication_paper_finetune"] == "reject_for_cdnow_final"
-    assert non_promoted["lstm_base_cdnow_replication_keras_exact"] == "reject"
-    assert decision["observed_final_results"]["strict_demo_pure"]["seed_mean"]["bias_pct"] < -5.0
-    assert decision["observed_final_results"]["paper_finetune"]["seed_mean"]["freq_mape"] > (
-        decision["observed_final_results"]["strict_demo_pure"]["seed_mean"]["freq_mape"]
+    assert decision["paper_consistent_variant"]["decision"] == "rerun_pending"
+    ablations = {item["run_name"]: item for item in decision["forecast_quality_ablations"]}
+    assert "lstm_base_cdnow_replication_fullbatch" in ablations
+    assert ablations["lstm_base_cdnow_replication_fullbatch"]["differing_settings"]["training.batch_size"] == "full"
+    assert decision["promotion_rule"]["exclude_repaired_runs"] is True
+    previous = decision["previous_observed_results"]
+    assert previous["strict_demo_pure"]["seed_mean"]["bias_pct"] < -5.0
+    assert previous["paper_finetune"]["seed_mean"]["freq_mape"] > (
+        previous["strict_demo_pure"]["seed_mean"]["freq_mape"]
     )
     rejected = decision["rejected_ablations"][0]
     assert rejected["config"] == (
@@ -124,7 +127,8 @@ def test_replication_interpretation_table_can_render_missing_final_runs(tmp_path
     labels = set(df["label"])
     assert "Valendin et al. (2022) paper target" in labels
     assert "Base LSTM strict 3-seed mean" in labels
-    assert "Non-promoted Base LSTM paper-finetune seed ensemble" in labels
+    assert "Audit Base LSTM paper-finetune seed ensemble" in labels
+    assert "Full-batch Base LSTM sensitivity 3-seed mean" in labels
     pareto = df[df["label"].str.contains("Pareto/NBD")].iloc[0]
     assert not bool(pareto["headline_included"])
     assert pareto["status"] == "missing_context"
@@ -137,12 +141,15 @@ def test_replication_governance_yaml_commands_are_parseable():
     cfg = yaml.safe_load(path.read_text())
 
     assert "lstm_base_cdnow_replication_paper_finetune" in cfg["commands"]["final_seed_sweep"]
+    assert "lstm_base_cdnow_replication_fullbatch" in cfg["commands"]["final_seed_sweep"]
     assert "--build-array-ensembles" in cfg["commands"]["build_array_ensembles_and_table"]
     assert cfg["baseline_invariants"]["repair_on_failure"] is False
     assert cfg["baseline_invariants"]["aggregate_scaling"] is False
+    assert cfg["baseline_invariants"]["training_batch_size"] == 32
     assert cfg["baseline_invariants"]["cohort_size"] == 23570
     assert "replication_diagnostics" in cfg["commands"]["build_diagnostics_from_sidecars"]
     assert "expected_rescore" in cfg["commands"]["diagnostic_expected_rescore_all_strict_seeds"]
+    assert "fullbatch" in cfg["commands"]["diagnostic_expected_rescore_all_fullbatch_seeds"]
     assert "sample100_rescore" in cfg["commands"]["diagnostic_sampling_noise_100_scenarios_all_strict_seeds"]
     assert "unseen_week_neutralized" in cfg["commands"]["diagnostic_unseen_week_sensitivity"]
 

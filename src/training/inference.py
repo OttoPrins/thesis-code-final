@@ -106,12 +106,7 @@ def _step_from_logits(
         return sampled, pred_val, sampled_active
     if mode == "expected":
         ev = (probs * cv).sum(dim=-1)  # (B,) — weighted mean using representative values
-        # Sample activity (0 or 1) from Bernoulli(P(freq>0)) for the LSTM feedback class.
-        # Feeding back round(ev)=0 for sparse data creates a self-reinforcing zero spiral
-        # where the LSTM always sees "0 last week" and keeps predicting near-zero. Bernoulli
-        # feedback occasionally primes the LSTM with "1 last week", breaking the collapse
-        # while keeping expected-value predictions (not sample-path values) accumulated.
-        next_class = torch.bernoulli(p_active).long().clamp(0, max_trans)
+        next_class = torch.round(ev).long().clamp(0, max_trans)
         return next_class, ev, p_active
     raise ValueError(f"Unknown inference mode: {mode!r} — expected 'sample' or 'expected'.")
 

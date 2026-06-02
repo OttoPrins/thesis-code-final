@@ -470,13 +470,11 @@ def _run_final_finetune(
     if len(full_dataset) <= 0:
         raise ValueError("final_finetune requires a non-empty full calibration dataset")
 
-    ft_batch = int(
-        cfg.get(
-            "batch_size",
-            max(batch_size, int(batch_size * float(cfg.get("batch_size_multiplier", 1.0)))),
-        )
+    ft_batch = _resolve_final_finetune_batch_size(
+        training_cfg,
+        base_batch_size=batch_size,
+        full_dataset_len=len(full_dataset),
     )
-    ft_batch = max(1, min(ft_batch, len(full_dataset)))
     ft_lr = cfg.get("lr")
     if ft_lr is None:
         ft_lr = float(training_cfg["lr"]) * float(cfg.get("lr_multiplier", 0.1))
@@ -509,7 +507,12 @@ def _run_final_finetune(
     trainer.scheduler = None
     trainer._total_epochs = max(int(getattr(trainer, "_total_epochs", epochs)), epochs)
 
-    history = {"train_loss": [], "val_loss": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "batch_size_config": cfg.get("batch_size"),
+        "batch_size_resolved": ft_batch,
+    }
     print(
         "\nFinal calibration fine-tuning "
         f"for {epochs} epochs on {len(full_dataset)} customers "
@@ -568,6 +571,28 @@ def _resolve_loader_batch_size(
     if value <= 0:
         raise ValueError(f"{name} must be positive or a known shorthand, got {setting!r}")
     return max(1, min(value, max(1, dataset_len)))
+
+
+def _resolve_final_finetune_batch_size(
+    training_cfg: dict,
+    *,
+    base_batch_size: int,
+    full_dataset_len: int,
+) -> int:
+    """Resolve final fine-tune batch settings, including the symbolic ``full``."""
+    cfg = training_cfg.get("final_finetune", {}) or {}
+    default = max(
+        int(base_batch_size),
+        int(int(base_batch_size) * float(cfg.get("batch_size_multiplier", 1.0))),
+    )
+    setting = cfg.get("batch_size", default)
+    return _resolve_loader_batch_size(
+        setting,
+        default=default,
+        dataset_len=full_dataset_len,
+        name="training.final_finetune.batch_size",
+        reference_sizes={"full": full_dataset_len},
+    )
 
 
 def _build_customer_dataloader(
@@ -658,9 +683,16 @@ def _build_repair_config(config: dict, exc: BaseException) -> dict:
     training_cfg["max_grad_norm"] = min(current_clip, fallback_clip)
 
     if _looks_like_oom(exc):
-        batch_size = int(training_cfg.get("batch_size", 256))
-        reduced = max(1, batch_size // 2)
-        if reduced < batch_size:
+        raw_batch_size = training_cfg.get("batch_size", 256)
+        try:
+            batch_size = int(raw_batch_size)
+            reduced = max(1, batch_size // 2)
+        except (TypeError, ValueError):
+            if str(raw_batch_size).lower() == "full":
+                reduced = int(training_cfg.get("repair_fallback_batch_size", 1024))
+            else:
+                raise
+        if str(raw_batch_size).lower() != str(reduced):
             training_cfg["batch_size"] = reduced
             strategies.append(f"batch_size_{reduced}")
 
@@ -1400,6 +1432,14 @@ def run_experiment(
         inference_mode=str(inference_mode),
         n_scenarios=int(n_scenarios),
     )
+    metrics["training_batch_size_config"] = str(training_cfg.get("batch_size"))
+    metrics["training_batch_size_resolved"] = int(batch_size)
+    metrics["validation_batch_size_config"] = str(training_cfg.get("val_batch_size", training_cfg.get("batch_size")))
+    metrics["validation_batch_size_resolved"] = int(val_batch_size)
+    metrics["inference_batch_size_config"] = str(
+        training_cfg.get("inference_batch_size", training_cfg.get("batch_size"))
+    )
+    metrics["inference_batch_size_resolved"] = int(inference_batch_size)
     finetune_cfg = training_cfg.get("final_finetune", {}) or {}
     if finetune_cfg.get("enabled", False):
         metrics["final_finetune_enabled"] = True
@@ -1411,7 +1451,18 @@ def run_experiment(
                 finetune_cfg["lr_multiplier"]
             )
         if "batch_size" in finetune_cfg:
-            metrics["final_finetune_batch_size"] = int(finetune_cfg["batch_size"])
+            metrics["final_finetune_batch_size_config"] = str(finetune_cfg["batch_size"])
+        metrics["final_finetune_batch_size_resolved"] = int(
+            finetune_history.get(
+                "batch_size_resolved",
+                _resolve_final_finetune_batch_size(
+                    training_cfg,
+                    base_batch_size=batch_size,
+                    full_dataset_len=len(inference_ds),
+                ),
+            )
+        )
+        metrics["final_finetune_batch_size"] = metrics["final_finetune_batch_size_resolved"]
         if "batch_size_multiplier" in finetune_cfg:
             metrics["final_finetune_batch_size_multiplier"] = float(
                 finetune_cfg["batch_size_multiplier"]

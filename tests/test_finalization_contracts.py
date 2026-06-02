@@ -1356,11 +1356,16 @@ def test_sample_mode_activity_is_binary_and_matches_sampled_class():
 
 def test_expected_mode_is_deterministic_and_temperature_supported():
     logits = torch.tensor([[0.0, 1.0, 2.0, 3.0]])
+    before = torch.random.get_rng_state()
     a = _step_from_logits(logits, mode="expected", max_trans=3, temperature=1.5)
+    after = torch.random.get_rng_state()
     b = _step_from_logits(logits, mode="expected", max_trans=3, temperature=1.5)
+    expected_class = torch.round(a[1]).long().clamp(0, 3)
     assert torch.equal(a[0], b[0])
     assert torch.equal(a[1], b[1])
     assert torch.equal(a[2], b[2])
+    assert torch.equal(a[0], expected_class)
+    assert torch.equal(before, after)
 
 
 def test_conservative_aggregate_calibration_shrinks_and_clips():

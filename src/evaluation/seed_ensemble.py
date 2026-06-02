@@ -28,9 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 
-from src.data.collate import collate_fn
 from src.evaluation.calibration import (
     collect_autoregressive_rolling_validation,
     collect_teacher_forced_validation,
@@ -46,7 +44,14 @@ from src.training.inference import (
 )
 from src.utils.config import apply_kaggle_overrides, load_config
 from src.utils.final_manifest import attach_manifest_metadata
-from train import PIPELINES, _add_result_validity_checks, _compute_val_smearing, build_model
+from train import (
+    PIPELINES,
+    _add_result_validity_checks,
+    _build_customer_dataloader,
+    _compute_val_smearing,
+    _resolve_loader_batch_size,
+    build_model,
+)
 
 
 def _device() -> torch.device:
@@ -62,7 +67,7 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
     """Reconstruct the pipeline + model for one seed and run autoregressive inference.
 
     Returns (results, holdout_gt, scaler, inference_ds, smearing_factor,
-             temperature, aggregate_cal).
+             temperature, aggregate_cal, batch_metadata).
     """
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
@@ -70,16 +75,47 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
 
     pipeline = PIPELINES[dataset_cfg["name"]]()
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
-    batch_size = training_cfg["batch_size"]
+    loader_reference_sizes = {
+        "train": len(train_ds),
+        "val": len(val_ds),
+        "inference": len(inference_ds),
+    }
+    batch_size = _resolve_loader_batch_size(
+        training_cfg["batch_size"],
+        default=training_cfg["batch_size"],
+        dataset_len=len(train_ds),
+        name="training.batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    val_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("val_batch_size"),
+        default=batch_size,
+        dataset_len=len(val_ds),
+        name="training.val_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    inference_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("inference_batch_size"),
+        default=batch_size,
+        dataset_len=len(inference_ds),
+        name="training.inference_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
     n_workers = int(training_cfg.get("num_workers", 2))
     _pin = device.type == "cuda"
-    val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=n_workers, pin_memory=_pin, persistent_workers=(n_workers > 0),
+    val_loader = _build_customer_dataloader(
+        val_ds,
+        batch_size=val_batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=_pin,
     )
-    inference_loader = DataLoader(
-        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn,
-        num_workers=n_workers, pin_memory=_pin, persistent_workers=(n_workers > 0),
+    inference_loader = _build_customer_dataloader(
+        inference_ds,
+        batch_size=inference_batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=_pin,
     )
 
     model = build_model(config).to(device)
@@ -184,8 +220,18 @@ def _run_one_seed(config: dict, checkpoint: Path, mode: str, n_scenarios: int,
             mode=mode, temperature=temperature,
             class_values=class_values,
         )
+    batch_metadata = {
+        "training_batch_size_config": str(training_cfg.get("batch_size")),
+        "training_batch_size_resolved": int(batch_size),
+        "validation_batch_size_config": str(training_cfg.get("val_batch_size", training_cfg.get("batch_size"))),
+        "validation_batch_size_resolved": int(val_batch_size),
+        "inference_batch_size_config": str(
+            training_cfg.get("inference_batch_size", training_cfg.get("batch_size"))
+        ),
+        "inference_batch_size_resolved": int(inference_batch_size),
+    }
     return (results, holdout_gt, scaler, inference_ds, smearing_factor,
-            float(temperature), aggregate_cal)
+            float(temperature), aggregate_cal, batch_metadata)
 
 
 def main() -> None:
@@ -274,7 +320,7 @@ def main() -> None:
     ens_freq_factor = float(np.mean([c.freq_factor for c in cal_objs])) if cal_objs else 1.0
     ens_spend_factor = float(np.mean([c.spend_factor for c in cal_objs])) if cal_objs else 1.0
 
-    _, holdout_gt, scaler, inference_ds, _, _, _ = ref
+    _, holdout_gt, scaler, inference_ds, _, _, _, batch_metadata = ref
     true_per_week = np.asarray(holdout_gt["raw_freq"], dtype=np.float32)
 
     freq_kwargs = {
@@ -313,6 +359,7 @@ def main() -> None:
     base_model, _, _, _, _ = parse_run_name(base_run)
     metrics["model"] = f"{base_model}_ensemble"
     metrics["dataset"] = base_config.get("dataset", {}).get("name", "unknown")
+    metrics.update(batch_metadata)
 
     attach_manifest_metadata(
         metrics, config_path=args.config, config=base_config, run_name=run_name

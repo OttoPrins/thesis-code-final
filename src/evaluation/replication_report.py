@@ -1,6 +1,6 @@
-"""Final Valendin CDNOW replication interpretation table.
+"""Valendin CDNOW replication audit interpretation table.
 
-This module turns the frozen replication decision file into a compact table for
+This module turns the replication decision file into a compact table for
 the thesis: paper target, local benchmark context, strict Base LSTM seeds,
 paper-finetune seeds, and seed ensembles. It can also build seed ensembles from
 saved per-week prediction arrays, which is useful after Kaggle run artifacts are
@@ -28,7 +28,7 @@ METRIC_COLUMNS = ("freq_rmse", "bias_pct", "freq_mape")
 
 
 def load_replication_decision(path: str | Path = DEFAULT_GOVERNANCE_PATH) -> dict[str, Any]:
-    """Load the frozen replication decision/governance file."""
+    """Load the replication decision/governance file."""
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -264,7 +264,7 @@ def build_replication_interpretation_table(
     overwrite_ensembles: bool = False,
     write_outputs: bool = True,
 ) -> pd.DataFrame:
-    """Build the frozen Valendin replication interpretation table."""
+    """Build the Valendin replication interpretation table."""
     gov = load_replication_decision(governance_path)
     report_cfg = gov["report"]
     evidence = gov["final_evidence_set"]
@@ -327,14 +327,17 @@ def build_replication_interpretation_table(
         elif kind == "ensemble":
             run_name = spec["run_name"]
             if build_array_ensembles and not metrics_path(results_dir, run_name).exists():
-                build_array_ensemble(
-                    results_dir=results_dir,
-                    base_run_name=spec["base_run_name"],
-                    seeds=seeds,
-                    mode=mode,
-                    output_run_name=run_name,
-                    overwrite=overwrite_ensembles,
-                )
+                try:
+                    build_array_ensemble(
+                        results_dir=results_dir,
+                        base_run_name=spec["base_run_name"],
+                        seeds=seeds,
+                        mode=mode,
+                        output_run_name=run_name,
+                        overwrite=overwrite_ensembles,
+                    )
+                except (FileNotFoundError, KeyError, ValueError) as exc:
+                    print(f"Skipping ensemble {run_name}: {exc}")
             rows.append(_row_from_metrics(
                 label,
                 _load_metrics(metrics_path(results_dir, run_name)),

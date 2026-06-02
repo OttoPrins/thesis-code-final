@@ -15,9 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import Subset
 
-from src.data.collate import collate_fn
 from src.evaluation.calibration import (
     collect_autoregressive_rolling_validation,
     collect_teacher_forced_validation,
@@ -33,7 +32,12 @@ from src.training.inference import (
     autoregressive_inference_transformer,
 )
 from src.utils.config import apply_kaggle_overrides, load_config
-from train import PIPELINES, build_model
+from train import (
+    PIPELINES,
+    _build_customer_dataloader,
+    _resolve_loader_batch_size,
+    build_model,
+)
 
 
 def _device() -> torch.device:
@@ -390,22 +394,45 @@ def run_prediction_diagnostics(
         indices = np.arange(n)
         inference_eval_ds = Subset(inference_ds, indices.tolist())
         holdout_gt = _subset_holdout_gt(holdout_gt, indices)
-    batch_size = int(config["training"]["batch_size"])
+    loader_reference_sizes = {
+        "train": len(train_ds),
+        "val": len(val_ds),
+        "inference": len(inference_eval_ds),
+    }
+    batch_size = _resolve_loader_batch_size(
+        config["training"]["batch_size"],
+        default=config["training"]["batch_size"],
+        dataset_len=len(train_ds),
+        name="training.batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    val_batch_size = _resolve_loader_batch_size(
+        config["training"].get("val_batch_size"),
+        default=batch_size,
+        dataset_len=len(val_ds),
+        name="training.val_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    inference_batch_size = _resolve_loader_batch_size(
+        config["training"].get("inference_batch_size"),
+        default=batch_size,
+        dataset_len=len(inference_eval_ds),
+        name="training.inference_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
     n_workers = int(config["training"].get("num_workers", 0))
     pin = device.type == "cuda"
-    val_loader = DataLoader(
+    val_loader = _build_customer_dataloader(
         val_ds,
-        batch_size=batch_size,
+        batch_size=val_batch_size,
         shuffle=False,
-        collate_fn=collate_fn,
         num_workers=n_workers,
         pin_memory=pin,
     )
-    inference_loader = DataLoader(
+    inference_loader = _build_customer_dataloader(
         inference_eval_ds,
-        batch_size=batch_size,
+        batch_size=inference_batch_size,
         shuffle=False,
-        collate_fn=collate_fn,
         num_workers=n_workers,
         pin_memory=pin,
     )

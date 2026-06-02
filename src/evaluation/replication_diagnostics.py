@@ -1,4 +1,4 @@
-"""Diagnostics for the frozen Valendin CDNOW replication.
+"""Diagnostics for the Valendin CDNOW replication audit.
 
 This module is deliberately diagnostic-only. It reads saved metrics/array
 sidecars and writes tables/plots that explain seed instability and aggregate
@@ -123,6 +123,21 @@ def _default_run_specs(gov: dict[str, Any], include_rescore_runs: bool = True) -
                 "label": f"{base} seed {seed}",
             })
 
+    for ablation in gov.get("forecast_quality_ablations", []):
+        base = ablation["run_name"]
+        role = ablation.get("role", "forecast_quality_sensitivity")
+        for seed in seeds:
+            specs.append({
+                "family": role,
+                "run_name": f"{base}_seed{seed}_{mode}",
+                "label": f"{base} seed {seed}",
+            })
+        specs.append({
+            "family": role,
+            "run_name": f"{base}_ensemble_{mode}",
+            "label": f"{base} seed ensemble",
+        })
+
     if include_rescore_runs:
         for seed in seeds:
             specs.append({
@@ -135,6 +150,21 @@ def _default_run_specs(gov: dict[str, Any], include_rescore_runs: bool = True) -
                 "run_name": f"{strict}_seed{seed}_sample100_rescore",
                 "label": f"strict sample100 rescore seed {seed}",
             })
+        for ablation in gov.get("forecast_quality_ablations", []):
+            if "expected_rescore" not in set(ablation.get("modes", [])):
+                continue
+            base = ablation["run_name"]
+            for seed in seeds:
+                specs.append({
+                    "family": "diagnostic_rescore_expected",
+                    "run_name": f"{base}_seed{seed}_expected_rescore",
+                    "label": f"{base} expected rescore seed {seed}",
+                })
+                specs.append({
+                    "family": "diagnostic_rescore_sample100",
+                    "run_name": f"{base}_seed{seed}_sample100_rescore",
+                    "label": f"{base} sample100 rescore seed {seed}",
+                })
     return specs
 
 

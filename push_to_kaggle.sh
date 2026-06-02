@@ -36,8 +36,11 @@ if not code_file.exists():
 text = code_file.read_text()
 required = [
     "lstm_base_cdnow_replication",
+    "lstm_base_cdnow_replication_fullbatch",
     "lstm_base_cdnow_replication_paper_finetune",
+    "lstm_base_cdnow_replication_paper_finetune_fullbatch",
     "lstm_base_cdnow_replication_unseen_week_neutralized",
+    "EXPECTED_CONFIG_SETTINGS",
     "src.evaluation.replication_report",
     "src.evaluation.replication_diagnostics",
     "--build-array-ensembles",

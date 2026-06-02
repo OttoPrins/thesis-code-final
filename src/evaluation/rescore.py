@@ -16,9 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 
-from src.data.collate import collate_fn
 from src.evaluation.calibration import (
     collect_teacher_forced_validation,
     fit_aggregate_calibration,
@@ -36,7 +34,9 @@ from train import (
     _add_protocol_metadata,
     _add_result_validity_checks,
     _append_run_warning,
+    _build_customer_dataloader,
     _compute_val_smearing,
+    _resolve_loader_batch_size,
     build_model,
 )
 
@@ -81,10 +81,47 @@ def main() -> None:
 
     pipeline = PIPELINES[dataset_cfg["name"]]()
     train_ds, val_ds, inference_ds, holdout_gt, scaler = pipeline.run(config)
-    batch_size = training_cfg["batch_size"]
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-    inference_loader = DataLoader(
-        inference_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
+    loader_reference_sizes = {
+        "train": len(train_ds),
+        "val": len(val_ds),
+        "inference": len(inference_ds),
+    }
+    batch_size = _resolve_loader_batch_size(
+        training_cfg["batch_size"],
+        default=training_cfg["batch_size"],
+        dataset_len=len(train_ds),
+        name="training.batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    val_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("val_batch_size"),
+        default=batch_size,
+        dataset_len=len(val_ds),
+        name="training.val_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    inference_batch_size = _resolve_loader_batch_size(
+        training_cfg.get("inference_batch_size"),
+        default=batch_size,
+        dataset_len=len(inference_ds),
+        name="training.inference_batch_size",
+        reference_sizes=loader_reference_sizes,
+    )
+    n_workers = int(training_cfg.get("num_workers", 0))
+    pin = device.type == "cuda"
+    val_loader = _build_customer_dataloader(
+        val_ds,
+        batch_size=val_batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=pin,
+    )
+    inference_loader = _build_customer_dataloader(
+        inference_ds,
+        batch_size=inference_batch_size,
+        shuffle=False,
+        num_workers=n_workers,
+        pin_memory=pin,
     )
 
     model = build_model(config).to(device)
@@ -178,6 +215,14 @@ def main() -> None:
         inference_mode=args.mode,
         n_scenarios=int(args.n_scenarios),
     )
+    metrics["training_batch_size_config"] = str(training_cfg.get("batch_size"))
+    metrics["training_batch_size_resolved"] = int(batch_size)
+    metrics["validation_batch_size_config"] = str(training_cfg.get("val_batch_size", training_cfg.get("batch_size")))
+    metrics["validation_batch_size_resolved"] = int(val_batch_size)
+    metrics["inference_batch_size_config"] = str(
+        training_cfg.get("inference_batch_size", training_cfg.get("batch_size"))
+    )
+    metrics["inference_batch_size_resolved"] = int(inference_batch_size)
     metrics["rescore_checkpoint"] = str(args.checkpoint)
     metrics["rescore_temperature"] = float(temperature)
     metrics.update({f"validation_{k}": float(v) for k, v in validation_totals.items()})

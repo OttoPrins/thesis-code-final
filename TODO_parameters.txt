@@ -1,10 +1,18 @@
 # Parameter Governance TODOs
 
-- replication.yaml: batch_size=256 — justify from Valendin repo/code, empirical runtime constraints, or sensitivity evidence.
-- replication.yaml: dropout_rate=0.2 — verify against Valendin paper/repo or document as thesis implementation choice.
-- sensitivity.yaml: spend_log_transform — complete independent sweep and record chosen default.
-- sensitivity.yaml: regression_head_hidden — complete independent sweep and record chosen default.
-- sensitivity.yaml: kendall_warmup_epochs — complete independent sweep and record chosen default.
-- sensitivity.yaml: early_stopping_patience — complete independent sweep and record chosen default.
-- sensitivity.yaml: max_grad_norm — complete independent sweep and record chosen default.
-- sensitivity.yaml: scheduled_sampling — complete independent sweep and record chosen default.
+- replication.yaml: batch_size=256 — NOTE — document justification in thesis methodology section; \
+  not a code task.
+- replication.yaml: dropout_rate=0.2 — NOTE — document justification in thesis methodology section; \
+  not a code task.
+- sensitivity.yaml: spend_log_transform — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param dataset.spend_scaler --values log robust
+- sensitivity.yaml: regression_head_hidden — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param model.regression_head_hidden --values 0 32 64
+- sensitivity.yaml: kendall_warmup_epochs — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param loss.warmup_epochs --values 0 5 10 20
+- sensitivity.yaml: early_stopping_patience — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param training.early_stopping_patience --values 5 10 15 20
+- sensitivity.yaml: max_grad_norm — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param training.max_grad_norm --values 0.5 1.0 2.0 0.0
+- sensitivity.yaml: scheduled_sampling — DONE — addressable via: python tune.py --mode sensitivity \
+  --config <hpo_winner> --param training.scheduled_sampling.max_prob --values 0.0 0.1 0.25 0.4

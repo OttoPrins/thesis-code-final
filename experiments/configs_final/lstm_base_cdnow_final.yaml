@@ -1,27 +1,21 @@
-# Final — Base LSTM CDNOW replication of Valendin et al. (2022).
+# Final — Base LSTM CDNOW on full 23,570-customer master with thesis holdout.
 #
-# Identical to lstm_base_cdnow_replication.yaml (the validated winning config):
-#   - Full 23,570-customer master cohort (Q1 1997 cohort, 39×39 symmetric split)
-#   - Observed softmax classes (freq_cap: observed), no truncation to [0,1,2,3]
-#   - Keras-exact init, linear Dense(128), no dropout, no weight decay
-#   - Plain Adam(eps=1e-7), EarlyStopping(patience=5), 150 epochs
-#   - Autoregressive multinomial sampling, 30 scenarios, temperature=1.0
-#   - No calibration post-processing (temperature_scaling=false)
+# Applies the Valendin-winning settings (Keras init, linear dense, no dropout, no weight decay,
+# plain Adam(eps=1e-7), EarlyStopping(patience=5), 150 epochs) to the standard thesis CDNOW
+# protocol: 52-week calibration + 26-week holdout (Jan–Jun 1998 in the sample).
 #
-# Reference targets (Valendin et al. 2022 Table 4):
-#   RMSE=1.86, bias=-0.7%, MAPE=13.8%
+# Dataset: Full 23,570-customer master cohort (not sample).
+# Softmax: Observed classes (freq_cap: observed) to match Valendin's reference implementation
+#   without clipping, giving n_classes = max_observed_weekly_count + 1.
+# No calibration post-processing (temperature_scaling=false).
 dataset:
   name: cdnow
   raw_dir: data/raw
   raw_file: CDNOW_master.txt
   prefer_sample_file: false
-  protocol_name: valendin_cdnow_master_39x39
-  calibration_weeks: 39
-  holdout_weeks: 39
+  calibration_weeks: 52
+  holdout_weeks: 26
   origin_date: "1997-01-01"
-  cohort_end_date: "1997-03-31"
-  calendar_mode: valendin_year_week
-  keep_zero_amount_transactions: true
   loss_mask_mode: all
   min_active_weeks: 1
   val_fraction: 0.1
@@ -84,7 +78,4 @@ calibration:
 
 evaluation:
   weekly_discount_rate: 0.0018
-  valendin_reference_rmse: 1.86
-  valendin_reference_bias_pct: -0.7
-  valendin_reference_mape: 13.8
   fail_on_invalid: false

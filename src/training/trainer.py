@@ -605,10 +605,13 @@ class Trainer:
 
     def train_epoch(self, dataloader) -> dict:
         """One training epoch. Returns average metrics dict."""
+        import sys
+        import time
         self.model.train()
         self._nan_count = 0
         totals = {}
         n_batches = 0
+        t_start = time.time()
 
         for batch_idx, batch in enumerate(dataloader):
             self.optimizer.zero_grad()
@@ -662,7 +665,11 @@ class Trainer:
                 f"Training aborted: no finite training batches in epoch {self.current_epoch + 1}. "
                 f"Last valid checkpoint saved to {path}."
             )
-        return {k: v / n_batches for k, v in totals.items()}
+        result = {k: v / n_batches for k, v in totals.items()}
+        elapsed = time.time() - t_start
+        print(f"  [train done: {elapsed:.1f}s]", flush=True)
+        sys.stdout.flush()
+        return result
 
     def validate(self, dataloader) -> dict:
         """Validation epoch (no gradients). Returns average metrics dict."""
@@ -851,6 +858,7 @@ class Trainer:
                     train_metrics.get("task_weight_spend", float("nan"))
                 )
 
+            import sys
             print(
                 f"Epoch {epoch + 1:3d}/{epochs} — "
                 f"train_loss: {train_loss:.4f}  val_loss: {val_loss:.4f}"
@@ -860,8 +868,10 @@ class Trainer:
                     f"  w_freq: {train_metrics.get('task_weight_freq', float('nan')):.3f}"
                     f"  w_spend: {train_metrics.get('task_weight_spend', float('nan')):.3f}"
                     if self.joint else ""
-                )
+                ),
+                flush=True
             )
+            sys.stdout.flush()
 
             if early_stopping is not None:
                 if early_stopping(val_loss, self.model):

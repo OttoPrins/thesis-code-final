@@ -37,10 +37,6 @@ text = code_file.read_text()
 required = [
     "lstm_base_cdnow_final",
     "configs_final",
-    "src.evaluation.replication_report",
-    "src.evaluation.replication_diagnostics",
-    "--build-array-ensembles",
-    "sample100_rescore",
     "RUN_ALL_STAGES = True",
 ]
 missing = [needle for needle in required if needle not in text]
@@ -56,11 +52,15 @@ forbidden = [
     "transformer_joint_cdnow_full",
     "--fit-temperature",
     "--fit-aggregate-calibration",
+    "Valendin-winning",
+    "39x39",
+    "Valendin et al. (2022) 39",
+    "Valendin master replication",
 ]
 present_forbidden = [needle for needle in forbidden if needle in text]
 if present_forbidden:
     raise SystemExit(
-        "ERROR: Kaggle code_file still contains obsolete CDNOW full-run configs: "
+        "ERROR: Kaggle code_file contains obsolete Valendin branding language: "
         + ", ".join(present_forbidden)
         + f"\nChecked file: {code_file}"
     )

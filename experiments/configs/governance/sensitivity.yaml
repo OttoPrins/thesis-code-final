@@ -1,9 +1,0 @@
-# Parameter governance: Category C parameters requiring independent sensitivity sweeps.
-# Documentation artifact only. experiments/sensitivity.py reads these defaults.
-
-spend_log_transform: "log1p"    # TODO: JUSTIFY via sweep. Alternatives: ["log1p", "robust_log1p"]
-regression_head_hidden: null    # TODO: JUSTIFY via sweep. Alternatives: [null, 32, 64]
-kendall_warmup_epochs: 5        # TODO: JUSTIFY via sweep. Alternatives: [0, 5, 10]
-early_stopping_patience: 5      # TODO: JUSTIFY via sweep. Alternatives: [5, 10, 20]
-max_grad_norm: 1.0              # TODO: JUSTIFY via sweep. Alternatives: [0.5, 1.0, 5.0]
-scheduled_sampling: null        # TODO: JUSTIFY via sweep. Alternatives: [null, "linear", "inv_sigmoid"]

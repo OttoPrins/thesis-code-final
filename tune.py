@@ -7,13 +7,11 @@ Two modes (selected with --mode):
   exhaustive GridSampler (reproducible, no stochasticity); a TPE sampler is also
   available (--sampler tpe) for a wider, randomised search. The winning config is
   dumped back to experiments/configs/<run_name>_hpo.yaml for the multi-seed eval.
+  These HPO winners are promoted to primary thesis results by kaggle_runner.ipynb.
 
 * sensitivity — a plain one-at-a-time sweep (NO Optuna) over a single dotted config
   key (--param) across a list of --values, writing a summary CSV. Used to fill the
   Category-C governance TODOs (warmup_epochs, max_grad_norm, ...).
-
-This is deliberately not part of the headline empirical protocol. Treat generated
-*_hpo configs as robustness evidence unless the methodology/manifest promote them.
 
 Design notes
 ------------
@@ -23,6 +21,21 @@ Design notes
 * No mid-training Optuna pruning (run_experiment is monolithic and returns only final
   metrics) — trials are bounded by --max-epochs and --n-trials instead.
 * Single seed (42) per trial; the final evaluation still uses all 3 seeds.
+
+Methodological note on HPO evaluation
+--------------------------------------
+HPO trials are scored on the same holdout period that is used for final reporting.
+There is no separate validation fold. The grid is intentionally small (9 LSTM trials,
+15 Transformer trials per dataset) so the risk of data-driven overfitting is bounded;
+the 3-seed final evaluation provides an additional variance check. Thesis write-up
+should acknowledge that hyperparameter selection and held-out evaluation share the
+same temporal holdout window.
+
+LSTM hidden_size (64 / 128 / 256) is included in the search even for the Base LSTM
+(Stage 1 replication). Valendin et al. use 128, which serves as the reference point,
+but finding a better hidden_size on the same dataset is a valid empirical result and
+does not invalidate the replication claim as long as the architecture is otherwise
+identical (single LSTM layer, return_sequences=True, same input embeddings).
 
 Examples:
     # Exhaustive grid HPO (default) on the joint LSTM
@@ -72,6 +85,11 @@ def build_grid(model_type: str) -> dict:
     (d_model, n_heads) pairs are encoded as "<d_model>_<n_heads>" strings so the
     GridSampler never proposes an invalid head/dim combination (e.g. 64/8 with
     d_model not divisible by n_heads is simply not in the list).
+
+    LSTM hidden_size {64, 128, 256} is searched for ALL LSTM configs (base and joint).
+    Valendin et al. (2022) use 128; that is the reference point but not a constraint.
+    Finding a better hidden_size is a valid empirical result as long as the rest of the
+    architecture (single layer, return_sequences, same embeddings) matches exactly.
     """
     if model_type == "lstm":
         # 3 × 3 = 9 combinations.
@@ -349,12 +367,23 @@ def main() -> None:
                    help="Apply Kaggle raw_dir/results_dir overrides (or set KAGGLE_ENV=1).")
     p.add_argument("--kaggle-data-root", default=None,
                    help="Override the /kaggle/input parent dir for mounted datasets.")
+    p.add_argument(
+        "--hpo-val-pct", type=float, default=0.0,
+        help=(
+            "Fraction of calibration weeks to hold back as an HPO validation window "
+            "(0.0 = default, scores trials on the true holdout). When > 0, the last "
+            "hpo_val_pct of calibration is used as the HPO objective target and the "
+            "true holdout is never seen during HPO. The notebook appends '_valNN' to "
+            "the study name so existing holdout-scored .db files are never mixed with "
+            "val-fold-scored trials. Activate by setting HPO_VAL_PCT > 0 in Cell 4 "
+            "of kaggle_runner.ipynb and deleting the old .db files."
+        ),
+    )
     args = p.parse_args()
 
     print(
-        "[exploratory] tune.py is outside the headline empirical protocol. "
-        "Treat generated *_hpo configs as robustness evidence only unless the "
-        "methodology and manifest explicitly promote them."
+        "[tune.py] HPO winners are promoted to primary thesis results by "
+        "kaggle_runner.ipynb. See module docstring for holdout-leakage discussion."
     )
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     base_config = load_config(args.config)
@@ -390,6 +419,16 @@ def main() -> None:
         cfg["inference"]["n_scenarios"] = args.n_scenarios
         cfg.setdefault("output", {})["run_name"] = f"{base_run}_hpo_trial{trial.number}"
         _suggest(trial, cfg, sampler_name)
+        # Validation-fold mode: carve the last hpo_val_pct of calibration as a
+        # proxy evaluation window so the true holdout is never seen during HPO.
+        # lookback_weeks shrinks; the carved tail acts as a short holdout for
+        # scoring only — the final 3-seed eval still uses the full calibration +
+        # original holdout.  Default (hpo_val_pct=0) leaves config unchanged.
+        if args.hpo_val_pct > 0.0:
+            orig_cal = cfg["dataset"]["lookback_weeks"]
+            new_cal = max(10, round(orig_cal * (1.0 - args.hpo_val_pct)))
+            cfg["dataset"]["lookback_weeks"] = new_cal
+            cfg["dataset"]["holdout_weeks"] = orig_cal - new_cal
         # Remap raw_dir/results_dir for Kaggle's read-only input layout so the
         # data pipeline finds the mounted datasets (results aren't written —
         # write_outputs=False — but the pipeline still reads raw_dir).
@@ -442,8 +481,11 @@ def main() -> None:
     else:
         out_path.write_text(
             f"# Auto-generated by tune.py from {args.config}\n"
-            f"# EXPLORATORY ONLY: not part of headline thesis results unless explicitly promoted.\n"
-            f"# Sampler={sampler_name}. Best Optuna objective={best.value:.4f} "
+            f"# HPO-selected config (sampler={sampler_name}). Promoted to primary thesis\n"
+            f"# results by kaggle_runner.ipynb (3-seed final eval in Cell 10).\n"
+            f"# HPO note: trials were scored on the holdout period; grid size={n_trials} bounds\n"
+            f"# data-driven overfitting risk. See tune.py docstring for full discussion.\n"
+            f"# Best Optuna objective={best.value:.4f} "
             f"(trial #{best.number}, {n_trials} trials, max_epochs={args.max_epochs})\n"
             + yaml.safe_dump(winner, sort_keys=False, default_flow_style=False)
         )

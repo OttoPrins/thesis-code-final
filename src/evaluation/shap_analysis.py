@@ -142,11 +142,12 @@ class _CovariateShapWrapper(nn.Module):
             class_vals = torch.arange(
                 n_classes, dtype=probs.dtype, device=probs.device
             )
-            return (probs * class_vals).sum(dim=-1)  # (B,) expected count
+            # unsqueeze → (B, 1): GradientExplainer requires 2D output (does outputs[:, idx] internally)
+            return (probs * class_vals).sum(dim=-1).unsqueeze(-1)
         if self.head == "spend":
             if log_spend is None:
                 raise ValueError("Spend head requires a joint model.")
-            return log_spend[:, -1]  # (B,)
+            return log_spend[:, -1].unsqueeze(-1)  # (B, 1)
         raise ValueError(f"Unknown head: {self.head!r}")
 
 
@@ -306,8 +307,9 @@ def run_shap(
             [ex_static.to(device), ex_dynamic.to(device)]
         )
 
-        static_shap = shap_vals[0]    # (n_explain, S) ndarray
-        dynamic_shap = shap_vals[1]   # (n_explain, T, D) ndarray
+        # (B,1) output → multi_output=True → shap_vals = [[static, dynamic]]
+        static_shap = np.asarray(shap_vals[0][0])   # (n_explain, S)
+        dynamic_shap = np.asarray(shap_vals[0][1])  # (n_explain, T, D)
 
         # Aggregate dynamic SHAP across time: sum |shap| over T → (n_explain, D)
         dynamic_shap_agg = np.abs(dynamic_shap).sum(axis=1)   # (n_explain, D)

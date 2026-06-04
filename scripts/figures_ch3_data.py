@@ -218,8 +218,9 @@ def compute_summary(key: str, raw_df: pd.DataFrame, calib_w: pd.DataFrame) -> di
     """Compute per-dataset statistics for Table 3.1."""
     n_cust  = raw_df["customer_id"].nunique()
     n_trans = len(raw_df)
+    # Use LaTeX en-dash (--) to avoid UTF-8 U+2013 causing pdflatex inputenc errors
     period  = (f"{raw_df['date'].min().strftime('%b %Y')}"
-               f" – {raw_df['date'].max().strftime('%b %Y')}")
+               f"--{raw_df['date'].max().strftime('%b %Y')}")
 
     calib_per_cust = calib_w.groupby("customer_id")["weekly_freq"].sum()
     mean_purch     = calib_per_cust.mean()
@@ -255,6 +256,7 @@ def compute_summary(key: str, raw_df: pd.DataFrame, calib_w: pd.DataFrame) -> di
 
 def generate_table_3_1(stats: list[dict]) -> None:
     lines = []
+    lines.append(r"% Requires: \usepackage{booktabs}, \usepackage{makecell}")
     lines.append(r"\begin{table}[htbp]")
     lines.append(r"  \centering")
     lines.append(r"  \small")
@@ -306,27 +308,12 @@ def build_raster(weekly: pd.DataFrame, calib_weeks: int, holdout_weeks: int,
         weekly[weekly["week"] < calib_weeks]
         .groupby("customer_id")["weekly_freq"].sum()
     )
-    # Sample 30 from customers with ≥1 calibration purchase, sorted desc by total
-    eligible = calib_totals[calib_totals > 0].sort_values(ascending=False)
-    n_sample = min(n_show, len(eligible))
-    # stratified sample: take top 10, middle 10, bottom 10 to show heterogeneity
-    if n_sample >= 30:
-        top_n    = min(10, n_sample)
-        bot_n    = min(10, n_sample - top_n)
-        mid_pool = eligible.iloc[top_n: n_sample - bot_n]
-        mid_n    = min(10, len(mid_pool))
-        mid_idx  = RNG.choice(len(mid_pool), size=mid_n, replace=False) if mid_n > 0 else []
-        chosen = pd.concat([
-            eligible.iloc[:top_n],
-            mid_pool.iloc[mid_idx] if len(mid_idx) > 0 else pd.Series(dtype=float),
-            eligible.iloc[n_sample - bot_n:n_sample],
-        ])
-    else:
-        chosen = eligible.iloc[:n_sample]
-
-    chosen_ids = chosen.index.tolist()
-    # Sort by calibration total (most active = row 0)
-    chosen_ids.sort(key=lambda c: -calib_totals.get(c, 0))
+    # Sample uniformly from ALL customers (including sparse/inactive buyers) so that
+    # the raster shows genuine heterogeneity; sort by calibration total after sampling.
+    all_ids  = weekly["customer_id"].unique()
+    n_sample = min(n_show, len(all_ids))
+    chosen_ids = RNG.choice(all_ids, size=n_sample, replace=False).tolist()
+    chosen_ids.sort(key=lambda c: -calib_totals.get(c, 0))  # most active at row 0
 
     matrix = np.zeros((len(chosen_ids), T), dtype=np.int8)
     for row_i, cid in enumerate(chosen_ids):
@@ -356,13 +343,16 @@ def generate_figure_3_1(all_weekly: dict) -> None:
                   interpolation="none", origin="upper",
                   extent=[-0.5, T_total - 0.5, n_rows - 0.5, -0.5])
 
-        # Split line
+        # Split line + in-panel period labels (avoids title overlap)
         ax.axvline(tc - 0.5, color=C_SPLIT, lw=1.2, linestyle="--")
-        ax.text(tc - 0.5, -1.5, "Calibration | Holdout",
-                ha="center", va="bottom", fontsize=6, color=C_SPLIT)
+        ax.text(tc * 0.5,      n_rows - 0.7, "← Calibration", ha="center", va="center",
+                fontsize=5.5, color="white", alpha=0.75, style="italic")
+        ax.text(tc + th * 0.5, n_rows - 0.7, "Holdout →",    ha="center", va="center",
+                fontsize=5.5, color="white", alpha=0.75, style="italic")
 
+        # N outside math-mode so comma is not treated as a LaTeX group separator
         n_cust = weekly["customer_id"].nunique()
-        ax.set_title(f"{LABELS[key]}\n($N={n_cust:,}$, $T_c={tc}$, $T_h={th}$ wks)",
+        ax.set_title(f"{LABELS[key]}\n$N$={n_cust:,}, $T_c$={tc}, $T_h$={th} wks",
                      fontsize=8, pad=4)
         ax.set_xlabel("Week", fontsize=7)
         ax.set_ylabel("Customer (sorted by activity)", fontsize=7)
@@ -415,21 +405,24 @@ def generate_figure_3_2(all_weekly: dict, all_raw: dict) -> None:
         )
         p99 = np.percentile(calib_per_cust, 99)
         cap = min(int(np.ceil(p99)), int(calib_per_cust.max()))
-        # Bin: 1, 2, ..., cap-1, cap+
-        bins  = np.arange(0.5, cap + 1.5)
-        clipped = np.minimum(calib_per_cust.values, cap)
-        counts, edges = np.histogram(clipped, bins=bins)
+        # Adaptive bin width: target ~25 bars so dense datasets (Dunnhumby) don't
+        # produce a noisy 400-bar comb on a log-y axis.
+        bin_width = max(1, int(np.ceil(cap / 25)))
+        bin_edges = np.arange(0.5, cap + bin_width + 0.5, bin_width)
+        clipped   = np.minimum(calib_per_cust.values, cap)
+        counts, _ = np.histogram(clipped, bins=bin_edges)
+        x_pos     = (bin_edges[:-1] + bin_edges[1:]) / 2  # bin midpoints
+        bar_w     = bin_width * 0.85
 
-        x_pos  = np.arange(1, len(counts) + 1)
-        colors = [C_CALIB] * (len(counts) - 1) + ["#6c757d"]  # last bar (top bin) slightly lighter
-        ax_l.bar(x_pos, counts, width=0.8, color=colors, alpha=0.85, linewidth=0)
+        colors = [C_CALIB] * (len(counts) - 1) + ["#6c757d"]
+        ax_l.bar(x_pos, counts, width=bar_w, color=colors, alpha=0.85, linewidth=0)
         ax_l.set_yscale("log")
-        ax_l.set_xlabel(f"Calibration purchases per customer", fontsize=7)
+        ax_l.set_xlabel("Calibration purchases per customer", fontsize=7)
         ax_l.set_ylabel("Customers (log scale)", fontsize=7)
         ax_l.set_title(LABELS[key], fontsize=8)
-        ax_l.set_xlim(0.5, len(counts) + 0.5)
+        ax_l.set_xlim(bin_edges[0], bin_edges[-1])
         # Annotate the top bin
-        ax_l.text(len(counts), counts[-1] * 1.5, f"{cap}+",
+        ax_l.text(x_pos[-1], counts[-1] * 1.5, f"{cap}+",
                   ha="center", va="bottom", fontsize=6, color="#6c757d")
         ax_l.yaxis.set_major_formatter(ticker.FuncFormatter(
             lambda v, _: f"{int(v):,}" if v >= 1 else ""
@@ -506,8 +499,11 @@ def generate_figure_3_3(all_weekly: dict) -> None:
     fig, axes = plt.subplots(4, 1, figsize=(8, 9),
                              gridspec_kw={"hspace": 0.6})
 
+    # Annotations: only UCI Dec 2010 peak (week 52 from Dec 2009 = Dec 2010, visible in data).
+    # CDNOW "Christmas 1997" removed: that week falls in the holdout (calib ends week 39)
+    # and the arrow pointed to no notable feature in the normalised series.
     annotations = {
-        "cdnow":     {52: "Christmas 1997"},
+        "cdnow":     {},
         "uci":       {52: "Dec 2010 peak"},
         "tafeng":    {},
         "dunnhumby": {},
@@ -537,7 +533,8 @@ def generate_figure_3_3(all_weekly: dict) -> None:
                  label=f"Weekly revenue (max {CURRENCIES[key]} {max_revenue:,.0f})")
 
         ax.axvline(tc, color=C_SPLIT, lw=1.2, linestyle="--")
-        ax.text(tc + 0.3, 0.95, "Holdout →", fontsize=6, color=C_SPLIT, va="top")
+        label_h = "Holdout →" if th >= 8 else "H/O"
+        ax.text(tc + 0.3, 0.90, label_h, fontsize=6, color=C_SPLIT, va="top", clip_on=False)
 
         for week_num, label in annotations.get(key, {}).items():
             if week_num < tc + th:

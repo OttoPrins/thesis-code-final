@@ -52,8 +52,8 @@
   "final_manifest_version": "2026-05-29-v7-v8-extension3-sweep",
   "final_manifest_run_name": "pareto_nbd_uci",
   "final_manifest_benchmark_name": "pareto_nbd_uci",
-  "final_manifest_config": "experiments/configs/lstm_base_uci_v6.yaml",
-  "final_manifest_config_hash": "fd028ad50b7c",
-  "final_manifest_actual_config_hash": "a38701d90619",
+  "final_manifest_config": "experiments/configs_final/lstm_base_uci_final.yaml",
+  "final_manifest_config_hash": "0b231483fd7e",
+  "final_manifest_actual_config_hash": "659665433e0a",
   "arrays_file": "pareto_nbd_uci_arrays.npz"
 }

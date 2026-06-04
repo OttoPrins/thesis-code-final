@@ -79,3 +79,5 @@ Thumbs.db
 *.textClipping
 run_full_analysis.log
 results/logs/*.pid
+FINAL_KAGGLE_RESULTS/
+data/hpo cache/

@@ -40,14 +40,17 @@ training:
   weight_decay: 0.0
   max_grad_norm: 1.0
   amp_enabled: false
-  early_stopping_patience: 30
+  early_stopping_patience: 10
   restore_best_checkpoint: true
   scheduler:
     type: none
   scheduled_sampling:
     enabled: false
   final_finetune:
-    enabled: false
+    enabled: true
+    epochs: 5
+    batch_size: "full"
+    lr_multiplier: 0.1
   seed: 42
 
 loss:

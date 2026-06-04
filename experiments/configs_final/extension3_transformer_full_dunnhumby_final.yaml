@@ -45,7 +45,7 @@ training:
   max_grad_norm: 1.0
   amp_enabled: false
   num_workers: 0
-  early_stopping_patience: 10
+  early_stopping_patience: 15
   restore_best_checkpoint: true
   scheduler:
     type: cosine
@@ -55,7 +55,7 @@ training:
   final_finetune:
     enabled: true
     epochs: 5
-    batch_size: "full"
+    batch_size: 512
     lr_multiplier: 0.1
   seed: 42
 

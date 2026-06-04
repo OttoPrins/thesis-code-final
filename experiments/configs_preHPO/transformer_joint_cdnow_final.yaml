@@ -1,18 +1,14 @@
-# Final — Joint LSTM CDNOW (Extension 1: frequency + spend joint prediction).
+# Final — Transformer Joint CDNOW (Extension 2: Transformer + joint prediction).
 #
-# Inherits the Valendin-winning base settings (39×39, Keras init, Adam, no regularization)
-# and adds the spend regression head with Kendall multi-task uncertainty weighting.
-#
-# Key differences from base:
-#   - joint: true + hurdle_lognormal spend head
-#   - Kendall loss with freq_logvar_max=-1.0 guard (freq weight ≥ exp(1)/2 ≈ 1.36)
-#   - spend_loss_scale: 0.1 reduces spend NLL gradient magnitude 10× for stability
-#   - patience=15 (multi-task Kendall log-vars need more epochs to settle)
-#   - max_grad_norm=1.0 (guard against Kendall boundary spikes)
-#   - No auxiliary frequency_loss section — simplified Kendall only
-#
-# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): hidden_size=256 (was 128).
-# Pre-HPO base archived in experiments/configs_preHPO/.
+# Applies Valendin-winning data protocol (39×39, observed freq classes) to the
+# Transformer encoder. Key architectural choices:
+#   - d_model=128 (matches LSTM hidden_size=128 for fair comparison)
+#   - n_layers=2, n_heads=4 (32 dims/head; simple/shallow per proposal)
+#   - Time2Vec (time2vec_dim=8) + sinusoidal PE (both required by proposal)
+#   - Causal masking during training (Transformer sees full sequence; must not use future)
+#   - dropout=0.1 (Transformer needs some regularization; no Valendin reference here)
+#   - lr=0.0005 (lower than LSTM; attention gradients more sensitive)
+#   - No two-stage mode, no scheduled sampling
 dataset:
   name: cdnow
   raw_dir: data/raw
@@ -33,18 +29,17 @@ dataset:
   spend_scaler: robust
 
 model:
-  type: lstm
+  type: transformer
   max_week: 51
-  hidden_size: 256
-  dense_units: 128
-  num_layers: 1
-  dropout: 0.0
-  dense_activation: linear
-  keras_initialization: true
+  d_model: 128
+  n_heads: 4
+  n_layers: 2
+  d_ff: 256
+  dropout: 0.1
+  time2vec_dim: 8
   joint: true
   spend_head: hurdle_lognormal
   state_feature_dim: 1
-  neutralize_unseen_week_embeddings: false
 
 training:
   epochs: 150
@@ -52,13 +47,12 @@ training:
   batch_size: 256
   val_batch_size: full
   drop_last_train: true
-  lr: 0.001
+  lr: 0.0005
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0
   max_grad_norm: 1.0
   amp_enabled: false
-  repair_on_failure: false
   early_stopping_patience: 30
   restore_best_checkpoint: true
   scheduler:
@@ -81,7 +75,7 @@ loss:
   spend_logvar_clamp: [-2.0, 2.0]
 
 output:
-  run_name: lstm_joint_cdnow_final
+  run_name: transformer_joint_cdnow_final
   results_dir: results
   save_checkpoint: true
 

@@ -3,6 +3,9 @@
 # Same Transformer architecture; batch_size=512 for 32k customers.
 # Proposal specifically expects Transformer to outperform LSTM on Ta-Feng
 # (longer-range dependencies in high-frequency grocery data).
+#
+# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): lr=0.001 (was 0.0005).
+# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
   name: tafeng
   raw_dir: data/raw
@@ -34,7 +37,7 @@ training:
   batch_size: 512
   val_batch_size: full
   drop_last_train: true
-  lr: 0.0005
+  lr: 0.001
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0

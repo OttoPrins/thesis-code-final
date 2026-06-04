@@ -1,19 +1,16 @@
-# Final — Base LSTM UCI Online Retail II.
+# Final — Base LSTM Ta-Feng Grocery.
 #
 # Applies the Valendin-winning settings from lstm_base_cdnow_final:
 #   - Keras init, linear dense, no dropout, no weight decay
 #   - Plain Adam(eps=1e-7), EarlyStopping(patience=5), 150 epochs
-#   - freq_cap: auto (99th-pct cap — UCI has B2B outliers that would inflate classes)
+#   - freq_cap: auto (grocery weekly counts vary more than CDNOW)
+#   - batch_size: 512 (32k customers; larger batches give stable gradients)
 #   - No calibration post-processing
-#
-# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): hidden_size=256 (was 128).
-# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
-  name: uci
+  name: tafeng
   raw_dir: data/raw
-  require_online_retail_ii: true
-  calibration_weeks: 78
-  holdout_weeks: 26
+  calibration_weeks: 12
+  holdout_weeks: 5
   loss_mask_mode: all
   min_active_weeks: 1
   val_fraction: 0.1
@@ -23,7 +20,7 @@ dataset:
 model:
   type: lstm
   max_week: 51
-  hidden_size: 256
+  hidden_size: 128
   dense_units: 128
   num_layers: 1
   dropout: 0.0
@@ -34,7 +31,7 @@ model:
 training:
   epochs: 150
   max_epochs: 150
-  batch_size: 256
+  batch_size: 512
   val_batch_size: full
   drop_last_train: true
   lr: 0.001
@@ -57,7 +54,7 @@ loss:
   type: cross_entropy
 
 output:
-  run_name: lstm_base_uci_final
+  run_name: lstm_base_tafeng_final
   results_dir: results
   save_checkpoint: true
 
@@ -73,5 +70,5 @@ calibration:
   aggregate_shrinkage: 1.0
 
 evaluation:
-  weekly_discount_rate: 0.0018
+  weekly_discount_rate: 0.0
   fail_on_invalid: false

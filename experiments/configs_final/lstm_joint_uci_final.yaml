@@ -1,6 +1,9 @@
 # Final — Joint LSTM UCI Online Retail II (Extension 1: frequency + spend).
 #
 # Same Valendin-winning base + Kendall joint settings as lstm_joint_cdnow_final.
+#
+# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): hidden_size=64 (was 128), lr=0.0003 (was 0.001).
+# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
   name: uci
   raw_dir: data/raw
@@ -17,7 +20,7 @@ dataset:
 model:
   type: lstm
   max_week: 51
-  hidden_size: 128
+  hidden_size: 64
   dense_units: 128
   num_layers: 1
   dropout: 0.0
@@ -33,7 +36,7 @@ training:
   batch_size: 256
   val_batch_size: full
   drop_last_train: true
-  lr: 0.001
+  lr: 0.0003
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0

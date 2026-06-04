@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from src.data.datasets import (
 from src.data.transforms import TemporalSplitter, WeeklyAggregator
 from src.evaluation.benchmarks import get_benchmark_model
 from src.evaluation.metrics import compute_all_metrics, save_metrics_with_artifacts
-from src.utils.config import load_config
+from src.utils.config import apply_kaggle_overrides, load_config
 from src.utils.final_manifest import attach_manifest_metadata
 from src.utils.seed import set_seed
 
@@ -148,6 +149,10 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    if os.environ.get("KAGGLE_ENV", "0") == "1":
+        apply_kaggle_overrides(config, None)
+        print(f"[Kaggle] raw_dir  -> {config['dataset']['raw_dir']}")
+        print(f"[Kaggle] results  -> {config['output']['results_dir']}")
     dataset_cfg = config["dataset"]
     output_cfg = config.get("output", {})
 

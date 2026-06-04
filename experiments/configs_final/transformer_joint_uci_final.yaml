@@ -1,10 +1,6 @@
 # Final — Transformer Joint UCI Online Retail II (Extension 2).
 #
 # Same Transformer architecture as transformer_joint_cdnow_final, UCI split.
-#
-# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): d_model=256, n_heads=8 (both were 128/4),
-# lr=0.0001 (was 0.0005). d_ff stays at 256.
-# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
   name: uci
   raw_dir: data/raw
@@ -21,8 +17,8 @@ dataset:
 model:
   type: transformer
   max_week: 51
-  d_model: 256
-  n_heads: 8
+  d_model: 128
+  n_heads: 4
   n_layers: 2
   d_ff: 256
   dropout: 0.1
@@ -37,7 +33,7 @@ training:
   batch_size: 256
   val_batch_size: full
   drop_last_train: true
-  lr: 0.0001
+  lr: 0.0005
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0

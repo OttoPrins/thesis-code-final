@@ -10,9 +10,6 @@
 #   - patience=15 (multi-task Kendall log-vars need more epochs to settle)
 #   - max_grad_norm=1.0 (guard against Kendall boundary spikes)
 #   - No auxiliary frequency_loss section — simplified Kendall only
-#
-# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): hidden_size=256 (was 128).
-# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
   name: cdnow
   raw_dir: data/raw
@@ -35,7 +32,7 @@ dataset:
 model:
   type: lstm
   max_week: 51
-  hidden_size: 256
+  hidden_size: 128
   dense_units: 128
   num_layers: 1
   dropout: 0.0

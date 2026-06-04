@@ -1214,33 +1214,53 @@ def test_teacher_forced_transformer_paths_slice_full_dynamic_covariates():
     assert np.isfinite(smear)
 
 
-def test_final_joint_configs_use_strict_stability_defaults():
+def test_final_configs_freeze_valendin_fixed_tuning_protocol():
     manifest = yaml.safe_load(open("experiments/final_manifest.yaml"))
     final_configs = manifest["deep_learning_configs"]
     manifest_hashes = manifest["deep_learning_config_hashes"]
-    joint_configs = [
-        path for path in final_configs
-        if "lstm_base_" not in path
-    ]
-    assert joint_configs
+    assert len(final_configs) == 20
 
-    for path in joint_configs:
+    for path in final_configs:
         cfg = yaml.safe_load(open(path))
         assert manifest_hashes[path] == manifest_config_hash(cfg), path
+        assert path.startswith("experiments/configs_final/"), path
+
+        dataset = cfg["dataset"]
+        model = cfg["model"]
         training = cfg["training"]
-        assert training["lr"] == pytest.approx(5e-4), path
-        assert training["max_grad_norm"] == pytest.approx(0.5), path
+        inference = cfg["inference"]
+
+        assert dataset["val_fraction"] == pytest.approx(0.1), path
+        assert dataset["split_seed"] == 42, path
+        assert training["epochs"] == 150, path
+        assert training["max_epochs"] == 150, path
+        assert training["early_stopping_patience"] == 30, path
+        assert training["restore_best_checkpoint"] is True, path
+        assert training["final_finetune"]["enabled"] is False, path
         assert training["amp_enabled"] is False, path
+        assert inference["mode"] == "sample", path
+        assert inference["n_scenarios"] == 30, path
 
-    base_configs = [path for path in final_configs if "lstm_base_" in path]
-    assert base_configs
-    for path in base_configs:
-        cfg = yaml.safe_load(open(path))
-        assert manifest_hashes[path] == manifest_config_hash(cfg), path
-        training = cfg["training"]
-        assert training["lr"] == pytest.approx(1e-3), path
-        assert training["max_grad_norm"] == pytest.approx(1.0), path
-        assert "amp_enabled" not in training
+        if model["type"] == "transformer":
+            assert model["d_model"] == 128, path
+            assert model["n_heads"] == 4, path
+            assert training["lr"] == pytest.approx(5e-4), path
+            assert training["max_grad_norm"] == pytest.approx(1.0), path
+        else:
+            assert model["hidden_size"] == 128, path
+            assert model["dense_units"] == 128, path
+            assert training["lr"] == pytest.approx(1e-3), path
+            if model.get("joint"):
+                assert training["max_grad_norm"] == pytest.approx(1.0), path
+            else:
+                assert training["max_grad_norm"] == pytest.approx(0.0), path
+
+        if dataset["name"] == "cdnow":
+            assert dataset["protocol_name"] == "valendin_cdnow_master_39x39", path
+            assert dataset["calibration_weeks"] == 39, path
+            assert dataset["holdout_weeks"] == 39, path
+            assert dataset["calendar_mode"] == "valendin_year_week", path
+            assert dataset["keep_zero_amount_transactions"] is True, path
 
 
 def test_cdnow_v4_soft_configs_parse_and_use_conservative_frequency_loss():

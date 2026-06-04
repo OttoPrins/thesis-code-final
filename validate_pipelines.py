@@ -26,10 +26,10 @@ from src.data.datasets import (
 from src.utils.config import load_config
 
 DATASET_CONFIGS = {
-    "cdnow":     "experiments/configs/lstm_base_cdnow.yaml",
-    "uci":       "experiments/configs/lstm_base_uci.yaml",
-    "tafeng":    "experiments/configs/lstm_base_tafeng.yaml",
-    "dunnhumby": "experiments/configs/lstm_base_dunnhumby.yaml",
+    "cdnow":     "experiments/configs_final/lstm_base_cdnow_final.yaml",
+    "uci":       "experiments/configs_final/lstm_base_uci_final.yaml",
+    "tafeng":    "experiments/configs_final/lstm_base_tafeng_final.yaml",
+    "dunnhumby": "experiments/configs_final/lstm_base_dunnhumby_final.yaml",
 }
 
 PIPELINES = {

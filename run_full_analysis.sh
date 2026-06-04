@@ -128,7 +128,7 @@ if [[ "$SMOKE" != "1" ]]; then
 
 if [[ -z "$CDNOW_METRICS" ]]; then
     echo "$(ts)   No CDNOW Base LSTM metrics found — running canary training ..."
-    "$PYTHON_BIN" train.py --config experiments/configs/lstm_base_cdnow.yaml \
+    "$PYTHON_BIN" train.py --config experiments/configs_final/lstm_base_cdnow_final.yaml \
         2>&1 | tee "$LOG_DIR/gate_cdnow.log"
 	    CDNOW_METRICS=$(for f in $(ls results/tables/lstm_base_cdnow*_metrics.json 2>/dev/null \
 	        | grep -v "comparison_" | sort); do
@@ -146,8 +146,8 @@ sys.exit(0 if abs(float(b)) <= 8.0 else 1)
 " 2>/dev/null) || {
         BIAS=$("$PYTHON_BIN" -c "import json; d=json.load(open('$CDNOW_METRICS')); print(f\"{d.get('bias_pct',999):.1f}\")" 2>/dev/null || echo "999")
         echo "$(ts) [FATAL] CDNOW Base LSTM bias_pct=${BIAS}% > 8% — fix replication before sweep."
-        echo "$(ts)   Check: cohort_end_date and origin_date in experiments/configs/lstm_base_cdnow.yaml"
-        echo "$(ts)   Then re-run: python train.py --config experiments/configs/lstm_base_cdnow.yaml"
+        echo "$(ts)   Check: cohort_end_date and origin_date in experiments/configs_final/lstm_base_cdnow_final.yaml"
+        echo "$(ts)   Then re-run: python train.py --config experiments/configs_final/lstm_base_cdnow_final.yaml"
         exit 1
     }
     echo "$(ts)   CDNOW Base LSTM bias_pct=${BIAS}% ≤ 8% — gate passed."
@@ -157,30 +157,29 @@ fi  # end of non-smoke gate block
 
 # ---------------------------------------------------------------------------
 # Step 1 — Probabilistic benchmarks
-#   True GPPM and Pareto/GGG are CDNOW replication benchmarks only.
-#   Missing rpy2/BTYDplus or CmdStan fails in full preflight with instructions.
+#   The fixed final manifest includes Pareto/NBD under the same base configs.
 # ---------------------------------------------------------------------------
 echo ""
 echo "$(ts) [Step 1] Running probabilistic benchmarks ..."
 
 if [[ "$SMOKE" == "1" ]]; then
-    BENCHMARK_CONFIGS=("experiments/configs/lstm_base_cdnow.yaml")
-    BENCH_MODELS_BY_DATASET_cdnow="pareto_nbd bgnbd_gg"
+    BENCHMARK_CONFIGS=("experiments/configs_final/lstm_base_cdnow_final.yaml")
+    BENCH_MODELS_BY_DATASET_cdnow="pareto_nbd"
 else
     BENCHMARK_CONFIGS=(
-        "experiments/configs/lstm_base_cdnow.yaml"
-        "experiments/configs/lstm_base_uci.yaml"
-        "experiments/configs/lstm_base_tafeng.yaml"
-        "experiments/configs/lstm_base_dunnhumby.yaml"
+        "experiments/configs_final/lstm_base_cdnow_final.yaml"
+        "experiments/configs_final/lstm_base_uci_final.yaml"
+        "experiments/configs_final/lstm_base_tafeng_final.yaml"
+        "experiments/configs_final/lstm_base_dunnhumby_final.yaml"
     )
-    BENCH_MODELS_BY_DATASET_cdnow="pareto_nbd bgnbd_gg pareto_ggg gppm"
-    BENCH_MODELS_BY_DATASET_uci="pareto_nbd bgnbd_gg"
-    BENCH_MODELS_BY_DATASET_tafeng="pareto_nbd bgnbd_gg"
-    BENCH_MODELS_BY_DATASET_dunnhumby="pareto_nbd bgnbd_gg"
+    BENCH_MODELS_BY_DATASET_cdnow="pareto_nbd"
+    BENCH_MODELS_BY_DATASET_uci="pareto_nbd"
+    BENCH_MODELS_BY_DATASET_tafeng="pareto_nbd"
+    BENCH_MODELS_BY_DATASET_dunnhumby="pareto_nbd"
 fi
 
 for cfg in "${BENCHMARK_CONFIGS[@]}"; do
-    ds=$(basename "$cfg" .yaml | sed 's/lstm_base_//')
+    ds=$(basename "$cfg" .yaml | sed 's/lstm_base_//' | sed 's/_final//')
     var_name="BENCH_MODELS_BY_DATASET_${ds}"
     BENCH_MODELS="${!var_name}"
     # Check if ALL expected benchmark outputs exist (skip only if all present)
@@ -207,11 +206,12 @@ echo "$(ts) [Step 1] Done."
 #   Smoke: 1 config × 1 seed × 3 epochs = 1 invocation.
 # ---------------------------------------------------------------------------
 echo ""
-echo "$(ts) [Step 2] Multi-seed DL sweep (sample mode, seeds 42 7 123) ..."
+echo "$(ts) [Step 2] Multi-seed DL sweep (sample mode, seeds 42 7 2024) ..."
 
 if [[ "$SMOKE" == "1" ]]; then
     "$PYTHON_BIN" run_seeds.py \
-        --configs lstm_base_cdnow \
+        --config_dir experiments/configs_final \
+        --configs lstm_base_cdnow_final \
         --seeds 42 \
         --modes sample \
         --skip_existing \
@@ -219,7 +219,7 @@ if [[ "$SMOKE" == "1" ]]; then
         --n_scenarios 2 \
         2>&1 | tee "$LOG_DIR/run_seeds_sample.log"
 else
-    "$PYTHON_BIN" run_seeds.py --seeds 42 7 123 --modes sample --skip_existing \
+    "$PYTHON_BIN" run_seeds.py --config_dir experiments/configs_final --seeds 42 7 2024 --modes sample --skip_existing \
         2>&1 | tee "$LOG_DIR/run_seeds_sample.log"
 fi
 
@@ -232,10 +232,11 @@ echo "$(ts) [Step 2] Done."
 # ---------------------------------------------------------------------------
 if [[ "$SMOKE" != "1" ]]; then
     echo ""
-    echo "$(ts) [Step 3] Expected-mode diagnostic (base configs, seeds 42 7 123) ..."
+    echo "$(ts) [Step 3] Expected-mode diagnostic (base configs, seeds 42 7 2024) ..."
     "$PYTHON_BIN" run_seeds.py \
-        --configs lstm_base_cdnow lstm_base_uci lstm_base_tafeng lstm_base_dunnhumby \
-        --seeds 42 7 123 \
+        --config_dir experiments/configs_final \
+        --configs lstm_base_cdnow_final lstm_base_uci_final lstm_base_tafeng_final lstm_base_dunnhumby_final \
+        --seeds 42 7 2024 \
         --modes expected \
         --skip_existing \
         2>&1 | tee "$LOG_DIR/run_seeds_expected.log"
@@ -268,7 +269,7 @@ if [[ "$SMOKE" != "1" ]]; then
         else
             echo "$(ts)   Using checkpoint: ${SHAP_CKPT}"
             "$PYTHON_BIN" -m src.evaluation.shap_analysis \
-                --config experiments/configs/extension3_lstm_full_dunnhumby.yaml \
+                --config experiments/configs_final/extension3_lstm_full_dunnhumby_final.yaml \
                 --checkpoint "$SHAP_CKPT" \
                 --n_background 100 \
                 --n_explain 200 \

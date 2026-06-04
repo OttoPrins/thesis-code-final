@@ -2,9 +2,8 @@
 Final-analysis preflight checks.
 
 This script verifies the data identity and dependency gates that matter before
-starting final thesis runs. Smoke mode checks only the lightweight CDNOW path;
-full mode also requires Online Retail II, Pareto/GGG dependencies, and CmdStan
-for the true CDNOW GPPM.
+starting final thesis runs. Smoke mode checks only the CDNOW Valendin master
+path; full mode also checks Online Retail II and Dunnhumby data identity.
 """
 
 from __future__ import annotations
@@ -55,38 +54,44 @@ def _check_manifest() -> dict:
         _ok(f"{cfg_path}: frozen hash={actual} run={cfg['output']['run_name']}")
     runtime = manifest.get("runtime_expectations", {}).get("deep_learning", {})
     default_runtime = runtime.get("default", runtime)
-    if default_runtime.get("epochs") != 300:
-        _fail("final manifest default runtime must freeze deep-learning epochs at 300.")
+    if default_runtime.get("epochs") != 150:
+        _fail("final manifest default runtime must freeze deep-learning epochs at 150.")
     if runtime.get("inference_mode") != manifest.get("methodology", {}).get("inference_primary"):
         _fail("final manifest runtime inference_mode must match methodology.inference_primary.")
-    if default_runtime.get("n_scenarios") != 200:
-        _fail("final manifest default runtime must freeze n_scenarios at 200.")
+    if default_runtime.get("n_scenarios") != 30:
+        _fail("final manifest default runtime must freeze n_scenarios at 30.")
     return manifest
 
 
 def _check_cdnow() -> None:
-    cfg = load_config("experiments/configs/lstm_base_cdnow_v2.yaml")
+    cfg = load_config("experiments/configs_final/lstm_base_cdnow_final.yaml")
     pipe = CDNOWPipeline()
     pipe._current_dataset_cfg = cfg["dataset"]
     raw = pipe.load_raw(cfg["dataset"].get("raw_dir", "data/raw"))
     clean = pipe.clean(raw)
     raw_customers = raw["customer_id"].nunique()
     clean_customers = clean["customer_id"].nunique()
-    if raw_customers != 2357:
+    if raw_customers != 23570:
         _fail(
-            f"CDNOW final run must use the canonical 2,357-customer sample; "
+            f"CDNOW final run must use the Valendin 23,570-customer master; "
             f"loaded {raw_customers} raw customers."
         )
-    if cfg["dataset"]["calibration_weeks"] != 52 or cfg["dataset"]["holdout_weeks"] != 26:
-        _fail("CDNOW split must be 52/26 for final runs.")
+    if cfg["dataset"].get("protocol_name") != "valendin_cdnow_master_39x39":
+        _fail("CDNOW final run must declare protocol_name=valendin_cdnow_master_39x39.")
+    if cfg["dataset"]["calibration_weeks"] != 39 or cfg["dataset"]["holdout_weeks"] != 39:
+        _fail("CDNOW split must be 39/39 for final Valendin-protocol runs.")
+    if cfg["dataset"].get("calendar_mode") != "valendin_year_week":
+        _fail("CDNOW final run must use calendar_mode=valendin_year_week.")
+    if cfg["dataset"].get("keep_zero_amount_transactions") is not True:
+        _fail("CDNOW final run must keep zero-amount transactions for cohort parity.")
     _ok(
-        "CDNOW canonical sample detected "
-        f"(2,357 raw customers; {clean_customers} with positive spend, split 52/26)"
+        "CDNOW Valendin master detected "
+        f"(23,570 raw customers; {clean_customers} cleaned customers, split 39/39)"
     )
 
 
 def _check_uci_online_retail_ii() -> None:
-    cfg = load_config("experiments/configs/lstm_base_uci_v2.yaml")
+    cfg = load_config("experiments/configs_final/lstm_base_uci_final.yaml")
     pipe = UCIRetailPipeline()
     pipe._current_dataset_cfg = cfg["dataset"]
     raw = pipe.load_raw(cfg["dataset"].get("raw_dir", "data/raw"))
@@ -99,7 +104,7 @@ def _check_uci_online_retail_ii() -> None:
 
 
 def _check_dunnhumby_window() -> None:
-    cfg = load_config("experiments/configs/lstm_base_dunnhumby_v2.yaml")
+    cfg = load_config("experiments/configs_final/lstm_base_dunnhumby_final.yaml")
     raw_dir = Path(cfg["dataset"].get("raw_dir", "data/raw/Dunnhumby datasets"))
     path = raw_dir / "transaction_data.csv"
     if not path.exists():
@@ -169,8 +174,6 @@ def main() -> None:
         if not args.smoke:
             _check_uci_online_retail_ii()
             _check_dunnhumby_window()
-            _check_pareto_ggg()
-            _check_gppm()
     except Exception as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         sys.exit(1)

@@ -8,17 +8,18 @@
 # Softmax: Observed classes (freq_cap: observed) to match Valendin's reference implementation
 #   without clipping, giving n_classes = max_observed_weekly_count + 1.
 # No calibration post-processing (temperature_scaling=false).
-#
-# HPO-tuned (Optuna grid, Kaggle T4×2, 2026-06-04): lr=0.003 (was 0.001).
-# Pre-HPO base archived in experiments/configs_preHPO/.
 dataset:
   name: cdnow
   raw_dir: data/raw
   raw_file: CDNOW_master.txt
   prefer_sample_file: false
+  protocol_name: valendin_cdnow_master_39x39
   calibration_weeks: 39
   holdout_weeks: 39
   origin_date: "1997-01-01"
+  cohort_end_date: "1997-03-31"
+  calendar_mode: valendin_year_week
+  keep_zero_amount_transactions: true
   loss_mask_mode: all
   min_active_weeks: 1
   val_fraction: 0.1
@@ -43,7 +44,7 @@ training:
   batch_size: 256
   val_batch_size: full
   drop_last_train: true
-  lr: 0.003
+  lr: 0.001
   optimizer: adam
   eps: 1.0e-7
   weight_decay: 0.0

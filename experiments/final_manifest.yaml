@@ -1,299 +1,85 @@
-# Frozen final-analysis manifest.
-# Comparison tables should include only run names generated from these configs
-# unless a command explicitly requests exploratory runs.
+# Frozen final-analysis manifest for the Valendin-style fixed tuning protocol.
+# HPO artifacts are deliberately excluded from the thesis evidence set.
 
-version: 2026-05-29-v7-v8-extension3-sweep
-results_status: v7_complete_v8_extension3_pending
-archive_dir: results/archive/pre_validity_protocol_20260519
-# Change log:
-# 2026-05-29: Bumped version for v7/v8/extension3 sweep.
-#   - Added v7 and v7_twostage joint configs for all 4 datasets (16 configs).
-#   - Added Extension 3 sample-mode configs (8 configs, 3 seeds each).
-#   - v8 CDNOW/UCI/TaFeng joint configs placeholder (to be finalised before Kaggle run).
-#   - Removed gppm_cdnow from benchmark_run_names (scipy stub is not a real GPPM;
-#     see benchmarks.py and thesis Limitations section).
-#   - GPPM stub files archived to results/archive/gppm_stub/.
-#   - compare.py now implements 3-tier quality gate (A/B/C) instead of binary valid/invalid.
-# 2026-05-20: v6 sweep recovery protocol (previous version).
-
+version: 2026-06-04-valendin-fixed-v1
+results_status: fixed_protocol_pending_rerun
 methodology:
-  min_active_weeks: 1
+  tuning_protocol: valendin_fixed_validation
+  hyperparameter_policy: pre_specified_architecture_defaults_no_hpo
+  validation_policy: 10_percent_customer_validation_split_within_calibration_only
   inference_primary: sample
-  seeds: [42, 7, 2024]
+  seeds:
+  - 42
+  - 7
+  - 2024
   splits:
-    cdnow: {calibration_weeks: 52, holdout_weeks: 26}
-    uci: {calibration_weeks: 78, holdout_weeks: 26, required_file: online_retail_II.xlsx}
-    tafeng: {calibration_weeks: 12, holdout_weeks: 5}
-    dunnhumby: {calibration_weeks: 80, holdout_weeks: 22}
-    extension3_dunnhumby: {calibration_weeks: 80, holdout_weeks: 4}
-    cdnow_sensitivity: {calibration_weeks: 39, holdout_weeks: 39}
-
+    cdnow:
+      calibration_weeks: 39
+      holdout_weeks: 39
+      protocol_name: valendin_cdnow_master_39x39
+    uci:
+      calibration_weeks: 78
+      holdout_weeks: 26
+    tafeng:
+      calibration_weeks: 12
+      holdout_weeks: 5
+    dunnhumby:
+      calibration_weeks: 80
+      holdout_weeks: 22
+    extension3_dunnhumby:
+      calibration_weeks: 80
+      holdout_weeks: 4
 runtime_expectations:
   deep_learning:
     inference_mode: sample
     default:
-      epochs: 300
-      n_scenarios: 200
-    by_config:
-      experiments/configs/extension3_lstm_none_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_lstm_static_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_lstm_full_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_transformer_none_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_transformer_static_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      experiments/configs/extension3_transformer_full_dunnhumby.yaml: {epochs: 100, n_scenarios: 30}
-      # v6 track — noshrink calibration, sample inference, 100-epoch budget
-      experiments/configs/lstm_base_cdnow_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_base_uci_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_base_tafeng_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_base_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_cdnow_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_uci_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_tafeng_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_cdnow_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_uci_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_tafeng_v6b.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_dunnhumby_v6.yaml: {epochs: 100, n_scenarios: 30, inference_mode: sample}
-      # v7 track — spend_loss_scale=0.1 fix; 120-epoch budget; two-stage variants
-      experiments/configs/lstm_joint_cdnow_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_cdnow_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_uci_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_uci_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_tafeng_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_tafeng_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_dunnhumby_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_cdnow_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_cdnow_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_uci_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_uci_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_tafeng_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_tafeng_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_dunnhumby_v7.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      # v8 LSTM joint fix track
-      experiments/configs/lstm_joint_cdnow_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_uci_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/lstm_joint_tafeng_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      # Extension 3 sample-mode track — 3 seeds × 8 configs (replaces v4_soft expected-only)
-      experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml: {epochs: 120, n_scenarios: 30, inference_mode: sample}
-      # v4_soft track — deterministic expected-value inference, 100-epoch budget
-      experiments/configs/lstm_base_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_joint_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/transformer_joint_cdnow_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_base_uci_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_joint_uci_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/transformer_joint_uci_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_base_tafeng_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_joint_tafeng_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/transformer_joint_tafeng_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_base_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_joint_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/transformer_joint_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/lstm_base_cdnow_39x39_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_lstm_none_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_lstm_static_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_lstm_dynamic_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_lstm_full_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_transformer_none_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_transformer_static_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_transformer_dynamic_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-      experiments/configs/extension3_transformer_full_dunnhumby_v4_soft.yaml: {epochs: 100, n_scenarios: 1, inference_mode: expected}
-
+      epochs: 150
+      n_scenarios: 30
 deep_learning_configs:
-  - experiments/configs/lstm_base_cdnow_v2.yaml
-  - experiments/configs/lstm_joint_cdnow_v2.yaml
-  - experiments/configs/transformer_joint_cdnow_v2.yaml
-  - experiments/configs/lstm_base_uci_v2.yaml
-  - experiments/configs/lstm_joint_uci_v2.yaml
-  - experiments/configs/transformer_joint_uci_v2.yaml
-  - experiments/configs/lstm_base_tafeng_v2.yaml
-  - experiments/configs/lstm_joint_tafeng_v2.yaml
-  - experiments/configs/transformer_joint_tafeng_v2.yaml
-  - experiments/configs/lstm_base_dunnhumby_v2.yaml
-  - experiments/configs/lstm_joint_dunnhumby_v2.yaml
-  - experiments/configs/transformer_joint_dunnhumby_v2.yaml
-  - experiments/configs/extension3_lstm_none_dunnhumby.yaml
-  - experiments/configs/extension3_lstm_static_dunnhumby.yaml
-  - experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml
-  - experiments/configs/extension3_lstm_full_dunnhumby.yaml
-  - experiments/configs/extension3_transformer_none_dunnhumby.yaml
-  - experiments/configs/extension3_transformer_static_dunnhumby.yaml
-  - experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml
-  - experiments/configs/extension3_transformer_full_dunnhumby.yaml
-  # v6 track — noshrink calibration, Kendall freq_logvar fix (v6b for sparse datasets)
-  - experiments/configs/lstm_base_cdnow_v6.yaml
-  - experiments/configs/lstm_base_uci_v6.yaml
-  - experiments/configs/lstm_base_tafeng_v6.yaml
-  - experiments/configs/lstm_base_dunnhumby_v6.yaml
-  - experiments/configs/lstm_joint_cdnow_v6b.yaml
-  - experiments/configs/lstm_joint_uci_v6b.yaml
-  - experiments/configs/lstm_joint_tafeng_v6b.yaml
-  - experiments/configs/lstm_joint_dunnhumby_v6.yaml
-  - experiments/configs/transformer_joint_cdnow_v6b.yaml
-  - experiments/configs/transformer_joint_uci_v6b.yaml
-  - experiments/configs/transformer_joint_tafeng_v6b.yaml
-  - experiments/configs/transformer_joint_dunnhumby_v6.yaml
-  # v4_soft track — main sweep, expected-value inference, 100-epoch budget
-  - experiments/configs/lstm_base_cdnow_v4_soft.yaml
-  - experiments/configs/lstm_joint_cdnow_v4_soft.yaml
-  - experiments/configs/transformer_joint_cdnow_v4_soft.yaml
-  - experiments/configs/lstm_base_uci_v4_soft.yaml
-  - experiments/configs/lstm_joint_uci_v4_soft.yaml
-  - experiments/configs/transformer_joint_uci_v4_soft.yaml
-  - experiments/configs/lstm_base_tafeng_v4_soft.yaml
-  - experiments/configs/lstm_joint_tafeng_v4_soft.yaml
-  - experiments/configs/transformer_joint_tafeng_v4_soft.yaml
-  - experiments/configs/lstm_base_dunnhumby_v4_soft.yaml
-  - experiments/configs/lstm_joint_dunnhumby_v4_soft.yaml
-  - experiments/configs/transformer_joint_dunnhumby_v4_soft.yaml
-  # v4_soft Extension 3 — covariate ablation under v4_soft recipe
-  - experiments/configs/extension3_lstm_none_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_lstm_static_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_lstm_dynamic_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_lstm_full_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_transformer_none_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_transformer_static_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_transformer_dynamic_dunnhumby_v4_soft.yaml
-  - experiments/configs/extension3_transformer_full_dunnhumby_v4_soft.yaml
-  # CDNOW 39+39 sensitivity check
-  - experiments/configs/lstm_base_cdnow_39x39_v4_soft.yaml
-  # v7 track — spend_loss_scale=0.1 joint training fix; all 4 datasets × LSTM+Transformer × single-stage+two-stage
-  - experiments/configs/lstm_joint_cdnow_v7.yaml
-  - experiments/configs/lstm_joint_cdnow_v7_twostage.yaml
-  - experiments/configs/lstm_joint_uci_v7.yaml
-  - experiments/configs/lstm_joint_uci_v7_twostage.yaml
-  - experiments/configs/lstm_joint_tafeng_v7.yaml
-  - experiments/configs/lstm_joint_tafeng_v7_twostage.yaml
-  - experiments/configs/lstm_joint_dunnhumby_v7.yaml
-  - experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml
-  - experiments/configs/transformer_joint_cdnow_v7.yaml
-  - experiments/configs/transformer_joint_cdnow_v7_twostage.yaml
-  - experiments/configs/transformer_joint_uci_v7.yaml
-  - experiments/configs/transformer_joint_uci_v7_twostage.yaml
-  - experiments/configs/transformer_joint_tafeng_v7.yaml
-  - experiments/configs/transformer_joint_tafeng_v7_twostage.yaml
-  - experiments/configs/transformer_joint_dunnhumby_v7.yaml
-  - experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml
-  # v8 track — freq_logvar_max=-1.0 + spend_loss_scale=0.1 targeted fix
-  - experiments/configs/lstm_joint_cdnow_v8.yaml
-  - experiments/configs/lstm_joint_uci_v8.yaml
-  - experiments/configs/lstm_joint_tafeng_v8.yaml
-  # Extension 3 sample-mode track — proper 3-seed sample inference (replaces v4_soft expected-only)
-  - experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml
-  - experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml
-  - experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml
-  - experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml
-  - experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml
-  - experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml
-  - experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml
-  - experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml
-
+- experiments/configs_final/lstm_base_cdnow_final.yaml
+- experiments/configs_final/lstm_base_uci_final.yaml
+- experiments/configs_final/lstm_base_tafeng_final.yaml
+- experiments/configs_final/lstm_base_dunnhumby_final.yaml
+- experiments/configs_final/lstm_joint_cdnow_final.yaml
+- experiments/configs_final/lstm_joint_uci_final.yaml
+- experiments/configs_final/lstm_joint_tafeng_final.yaml
+- experiments/configs_final/lstm_joint_dunnhumby_final.yaml
+- experiments/configs_final/transformer_joint_cdnow_final.yaml
+- experiments/configs_final/transformer_joint_uci_final.yaml
+- experiments/configs_final/transformer_joint_tafeng_final.yaml
+- experiments/configs_final/transformer_joint_dunnhumby_final.yaml
+- experiments/configs_final/extension3_lstm_none_dunnhumby_final.yaml
+- experiments/configs_final/extension3_lstm_static_dunnhumby_final.yaml
+- experiments/configs_final/extension3_lstm_dynamic_dunnhumby_final.yaml
+- experiments/configs_final/extension3_lstm_full_dunnhumby_final.yaml
+- experiments/configs_final/extension3_transformer_none_dunnhumby_final.yaml
+- experiments/configs_final/extension3_transformer_static_dunnhumby_final.yaml
+- experiments/configs_final/extension3_transformer_dynamic_dunnhumby_final.yaml
+- experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml
 deep_learning_config_hashes:
-  experiments/configs/lstm_base_cdnow_v2.yaml: d61a76eef5f0
-  experiments/configs/lstm_joint_cdnow_v2.yaml: 740d9ef47338
-  experiments/configs/transformer_joint_cdnow_v2.yaml: f75ac41254ad
-  experiments/configs/lstm_base_uci_v2.yaml: aa05ce9f3c96
-  experiments/configs/lstm_joint_uci_v2.yaml: 55144bc3b9c2
-  experiments/configs/transformer_joint_uci_v2.yaml: 29b052241ff8
-  experiments/configs/lstm_base_tafeng_v2.yaml: 7ab58480ddce
-  experiments/configs/lstm_joint_tafeng_v2.yaml: b28c7143b29a
-  experiments/configs/transformer_joint_tafeng_v2.yaml: a9342acd04df
-  experiments/configs/lstm_base_dunnhumby_v2.yaml: a3d25fc97b18
-  experiments/configs/lstm_joint_dunnhumby_v2.yaml: a7cffe8fe0a2
-  experiments/configs/transformer_joint_dunnhumby_v2.yaml: ae106193109a
-  experiments/configs/extension3_lstm_none_dunnhumby.yaml: 4c7fd1defbd6
-  experiments/configs/extension3_lstm_static_dunnhumby.yaml: 5d2bef7fcc34
-  experiments/configs/extension3_lstm_dynamic_dunnhumby.yaml: a02fe15c952b
-  experiments/configs/extension3_lstm_full_dunnhumby.yaml: df3c5e674559
-  experiments/configs/extension3_transformer_none_dunnhumby.yaml: 13a8f6664135
-  experiments/configs/extension3_transformer_static_dunnhumby.yaml: db028af66dda
-  experiments/configs/extension3_transformer_dynamic_dunnhumby.yaml: 409298d28aa9
-  experiments/configs/extension3_transformer_full_dunnhumby.yaml: b9cbe08630d1
-  # v6 track — hashes computed 2026-05-28 before Kaggle launch
-  experiments/configs/lstm_base_cdnow_v6.yaml: 952d421f84f9
-  experiments/configs/lstm_base_uci_v6.yaml: 62c30f13f3aa
-  experiments/configs/lstm_base_tafeng_v6.yaml: 439b37da1351
-  experiments/configs/lstm_base_dunnhumby_v6.yaml: 23188946df06
-  experiments/configs/lstm_joint_cdnow_v6b.yaml: 43305e78becb
-  experiments/configs/lstm_joint_uci_v6b.yaml: 8d358c0bdca1
-  experiments/configs/lstm_joint_tafeng_v6b.yaml: 5eae91b88c96
-  experiments/configs/lstm_joint_dunnhumby_v6.yaml: 9497f7885ca2
-  experiments/configs/transformer_joint_cdnow_v6b.yaml: 459abafa4720
-  experiments/configs/transformer_joint_uci_v6b.yaml: 4f57320cbc5d
-  experiments/configs/transformer_joint_tafeng_v6b.yaml: 01ad7300cadf
-  experiments/configs/transformer_joint_dunnhumby_v6.yaml: 0bec45addf8e
-  # v4_soft track — hashes computed locally with src.utils.final_manifest.config_hash
-  # before Kaggle launch, to avoid the two-pass dance described in plan Risk 3.
-  experiments/configs/lstm_base_cdnow_v4_soft.yaml: 5f2ecaf63f95
-  experiments/configs/lstm_joint_cdnow_v4_soft.yaml: 26a749fadb67
-  experiments/configs/transformer_joint_cdnow_v4_soft.yaml: ce0ef6aa4eb7
-  experiments/configs/lstm_base_uci_v4_soft.yaml: b96bdd762314
-  experiments/configs/lstm_joint_uci_v4_soft.yaml: d1b7ba14f5ff
-  experiments/configs/transformer_joint_uci_v4_soft.yaml: 5646e734aa2f
-  experiments/configs/lstm_base_tafeng_v4_soft.yaml: cf3cbace3f8a
-  experiments/configs/lstm_joint_tafeng_v4_soft.yaml: c2cd9e6dc77a
-  experiments/configs/transformer_joint_tafeng_v4_soft.yaml: fc87c5c0f9a5
-  experiments/configs/lstm_base_dunnhumby_v4_soft.yaml: 470e65ce025a
-  experiments/configs/lstm_joint_dunnhumby_v4_soft.yaml: 0a7b7cb17247
-  experiments/configs/transformer_joint_dunnhumby_v4_soft.yaml: 0831990ebf91
-  experiments/configs/lstm_base_cdnow_39x39_v4_soft.yaml: 0a1902b23f20
-  experiments/configs/extension3_lstm_none_dunnhumby_v4_soft.yaml: 931be87fecf0
-  experiments/configs/extension3_lstm_static_dunnhumby_v4_soft.yaml: 1a533d065690
-  experiments/configs/extension3_lstm_dynamic_dunnhumby_v4_soft.yaml: eff69b904304
-  experiments/configs/extension3_lstm_full_dunnhumby_v4_soft.yaml: 74900e0adeb3
-  experiments/configs/extension3_transformer_none_dunnhumby_v4_soft.yaml: de49c98b3f81
-  experiments/configs/extension3_transformer_static_dunnhumby_v4_soft.yaml: 18c537f01f4c
-  experiments/configs/extension3_transformer_dynamic_dunnhumby_v4_soft.yaml: 57937f5f9607
-  experiments/configs/extension3_transformer_full_dunnhumby_v4_soft.yaml: 8d142d6bba9d
-  # v7 track — hashes computed 2026-05-29 before Kaggle launch
-  experiments/configs/lstm_joint_cdnow_v7.yaml: 58dba097329f
-  experiments/configs/lstm_joint_cdnow_v7_twostage.yaml: d40fa6c03917
-  experiments/configs/lstm_joint_dunnhumby_v7.yaml: c88179f736ba
-  experiments/configs/lstm_joint_dunnhumby_v7_twostage.yaml: b1f3dabe9f50
-  experiments/configs/lstm_joint_tafeng_v7.yaml: b59c86d07cc4
-  experiments/configs/lstm_joint_tafeng_v7_twostage.yaml: 3aa4c76570bc
-  experiments/configs/lstm_joint_uci_v7.yaml: b1a925d93d3e
-  experiments/configs/lstm_joint_uci_v7_twostage.yaml: fe3b86ec7136
-  experiments/configs/transformer_joint_cdnow_v7.yaml: 2cbde21da7a6
-  experiments/configs/transformer_joint_cdnow_v7_twostage.yaml: 4152a80ae183
-  experiments/configs/transformer_joint_dunnhumby_v7.yaml: 2a91986d1efd
-  experiments/configs/transformer_joint_dunnhumby_v7_twostage.yaml: 79da3c4dbb92
-  experiments/configs/transformer_joint_tafeng_v7.yaml: fd2a35807e8f
-  experiments/configs/transformer_joint_tafeng_v7_twostage.yaml: 3dbbb0eea481
-  experiments/configs/transformer_joint_uci_v7.yaml: 17f7c3d1c885
-  experiments/configs/transformer_joint_uci_v7_twostage.yaml: 10cd3b59400e
-  # v8 track — freq_logvar_max=-1.0 + spend_loss_scale=0.1 + 120 epochs
-  experiments/configs/lstm_joint_cdnow_v8.yaml: e83cfad5cee4
-  experiments/configs/lstm_joint_uci_v8.yaml: 5e3ec8b80869
-  experiments/configs/lstm_joint_tafeng_v8.yaml: 53643b4fce1d
-  # Extension 3 v8 sample-mode track — hashes computed 2026-05-29
-  experiments/configs/extension3_lstm_none_dunnhumby_v8.yaml: a6c8b27cc354
-  experiments/configs/extension3_lstm_static_dunnhumby_v8.yaml: c3e64bd07bed
-  experiments/configs/extension3_lstm_dynamic_dunnhumby_v8.yaml: 726b916e8ffa
-  experiments/configs/extension3_lstm_full_dunnhumby_v8.yaml: 4fe5bd90b96c
-  experiments/configs/extension3_transformer_none_dunnhumby_v8.yaml: 2a0038a6265d
-  experiments/configs/extension3_transformer_static_dunnhumby_v8.yaml: c51a978cb57a
-  experiments/configs/extension3_transformer_dynamic_dunnhumby_v8.yaml: a03ffd8a221c
-  experiments/configs/extension3_transformer_full_dunnhumby_v8.yaml: 903eca536891
-
+  experiments/configs_final/lstm_base_cdnow_final.yaml: 506694c48daf
+  experiments/configs_final/lstm_base_uci_final.yaml: 8e355ef36959
+  experiments/configs_final/lstm_base_tafeng_final.yaml: 6a2a25bd55f2
+  experiments/configs_final/lstm_base_dunnhumby_final.yaml: ae360dda0a26
+  experiments/configs_final/lstm_joint_cdnow_final.yaml: 4576fd12ee7d
+  experiments/configs_final/lstm_joint_uci_final.yaml: d12053b32735
+  experiments/configs_final/lstm_joint_tafeng_final.yaml: 34559d840c52
+  experiments/configs_final/lstm_joint_dunnhumby_final.yaml: e08b79bbff90
+  experiments/configs_final/transformer_joint_cdnow_final.yaml: 9cd4ada201fb
+  experiments/configs_final/transformer_joint_uci_final.yaml: 16cc5b354b04
+  experiments/configs_final/transformer_joint_tafeng_final.yaml: 97f0c7a2b0df
+  experiments/configs_final/transformer_joint_dunnhumby_final.yaml: 38e536f3db0b
+  experiments/configs_final/extension3_lstm_none_dunnhumby_final.yaml: f0446c2afdc0
+  experiments/configs_final/extension3_lstm_static_dunnhumby_final.yaml: 154bf8b6f232
+  experiments/configs_final/extension3_lstm_dynamic_dunnhumby_final.yaml: 3ba7ed843ee6
+  experiments/configs_final/extension3_lstm_full_dunnhumby_final.yaml: 56b2e9ac2cdd
+  experiments/configs_final/extension3_transformer_none_dunnhumby_final.yaml: d97656be5c36
+  experiments/configs_final/extension3_transformer_static_dunnhumby_final.yaml: 4339e14293fb
+  experiments/configs_final/extension3_transformer_dynamic_dunnhumby_final.yaml: cc89ad61b244
+  experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml: 92cc41983e04
 benchmark_run_names:
-  - pareto_nbd_cdnow
-  - pareto_nbd_uci
-  - pareto_nbd_tafeng
-  - pareto_nbd_dunnhumby
-
-diagnostic_run_names:
-  - gamma_poisson_cdnow
-  - gamma_poisson_uci
-  - gamma_poisson_tafeng
-  - gamma_poisson_dunnhumby
+- pareto_nbd_cdnow
+- pareto_nbd_uci
+- pareto_nbd_tafeng
+- pareto_nbd_dunnhumby
+diagnostic_run_names: []

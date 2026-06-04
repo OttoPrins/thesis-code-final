@@ -35,6 +35,7 @@ if not code_file.exists():
     raise SystemExit(f"ERROR: kernel-metadata.json code_file does not exist: {code_file}")
 text = code_file.read_text()
 required = [
+    "Fixed Validation Workflow",
     "lstm_base_cdnow_final",
     "configs_final",
     "RUN_ALL_STAGES = True",
@@ -47,14 +48,15 @@ if missing:
         + f"\nChecked file: {code_file}"
     )
 forbidden = [
+    "run_hpo_for_config",
+    "HPO Workflow (PRIMARY)",
+    "_hpo.yaml",
     "lstm_base_cdnow_full",
     "lstm_joint_cdnow_full",
     "transformer_joint_cdnow_full",
     "--fit-temperature",
     "--fit-aggregate-calibration",
     "Valendin-winning",
-    "39x39",
-    "Valendin et al. (2022) 39",
     "Valendin master replication",
 ]
 present_forbidden = [needle for needle in forbidden if needle in text]

@@ -5,17 +5,17 @@ For each (config, seed) pair, invokes `python train.py --config <c> --seed_overr
 Each run produces metrics at results/tables/<run_name>_seed<N>_metrics.json.
 
 Usage:
-    # All DL configs, default seeds {42, 7, 2024}
+    # All fixed-protocol final DL configs, default seeds {42, 7, 2024}
     python run_seeds.py
 
     # Specific configs and seeds
-    python run_seeds.py --configs lstm_base_cdnow lstm_joint_cdnow --seeds 42 7
+    python run_seeds.py --configs lstm_base_cdnow_final lstm_joint_cdnow_final --seeds 42 7
 
     # Both inference modes per seed (doubles the run count)
     python run_seeds.py --modes sample expected
 
     # Smoke/repair dry run with bounded resource override
-    python run_seeds.py --configs lstm_base_cdnow_v2 --max_epochs 1 --n_scenarios 2 --batch_size_override 32 --dry_run
+    python run_seeds.py --configs lstm_base_cdnow_final --max_epochs 1 --n_scenarios 2 --batch_size_override 32 --dry_run
 """
 
 from __future__ import annotations
@@ -32,32 +32,32 @@ from pathlib import Path
 
 from src.utils.final_manifest import load_final_manifest, result_matches_manifest
 
-CONFIGS_DIR = Path("experiments/configs")
+CONFIGS_DIR = Path("experiments/configs_final")
 
-# Default sweep: every DL training config (excludes pure-benchmark configs).
+# Default sweep: every fixed-protocol final DL training config.
 DEFAULT_CONFIGS = [
-    # V2 configs (hardened: rolling-origin, 300 epochs, n_scenarios=200, hurdle spend head)
-    "lstm_base_cdnow_v2",
-    "lstm_joint_cdnow_v2",
-    "transformer_joint_cdnow_v2",
-    "lstm_base_uci_v2",
-    "lstm_joint_uci_v2",
-    "transformer_joint_uci_v2",
-    "lstm_base_tafeng_v2",
-    "lstm_joint_tafeng_v2",
-    "transformer_joint_tafeng_v2",
-    "lstm_base_dunnhumby_v2",
-    "lstm_joint_dunnhumby_v2",
-    "transformer_joint_dunnhumby_v2",
-    # Extension 3 (Dunnhumby covariate ablation — no v2 suffix; uses separate config track)
-    "extension3_lstm_none_dunnhumby",
-    "extension3_lstm_static_dunnhumby",
-    "extension3_lstm_dynamic_dunnhumby",
-    "extension3_lstm_full_dunnhumby",
-    "extension3_transformer_none_dunnhumby",
-    "extension3_transformer_static_dunnhumby",
-    "extension3_transformer_dynamic_dunnhumby",
-    "extension3_transformer_full_dunnhumby",
+    # Stages 1-3: base LSTM, joint LSTM, joint Transformer on all datasets.
+    "lstm_base_cdnow_final",
+    "lstm_base_uci_final",
+    "lstm_base_tafeng_final",
+    "lstm_base_dunnhumby_final",
+    "lstm_joint_cdnow_final",
+    "lstm_joint_uci_final",
+    "lstm_joint_tafeng_final",
+    "lstm_joint_dunnhumby_final",
+    "transformer_joint_cdnow_final",
+    "transformer_joint_uci_final",
+    "transformer_joint_tafeng_final",
+    "transformer_joint_dunnhumby_final",
+    # Extension 3: Dunnhumby covariate ablation.
+    "extension3_lstm_none_dunnhumby_final",
+    "extension3_lstm_static_dunnhumby_final",
+    "extension3_lstm_dynamic_dunnhumby_final",
+    "extension3_lstm_full_dunnhumby_final",
+    "extension3_transformer_none_dunnhumby_final",
+    "extension3_transformer_static_dunnhumby_final",
+    "extension3_transformer_dynamic_dunnhumby_final",
+    "extension3_transformer_full_dunnhumby_final",
 ]
 
 DEFAULT_SEEDS = [42, 7, 2024]
@@ -97,10 +97,10 @@ def main():
     p = argparse.ArgumentParser(description="Sweep train.py over configs × seeds × inference modes.")
     p.add_argument("--configs", nargs="+", default=DEFAULT_CONFIGS,
                    help="Config basenames (without .yaml). Default: all final DL configs.")
-    p.add_argument("--config_dir", default="experiments/configs",
-                   help="Directory to search for config YAMLs. Default: experiments/configs.")
+    p.add_argument("--config_dir", default=str(CONFIGS_DIR),
+                   help="Directory to search for config YAMLs. Default: experiments/configs_final.")
     p.add_argument("--seeds", nargs="+", type=int, default=DEFAULT_SEEDS,
-                   help="Seeds to sweep over. Default: 42 7 123.")
+                   help="Seeds to sweep over. Default: 42 7 2024.")
     p.add_argument("--modes", nargs="+", default=["sample"],
                    choices=["sample", "expected"],
                    help="Inference modes to sweep. Default: just 'sample'.")

@@ -40,7 +40,7 @@ training:
   weight_decay: 0.0
   max_grad_norm: 1.0
   amp_enabled: false
-  early_stopping_patience: 15
+  early_stopping_patience: 30
   restore_best_checkpoint: true
   scheduler:
     type: none

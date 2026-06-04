@@ -1,0 +1,26 @@
+\begin{table}
+\caption{Holdout performance by model and dataset (mean $\pm$ SD across 3 seeds)}
+\label{tab:model_comparison_aggregated}
+\begin{tabular}{lllllll}
+\toprule
+Model & Dataset & Seeds & Freq Bias \% & Freq MAPE \% & Spend $R^2$ & CLV $\rho$ \\
+\midrule
+Pareto/NBD & CDNOW & — & 5.3\% & 16.4\% & -0.02 & 0.49 \\
+Base LSTM & CDNOW & 1 & -30.0\% & 34.2\% & — & — \\
+Joint LSTM & CDNOW & 1 & -20.1\% & 21.5\% & -0.31 & 0.41 \\
+Joint Transformer & CDNOW & 1 & -16.1\% & 25.3\% & -0.12 & 0.41 \\
+Pareto/NBD & Ta-Feng & — & 14.8\% & 16.8\% & -0.23 & 0.41 \\
+Base LSTM & Ta-Feng & 1 & 65.9\% & 65.9\% & — & — \\
+Joint LSTM & Ta-Feng & 1 & 1.3\% & 12.4\% & -0.69 & 0.39 \\
+Joint Transformer & Ta-Feng & 1 & -3.6\% & 9.5\% & -0.73 & 0.39 \\
+Pareto/NBD & UCI & — & -11.3\% & 20.3\% & 0.07 & 0.59 \\
+Base LSTM & UCI & 1 & 6.1\% & 9.9\% & — & — \\
+Joint LSTM & UCI & 1 & -8.7\% & 12.8\% & -0.08 & 0.60 \\
+Joint Transformer & UCI & 1 & -0.2\% & 18.6\% & -0.10 & 0.61 \\
+Pareto/NBD & Dunnhumby & — & -73.7\% & 73.7\% & -0.49 & 0.26 \\
+Base LSTM & Dunnhumby & 1 & -0.4\% & 5.1\% & — & — \\
+Joint LSTM & Dunnhumby & 1 & 4.2\% & 5.2\% & 0.43 & 0.82 \\
+Joint Transformer & Dunnhumby & 1 & 1.7\% & 5.8\% & 0.51 & 0.82 \\
+\bottomrule
+\end{tabular}
+\end{table}

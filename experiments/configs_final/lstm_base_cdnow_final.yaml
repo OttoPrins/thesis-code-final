@@ -1,8 +1,8 @@
 # Final — Base LSTM CDNOW on full 23,570-customer master with thesis holdout.
 #
 # Applies the Valendin-winning settings (Keras init, linear dense, no dropout, no weight decay,
-# plain Adam(eps=1e-7), EarlyStopping(patience=5), 150 epochs) to the standard thesis CDNOW
-# protocol: 52-week calibration + 26-week holdout (Jan–Jun 1998 in the sample).
+# plain Adam(eps=1e-7), EarlyStopping(patience=30), 150 epochs) to the standard thesis CDNOW
+# protocol: 39-week calibration + 39-week holdout (symmetric split matching Valendin replication).
 #
 # Dataset: Full 23,570-customer master cohort (not sample).
 # Softmax: Observed classes (freq_cap: observed) to match Valendin's reference implementation
@@ -13,8 +13,8 @@ dataset:
   raw_dir: data/raw
   raw_file: CDNOW_master.txt
   prefer_sample_file: false
-  calibration_weeks: 52
-  holdout_weeks: 26
+  calibration_weeks: 39
+  holdout_weeks: 39
   origin_date: "1997-01-01"
   loss_mask_mode: all
   min_active_weeks: 1
@@ -47,7 +47,7 @@ training:
   max_grad_norm: 0.0
   amp_enabled: false
   repair_on_failure: false
-  early_stopping_patience: 5
+  early_stopping_patience: 30
   restore_best_checkpoint: true
   scheduler:
     type: none

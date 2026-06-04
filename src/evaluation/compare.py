@@ -57,15 +57,13 @@ _DATASET_ALIASES: tuple[tuple[str, str], ...] = (
 )
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
-_VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final)$")
+_VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final_hpo|final)$")
 _REPAIR_SUFFIX = "_repair"
 _RESCORE_SUFFIX = "_rescore"
 
 # Canonical model order for table rows (GPPM removed — stub descoped, see limitations)
 _MODEL_ORDER = [
     "pareto_nbd",
-    "bgnbd_gg",
-    "pareto_ggg",
     "gamma_poisson",
     "lstm_base",
     "lstm_joint",
@@ -89,7 +87,7 @@ _META_KEYS = {
     "final_manifest_n_scenarios",
 }
 
-_BENCHMARK_MODELS = {"pareto_nbd", "bgnbd_gg", "pareto_ggg", "gamma_poisson"}
+_BENCHMARK_MODELS = {"pareto_nbd", "gamma_poisson"}
 
 # Thresholds for the 3-tier quality classification.
 # Tier A: run_valid=True (existing gate: |freq_bias| ≤ 15%, |spend_bias| ≤ 50%)
@@ -969,25 +967,29 @@ def export_latex_table_aggregated(
     label: str = "tab:model_comparison_aggregated",
 ) -> None:
     """
-    Export a publication-ready aggregated LaTeX table: one row per (model, dataset),
+    Export publication-ready aggregated LaTeX tables: one row per (model, dataset),
     showing mean ± SD across seeds for Tier-A (and Tier-B†) results.
 
-    Selection rule: for each (model, dataset), choose the best-version row from
-    df_seeds by lowest |bias_pct_mean| among rows where the dominant tier is A.
-    Benchmarks use the single-run values from df_all directly.
+    Generates three files derived from out_path stem:
+      comparison_thesis.tex       — compact (freq bias, freq MAPE, spend R², CLV ρ)
+      comparison_thesis_freq.tex  — frequency metrics (bias, MAPE, MASE, CLV ρ)
+      comparison_thesis_spend.tex — spend metrics (R², MAE, MAPE, MASE, bias)
 
-    Key metrics displayed:
-        bias_pct  freq_mape  spend_r2_log  clv_spearman  (seed count)
+    Selection rule: for each (model, dataset), choose the best non-HPO version row
+    from df_seeds by lowest |bias_pct_mean| among Tier-A rows. HPO-exploration runs
+    (version containing 'hpo') are excluded from all thesis tables; they appear only
+    in comparison_all.csv and comparison_seeds.csv for transparency.
+    Benchmarks use the single-run values from df_all directly.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    freq_path = out_path.with_name(out_path.stem + "_freq" + out_path.suffix)
+    spend_path = out_path.with_name(out_path.stem + "_spend" + out_path.suffix)
 
     DATASETS = ["cdnow", "tafeng", "uci", "dunnhumby"]
-    MODELS = ["pareto_nbd", "bgnbd_gg", "pareto_ggg", "lstm_base", "lstm_joint", "transformer_joint"]
+    MODELS = ["pareto_nbd", "lstm_base", "lstm_joint", "transformer_joint"]
     MODEL_LABELS_TEX = {
         "pareto_nbd":         "Pareto/NBD",
-        "bgnbd_gg":           "BG/NBD+GG",
-        "pareto_ggg":         "Pareto/GGG",
         "lstm_base":          "Base LSTM",
         "lstm_joint":         "Joint LSTM",
         "transformer_joint":  "Joint Transformer",
@@ -1014,39 +1016,49 @@ def export_latex_table_aggregated(
 
     # Build benchmark lookup from df_all (single values, no seeds)
     benchmarks = {}
-    for _, row in df_all[df_all["model"].isin({"pareto_nbd", "bgnbd_gg", "pareto_ggg"})].iterrows():
+    for _, row in df_all[df_all["model"].isin({"pareto_nbd"})].iterrows():
         key = (row["model"], row.get("dataset", ""))
         benchmarks[key] = row
 
     rows = []
     for ds in DATASETS:
         for model in MODELS:
-            is_benchmark = model in {"pareto_nbd", "bgnbd_gg", "pareto_ggg"}
+            is_benchmark = model in {"pareto_nbd"}
             if is_benchmark:
                 brow = benchmarks.get((model, ds))
                 if brow is None:
                     continue
-                # Spend/CLV now available for BTYD models paired with Gamma-Gamma
-                # (Pareto/NBD x GG and BG/NBD x GG). Frequency-only models (Pareto/GGG)
-                # still report "—" for spend/CLV.
+                # Spend/CLV available for BTYD models paired with Gamma-Gamma.
+                # Frequency-only models (Pareto/GGG) would show "—" for spend/CLV.
                 rows.append({
                     "Model": MODEL_LABELS_TEX.get(model, model),
                     "Dataset": DATASET_LABELS_TEX.get(ds, ds),
                     "Seeds": "—",
-                    "Bias \\%": _fmt(brow.get("bias_pct"), None, digits=1, pct=True),
-                    "Freq MAPE \\%": _fmt(brow.get("freq_mape"), None, digits=1, pct=True),
-                    "Spend $R^2$": _fmt2(brow.get("spend_r2_log"), None, digits=2),
-                    "CLV $\\rho$": _fmt2(brow.get("clv_spearman"), None, digits=2),
+                    # Frequency metrics
+                    "Freq Bias \\%":   _fmt(brow.get("bias_pct"), None, digits=1, pct=True),
+                    "Freq MAPE \\%":   _fmt(brow.get("freq_mape"), None, digits=1, pct=True),
+                    "Freq MASE":       _fmt2(brow.get("freq_mase"), None, digits=2),
+                    # Spend metrics
+                    "Spend $R^2$":     _fmt2(brow.get("spend_r2_log"), None, digits=2),
+                    "Spend MAE (\\$)": _fmt2(brow.get("spend_mae_raw"), None, digits=2),
+                    "Spend MAPE \\%":  _fmt(brow.get("spend_valendin_mape"), None, digits=1, pct=True),
+                    "Spend MASE":      _fmt2(brow.get("spend_mase"), None, digits=2),
+                    "Spend Bias \\%":  _fmt(brow.get("spend_bias_pct"), None, digits=1, pct=True),
+                    # CLV
+                    "CLV $\\rho$":     _fmt2(brow.get("clv_spearman"), None, digits=2),
                     "Tier": "A",
                 })
                 continue
 
-            # DL: choose best version row from df_seeds
-            sub = df_seeds[(df_seeds["model"] == model) & (df_seeds["dataset"] == ds)].copy()
+            # DL: exclude HPO-exploration runs; only use final (non-hpo) versions
+            sub = df_seeds[
+                (df_seeds["model"] == model) &
+                (df_seeds["dataset"] == ds) &
+                (~df_seeds["version"].fillna("").str.contains("hpo"))
+            ].copy()
             if sub.empty:
                 continue
             # Prefer Tier-A versions; break ties by |bias_pct_mean|
-            # Tier classification on aggregated row: A if all seeds valid, B otherwise
             sub_a = sub[sub.get("quality_tier", sub["model"].apply(lambda _: "A")) == "A"] if "quality_tier" in sub.columns else sub
             if sub_a.empty:
                 sub_a = sub
@@ -1060,10 +1072,18 @@ def export_latex_table_aggregated(
                 "Model": MODEL_LABELS_TEX.get(model, model) + ("†" if tier == "B" else ""),
                 "Dataset": DATASET_LABELS_TEX.get(ds, ds),
                 "Seeds": str(int(best["n_seeds"])) if not pd.isna(best["n_seeds"]) else "—",
-                "Bias \\%": _fmt(best.get("bias_pct_mean"), best.get("bias_pct_std"), digits=1, pct=True),
-                "Freq MAPE \\%": _fmt(best.get("freq_mape_mean"), best.get("freq_mape_std"), digits=1, pct=True),
-                "Spend $R^2$": _fmt2(best.get("spend_r2_log_mean"), best.get("spend_r2_log_std"), digits=2),
-                "CLV $\\rho$": _fmt2(best.get("clv_spearman_mean"), best.get("clv_spearman_std"), digits=2),
+                # Frequency metrics
+                "Freq Bias \\%":   _fmt(best.get("bias_pct_mean"), best.get("bias_pct_std"), digits=1, pct=True),
+                "Freq MAPE \\%":   _fmt(best.get("freq_mape_mean"), best.get("freq_mape_std"), digits=1, pct=True),
+                "Freq MASE":       _fmt2(best.get("freq_mase_mean"), best.get("freq_mase_std"), digits=2),
+                # Spend metrics
+                "Spend $R^2$":     _fmt2(best.get("spend_r2_log_mean"), best.get("spend_r2_log_std"), digits=2),
+                "Spend MAE (\\$)": _fmt2(best.get("spend_mae_raw_mean"), best.get("spend_mae_raw_std"), digits=2),
+                "Spend MAPE \\%":  _fmt(best.get("spend_valendin_mape_mean"), best.get("spend_valendin_mape_std"), digits=1, pct=True),
+                "Spend MASE":      _fmt2(best.get("spend_mase_mean"), best.get("spend_mase_std"), digits=2),
+                "Spend Bias \\%":  _fmt(best.get("spend_bias_pct_mean"), best.get("spend_bias_pct_std"), digits=1, pct=True),
+                # CLV
+                "CLV $\\rho$":     _fmt2(best.get("clv_spearman_mean"), best.get("clv_spearman_std"), digits=2),
                 "Tier": tier,
             })
 
@@ -1073,31 +1093,49 @@ def export_latex_table_aggregated(
 
     out_df = pd.DataFrame(rows)
 
-    # Remove Tier column from display (it's only for internal filtering)
-    display_cols = ["Model", "Dataset", "Seeds", "Bias \\%", "Freq MAPE \\%", "Spend $R^2$", "CLV $\\rho$"]
-    out_df = out_df[display_cols]
-
-    latex_str = out_df.to_latex(
-        index=False,
-        na_rep="—",
-        escape=False,
-        caption=caption,
-        label=label,
-    )
-    if "\\toprule" not in latex_str:
-        latex_str = latex_str.replace("\\hline\n", "\\toprule\n", 1)
-        latex_str = latex_str.replace("\n\\hline\n", "\n\\midrule\n", 1)
-        latex_str = latex_str.replace("\n\\hline\n", "\n\\bottomrule\n", 1)
-
-    if "†" in latex_str:
-        latex_str += (
-            "\\begin{tablenotes}\\small\n"
-            "\\item[†] Tier B: validity threshold (15\\% bias) not met; included with caveat.\n"
-            "\\end{tablenotes}\n"
+    def _write_latex(df_disp, path, cap, lbl):
+        latex_str = df_disp.to_latex(
+            index=False,
+            na_rep="—",
+            escape=False,
+            caption=cap,
+            label=lbl,
         )
+        if "\\toprule" not in latex_str:
+            latex_str = latex_str.replace("\\hline\n", "\\toprule\n", 1)
+            latex_str = latex_str.replace("\n\\hline\n", "\n\\midrule\n", 1)
+            latex_str = latex_str.replace("\n\\hline\n", "\n\\bottomrule\n", 1)
+        if "†" in latex_str:
+            latex_str += (
+                "\\begin{tablenotes}\\small\n"
+                "\\item[†] Tier B: validity threshold (15\\% bias) not met; included with caveat.\n"
+                "\\end{tablenotes}\n"
+            )
+        path.write_text(latex_str)
+        print(f"LaTeX aggregated table saved: {path}")
 
-    out_path.write_text(latex_str)
-    print(f"LaTeX aggregated table saved: {out_path}")
+    # Compact table (backward-compatible): bias, freq MAPE, spend R², CLV ρ
+    compact_cols = ["Model", "Dataset", "Seeds",
+                    "Freq Bias \\%", "Freq MAPE \\%", "Spend $R^2$", "CLV $\\rho$"]
+    _write_latex(out_df[compact_cols], out_path, caption, label)
+
+    # Frequency-detailed table: bias, MAPE, MASE, CLV ρ
+    freq_cols = ["Model", "Dataset", "Seeds",
+                 "Freq Bias \\%", "Freq MAPE \\%", "Freq MASE", "CLV $\\rho$"]
+    _write_latex(
+        out_df[freq_cols], freq_path,
+        caption.replace("performance", "frequency performance"),
+        label + "_freq",
+    )
+
+    # Spend-detailed table: R², MAE, MAPE, MASE, bias
+    spend_cols = ["Model", "Dataset",
+                  "Spend $R^2$", "Spend MAE (\\$)", "Spend MAPE \\%", "Spend MASE", "Spend Bias \\%"]
+    _write_latex(
+        out_df[spend_cols], spend_path,
+        caption.replace("performance", "spend performance"),
+        label + "_spend",
+    )
 
 
 def plot_model_comparison_bars(

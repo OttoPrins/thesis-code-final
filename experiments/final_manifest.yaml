@@ -288,16 +288,9 @@ deep_learning_config_hashes:
 
 benchmark_run_names:
   - pareto_nbd_cdnow
-  - bgnbd_gg_cdnow
-  - pareto_ggg_cdnow
-  # gppm_cdnow intentionally removed — scipy Gamma-Poisson stub is not a real GPPM;
-  # archived to results/archive/gppm_stub/; see benchmarks.py and thesis Limitations section.
   - pareto_nbd_uci
-  - bgnbd_gg_uci
   - pareto_nbd_tafeng
-  - bgnbd_gg_tafeng
   - pareto_nbd_dunnhumby
-  - bgnbd_gg_dunnhumby
 
 diagnostic_run_names:
   - gamma_poisson_cdnow

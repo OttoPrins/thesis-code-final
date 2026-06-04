@@ -5,8 +5,8 @@ Fits and evaluates Pareto/NBD, BG/NBD+Gamma-Gamma, Pareto/GGG, and GPPM
 on all datasets using the same config files as the DL experiments.
 
 Usage:
-    python run_benchmarks.py --config experiments/configs/lstm_base_cdnow.yaml --models pareto_nbd bgnbd_gg
-    python run_benchmarks.py --config experiments/configs/lstm_base_cdnow.yaml --models pareto_nbd bgnbd_gg pareto_ggg gppm
+    python run_benchmarks.py --config experiments/configs/lstm_base_cdnow.yaml --models pareto_nbd
+    python run_benchmarks.py --config experiments/configs/lstm_base_cdnow.yaml --models pareto_nbd bgnbd_gg pareto_ggg gppm  # legacy; only pareto_nbd used in thesis
 """
 
 import argparse
@@ -139,7 +139,7 @@ def main():
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["pareto_nbd", "bgnbd_gg"],
+        default=["pareto_nbd"],
         help=(
             "List of benchmark models to fit "
             "(pareto_nbd, bgnbd_gg, pareto_ggg, gppm, gamma_poisson)."

@@ -46,7 +46,7 @@ model:
 training:
   epochs: 150
   max_epochs: 150
-  batch_size: 256
+  batch_size: 32
   val_batch_size: full
   drop_last_train: true
   lr: 0.001

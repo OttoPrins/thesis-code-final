@@ -1,0 +1,82 @@
+# Paper-consistent audit variant: best validation checkpoint plus full-calibration fine-tune.
+dataset:
+  name: cdnow
+  raw_dir: data/raw
+  raw_file: CDNOW_master.txt
+  prefer_sample_file: false
+  protocol_name: valendin_cdnow_master_39x39
+  calibration_weeks: 39
+  holdout_weeks: 39
+  origin_date: "1997-01-01"
+  cohort_end_date: "1997-03-31"
+  calendar_mode: valendin_year_week
+  keep_zero_amount_transactions: true
+  loss_mask_mode: all
+  min_active_weeks: 1
+  val_fraction: 0.1
+  split_seed: 42
+  validation_split_mode: shuffled_tail
+  freq_cap: observed
+
+model:
+  type: lstm
+  max_week: 51
+  hidden_size: 128
+  dense_units: 128
+  num_layers: 1
+  dropout: 0.0
+  dense_activation: linear
+  keras_initialization: true
+  joint: false
+  neutralize_unseen_week_embeddings: false
+
+training:
+  epochs: 150
+  max_epochs: 150
+  batch_size: 32
+  val_batch_size: full
+  inference_batch_size: val
+  drop_last_train: true
+  lr: 0.001
+  optimizer: adam
+  eps: 1.0e-7
+  weight_decay: 0.0
+  max_grad_norm: 0.0
+  amp_enabled: false
+  repair_on_failure: false
+  early_stopping_patience: 5
+  restore_best_checkpoint: true
+  num_workers: 0
+  scheduler:
+    type: none
+  scheduled_sampling:
+    enabled: false
+  final_finetune:
+    enabled: true
+    epochs: 5
+    batch_size: 1024
+    lr: 1.0e-4
+  seed: 42
+
+loss:
+  type: cross_entropy
+
+output:
+  run_name: lstm_base_cdnow_replication_paper_finetune
+  results_dir: results
+  save_checkpoint: true
+
+inference:
+  n_scenarios: 30
+  mode: sample
+  temperature: 1.0
+  decode_top_bin: false
+
+calibration:
+  temperature_scaling: false
+  aggregate_scaling: false
+  aggregate_shrinkage: 1.0
+
+evaluation:
+  weekly_discount_rate: 0.0018
+  fail_on_invalid: false

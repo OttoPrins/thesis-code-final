@@ -1,0 +1,178 @@
+status: replication_audit_pending
+
+official_baseline:
+  config: experiments/configs/lstm_base_cdnow_replication.yaml
+  run_name: lstm_base_cdnow_replication_demo_pure
+  decision: keep_as_strict_reference
+  note: Strict public rfm2lstm demo mechanics applied to CDNOW 39x39.
+
+paper_consistent_variant:
+  config: experiments/configs/lstm_base_cdnow_replication_paper_finetune.yaml
+  run_name: lstm_base_cdnow_replication_paper_finetune
+  decision: rerun_pending
+  note: Appendix-style full-calibration fine-tune; tracked separately from strict demo replication.
+
+final_evidence_set:
+  seeds: [42, 7, 2024]
+  inference_mode: sample
+  n_scenarios: 30
+  expected_protocol_name: valendin_cdnow_master_39x39
+
+baseline_invariants:
+  reference_code: reference/rfm2lstm/banking_transactions_demo.ipynb
+  raw_file: CDNOW_master.txt
+  cohort_size: 23570
+  calibration_weeks: 39
+  holdout_weeks: 39
+  calendar_mode: valendin_year_week
+  validation_split_mode: shuffled_tail
+  training_batch_size: 32
+  validation_batch_size: full
+  prediction_batch_size: val
+  early_stopping_patience: 5
+  dense_activation: linear
+  keras_initialization: true
+  repair_on_failure: false
+  scheduled_sampling: false
+  temperature_scaling: false
+  aggregate_scaling: false
+  decode_top_bin: false
+
+promotion_rule:
+  exclude_repaired_runs: true
+  max_abs_bias_pct: 8.0
+  max_freq_mape: 18.0
+  note: Repaired variants may explain instability but cannot replace the strict baseline.
+
+previous_observed_results:
+  strict_demo_pure:
+    seed_mean:
+      freq_rmse: 2.02
+      bias_pct: -15.9
+      freq_mape: 27.6
+  paper_finetune:
+    seed_mean:
+      freq_rmse: 2.08
+      bias_pct: -18.4
+      freq_mape: 31.2
+
+forecast_quality_ablations:
+  - config: experiments/configs/lstm_base_cdnow_replication_fullbatch.yaml
+    run_name: lstm_base_cdnow_replication_fullbatch
+    role: forecast_quality_sensitivity
+    decision: rerun_pending
+    differing_settings:
+      training.batch_size: full
+    modes: [sample, expected_rescore]
+  - config: experiments/configs/lstm_base_cdnow_replication_paper_finetune_fullbatch.yaml
+    run_name: lstm_base_cdnow_replication_paper_finetune_fullbatch
+    role: forecast_quality_sensitivity
+    decision: rerun_pending
+    differing_settings:
+      training.batch_size: full
+      training.final_finetune.batch_size: full
+    modes: [sample]
+
+diagnostic_sensitivities:
+  - config: experiments/configs/lstm_base_cdnow_replication_unseen_week_neutralized.yaml
+    run_name: lstm_base_cdnow_replication_unseen_week_neutralized
+    decision: rerun_pending
+    differing_settings:
+      model.neutralize_unseen_week_embeddings: true
+
+rejected_ablations:
+  - config: experiments/configs/lstm_base_cdnow_replication_keras_exact.yaml
+    run_name: lstm_base_cdnow_replication_keras_exact
+    decision: reject
+    reason: Earlier seed-42 audit was less stable than the strict baseline.
+    promotion_rule:
+      max_abs_bias_pct: 8.0
+    observed_seed42:
+      strict:
+        freq_rmse: 2.00
+        bias_pct: -11.0
+        freq_mape: 22.0
+      ablation:
+        freq_rmse: 2.20
+        bias_pct: 18.5
+        freq_mape: 29.0
+
+report:
+  output_csv: results/tables/valendin_replication_interpretation.csv
+  output_markdown: results/tables/valendin_replication_interpretation.md
+  reference:
+    label: Valendin et al. (2022) paper target
+    freq_rmse: 1.86
+    bias_pct: -0.7
+    freq_mape: 13.8
+    note: CDNOW Base LSTM, Table 4.
+  rows:
+    - kind: metrics
+      label: Local Pareto/NBD benchmark context
+      run_name: pareto_nbd_cdnow
+      comparison_scope: non_comparable_local_context
+      expected_protocol_name: valendin_cdnow_master_39x39
+      headline_included: false
+      note: Context only unless protocol metadata matches the CDNOW 39x39 audit.
+    - kind: seed_mean
+      label: Base LSTM strict 3-seed mean
+      base_run_name: lstm_base_cdnow_replication_demo_pure
+      comparison_scope: strict_reference
+      headline_included: true
+      note: Public rfm2lstm demo mechanics, no repair or calibration.
+    - kind: ensemble
+      label: Base LSTM strict seed ensemble
+      base_run_name: lstm_base_cdnow_replication_demo_pure
+      run_name: lstm_base_cdnow_replication_demo_pure_ensemble_sample
+      comparison_scope: strict_reference
+      expected_protocol_name: valendin_cdnow_master_39x39
+      headline_included: true
+    - kind: seed_mean
+      label: Audit Base LSTM paper-finetune 3-seed mean
+      base_run_name: lstm_base_cdnow_replication_paper_finetune
+      comparison_scope: non_promoted_paper_consistent_variant
+      headline_included: false
+    - kind: ensemble
+      label: Audit Base LSTM paper-finetune seed ensemble
+      base_run_name: lstm_base_cdnow_replication_paper_finetune
+      run_name: lstm_base_cdnow_replication_paper_finetune_ensemble_sample
+      comparison_scope: non_promoted_paper_consistent_variant
+      expected_protocol_name: valendin_cdnow_master_39x39
+      headline_included: false
+    - kind: seed_mean
+      label: Full-batch Base LSTM sensitivity 3-seed mean
+      base_run_name: lstm_base_cdnow_replication_fullbatch
+      comparison_scope: diagnostic_sensitivity
+      headline_included: false
+    - kind: ensemble
+      label: Full-batch Base LSTM sensitivity seed ensemble
+      base_run_name: lstm_base_cdnow_replication_fullbatch
+      run_name: lstm_base_cdnow_replication_fullbatch_ensemble_sample
+      comparison_scope: diagnostic_sensitivity
+      expected_protocol_name: valendin_cdnow_master_39x39
+      headline_included: false
+
+commands:
+  final_seed_sweep: >
+    python run_seeds.py --config_dir experiments/configs --configs
+    lstm_base_cdnow_replication
+    lstm_base_cdnow_replication_paper_finetune
+    lstm_base_cdnow_replication_fullbatch
+    --seeds 42 7 2024 --modes sample
+  build_array_ensembles_and_table: >
+    python -m src.evaluation.replication_report --results-dir results
+    --build-array-ensembles --overwrite-ensembles
+  build_diagnostics_from_sidecars: >
+    python -m src.evaluation.replication_diagnostics --results-dir results
+  diagnostic_expected_rescore_all_strict_seeds: >
+    python rescore_replication.py --base-run lstm_base_cdnow_replication_demo_pure
+    --mode expected_rescore --seeds 42 7 2024
+  diagnostic_expected_rescore_all_fullbatch_seeds: >
+    python rescore_replication.py --base-run lstm_base_cdnow_replication_fullbatch
+    --mode expected_rescore --seeds 42 7 2024
+  diagnostic_sampling_noise_100_scenarios_all_strict_seeds: >
+    python rescore_replication.py --base-run lstm_base_cdnow_replication_demo_pure
+    --mode sample100_rescore --seeds 42 7 2024
+  diagnostic_unseen_week_sensitivity: >
+    python run_seeds.py --config_dir experiments/configs --configs
+    lstm_base_cdnow_replication_unseen_week_neutralized --seeds 42 7 2024 --modes sample

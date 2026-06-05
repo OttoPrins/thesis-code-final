@@ -294,7 +294,8 @@ def run_shap(
             seed_delta_t=delta_t_seed,
             head=head,
         ).to(device)
-        wrapper.eval()
+        # cuDNN LSTM backward requires training mode; GradientExplainer calls autograd.grad
+        wrapper.train()
 
         # GradientExplainer: background is a list of [static_bg, dynamic_bg]
         explainer = shap.GradientExplainer(

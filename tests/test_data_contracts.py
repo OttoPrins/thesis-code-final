@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pandas as pd
 import pytest
@@ -5,6 +6,7 @@ import copy
 import yaml
 from pathlib import Path
 
+from run_benchmarks import _holdout_weekly_matrices
 from src.data.datasets.cdnow import CDNOWPipeline
 from src.data.datasets.dunnhumby import DunnhumbyPipeline
 from src.data.datasets.uci_retail import UCIRetailPipeline
@@ -132,6 +134,29 @@ def test_cdnow_valendin_master_config_parses_expected_protocol():
     assert cfg["inference"]["decode_top_bin"] is False
     assert cfg["calibration"]["temperature_scaling"] is False
     assert cfg["calibration"]["aggregate_scaling"] is False
+
+
+def test_strict_cdnow_config_matches_public_rfm2lstm_reference_contract():
+    cfg = yaml.safe_load(Path("experiments/configs/lstm_base_cdnow_replication.yaml").read_text())
+    nb = json.loads(Path("reference/rfm2lstm/banking_transactions_demo.ipynb").read_text())
+    source = "\n".join("".join(cell.get("source", [])) for cell in nb["cells"])
+    compact = "".join(source.split())
+
+    assert "BATCH_SIZE_TRAIN=32" in compact
+    assert "BATCH_SIZE_PRED=no_valid_samples" in compact
+    assert "BATCH_SIZE_VALID=no_valid_samples" in compact
+    assert "valid_samples,valid_targets=samples[-validation_size:],targets[-validation_size:]" in compact
+    assert "patience=5" in compact
+    assert "optimizer=Adam()" in compact
+    assert "Dense(dense_units,name='dense')" in compact
+    assert "Categorical(probs=probs).sample()" in compact
+
+    assert cfg["dataset"]["validation_split_mode"] == "shuffled_tail"
+    assert cfg["training"]["batch_size"] == 32
+    assert cfg["training"]["val_batch_size"] == "full"
+    assert cfg["training"]["inference_batch_size"] == "val"
+    assert cfg["training"]["early_stopping_patience"] == 5
+    assert cfg["training"]["final_finetune"]["enabled"] is False
 
 
 def test_cdnow_keras_exact_config_parses_expected_ablation_protocol():
@@ -277,6 +302,30 @@ def test_cdnow_replication_pipeline_preserves_valendin_contract():
     assert holdout_gt["raw_freq"].shape == (23570, 39)
     assert inference_ds.max_trans == int(inference_ds.seed_raw_trans.max().item())
     assert np.allclose(inference_ds.mask.numpy(), 1.0)
+
+
+def test_cdnow_replication_benchmark_holdout_uses_same_calendar_protocol():
+    raw_path = Path("data/raw/CDNOW_master.txt")
+    if not raw_path.exists():
+        pytest.skip("CDNOW_master.txt is not available in this checkout")
+
+    cfg = yaml.safe_load(Path("experiments/configs/lstm_base_cdnow_replication.yaml").read_text())
+    pipe = CDNOWPipeline()
+    _, _, inference_ds, holdout_gt, _ = pipe.run(copy.deepcopy(cfg))
+    rfm_calib, _ = pipe.get_rfm_summary(copy.deepcopy(cfg))
+    true_freq_per_week, _ = _holdout_weekly_matrices(
+        pipe,
+        copy.deepcopy(cfg),
+        rfm_calib["customer_id"].values,
+    )
+
+    assert np.array_equal(
+        inference_ds.customer_ids.numpy(),
+        rfm_calib["customer_id"].values,
+    )
+    assert true_freq_per_week.shape == holdout_gt["raw_freq"].shape
+    assert true_freq_per_week.sum() == pytest.approx(float(holdout_gt["raw_freq"].sum()))
+    assert np.allclose(true_freq_per_week, holdout_gt["raw_freq"])
 
 
 def test_validation_split_mode_shuffled_tail_uses_demo_tail():

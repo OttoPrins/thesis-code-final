@@ -150,8 +150,13 @@ class BasePipeline(ABC):
 
         # Weekly aggregation
         origin_date = dataset_cfg.get("origin_date")
+        calendar_mode = dataset_cfg.get("calendar_mode", "elapsed_weeks")
         agg = WeeklyAggregator()
-        agg_df = agg.fit_transform(clean_df, origin_date=origin_date)
+        agg_df = agg.fit_transform(
+            clean_df,
+            origin_date=origin_date,
+            calendar_mode=calendar_mode,
+        )
 
         # Temporal split
         calib_weeks = config["dataset"]["calibration_weeks"]

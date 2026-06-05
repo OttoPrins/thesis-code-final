@@ -71,6 +71,7 @@ def _calibration_weekly_counts_for_gppm(pipeline, config: dict):
     agg = WeeklyAggregator().fit_transform(
         clean_df,
         origin_date=dataset_cfg.get("origin_date"),
+        calendar_mode=dataset_cfg.get("calendar_mode", "elapsed_weeks"),
     )
     calib, _ = TemporalSplitter(
         dataset_cfg["calibration_weeks"],
@@ -111,7 +112,9 @@ def _holdout_weekly_matrices(pipeline, config: dict, customer_ids: np.ndarray):
             clean_df = clean_df[clean_df["customer_id"].isin(sampled)].copy()
 
     agg = WeeklyAggregator().fit_transform(
-        clean_df, origin_date=dataset_cfg.get("origin_date")
+        clean_df,
+        origin_date=dataset_cfg.get("origin_date"),
+        calendar_mode=dataset_cfg.get("calendar_mode", "elapsed_weeks"),
     )
     calib_weeks = int(dataset_cfg["calibration_weeks"])
     holdout_weeks = int(dataset_cfg["holdout_weeks"])

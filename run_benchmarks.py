@@ -25,7 +25,7 @@ from src.data.datasets import (
 )
 from src.data.transforms import TemporalSplitter, WeeklyAggregator
 from src.evaluation.benchmarks import get_benchmark_model
-from src.evaluation.metrics import compute_all_metrics, save_metrics_with_artifacts
+from src.evaluation.metrics import compute_all_metrics, mase_scale, save_metrics_with_artifacts
 from src.utils.config import apply_kaggle_overrides, load_config
 from src.utils.final_manifest import attach_manifest_metadata
 from src.utils.seed import set_seed
@@ -135,6 +135,66 @@ def _holdout_weekly_matrices(pipeline, config: dict, customer_ids: np.ndarray):
     return freq_m, spend_m
 
 
+def _calibration_mase_scales(pipeline, config: dict, customer_ids: np.ndarray):
+    """
+    Compute MASE scale denominators from the calibration period.
+
+    Returns (freq_mase_scale, spend_mase_scale) computed as mean absolute lag-1
+    differences over the entire calibration period. These are the proper Hyndman
+    & Koehler denominators and must be used for benchmarks to be comparable to
+    DL models (which already use calibration scales).
+    """
+    import pandas as pd
+
+    dataset_cfg = config["dataset"]
+    pipeline._current_dataset_cfg = dataset_cfg
+    raw_dir = dataset_cfg.get("raw_dir", "data/raw")
+    clean_df = pipeline.clean(pipeline.load_raw(raw_dir))
+
+    cohort_end = dataset_cfg.get("cohort_end_date")
+    if cohort_end is not None:
+        cohort_end = pd.to_datetime(cohort_end)
+        first_purchase = clean_df.groupby("customer_id")["date"].min()
+        cohort_ids = first_purchase[first_purchase <= cohort_end].index
+        clean_df = clean_df[clean_df["customer_id"].isin(cohort_ids)].copy()
+
+    sample_n = dataset_cfg.get("sample_n")
+    if sample_n is not None:
+        all_custs = np.sort(clean_df["customer_id"].unique())
+        if len(all_custs) > sample_n:
+            rng_samp = np.random.RandomState(dataset_cfg.get("sample_seed", 0))
+            sampled = rng_samp.choice(all_custs, size=sample_n, replace=False)
+            clean_df = clean_df[clean_df["customer_id"].isin(sampled)].copy()
+
+    agg = WeeklyAggregator().fit_transform(
+        clean_df,
+        origin_date=dataset_cfg.get("origin_date"),
+        calendar_mode=dataset_cfg.get("calendar_mode", "elapsed_weeks"),
+    )
+    calib_weeks = int(dataset_cfg["calibration_weeks"])
+    calib, _ = TemporalSplitter(calib_weeks, int(dataset_cfg["holdout_weeks"])).split(agg)
+
+    # Build aligned (N, T_calib) matrices for frequency and spend
+    cid_to_idx = {cid: i for i, cid in enumerate(customer_ids)}
+    N, T_calib = len(customer_ids), calib_weeks
+    freq_matrix = np.zeros((N, T_calib), dtype=np.float32)
+    spend_matrix = np.zeros((N, T_calib), dtype=np.float32)
+
+    calib = calib[calib["customer_id"].isin(cid_to_idx)]
+    if not calib.empty:
+        rows = calib["customer_id"].map(cid_to_idx).values.astype(int)
+        cols = calib["week"].values.astype(int)
+        valid = (cols >= 0) & (cols < T_calib)
+        freq_matrix[rows[valid], cols[valid]] = calib["weekly_freq"].values.astype(np.float32)[valid]
+        spend_matrix[rows[valid], cols[valid]] = calib["weekly_spend"].values.astype(np.float32)[valid]
+
+    # Compute MASE scales: lag-1 mean absolute differences over calibration
+    freq_scale = mase_scale(freq_matrix, seasonal_period=1)
+    spend_scale = mase_scale(spend_matrix, seasonal_period=1)
+
+    return freq_scale, spend_scale
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fit and evaluate probabilistic benchmarks on CLV datasets."
@@ -194,6 +254,12 @@ def main():
     tables_dir = results_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
 
+    # Compute MASE scale denominators from calibration period (must match DL models)
+    logger.info("Computing MASE scales from calibration period...")
+    freq_mase_scale, spend_mase_scale = _calibration_mase_scales(pipeline, config, customer_ids)
+    logger.info(f"Frequency MASE scale: {freq_mase_scale:.6f}")
+    logger.info(f"Spend MASE scale: {spend_mase_scale:.6f}")
+
     # Fit and evaluate each model
     results_list = []
     for model_name in args.models:
@@ -250,6 +316,8 @@ def main():
                 weekly_discount_rate=config.get("evaluation", {}).get(
                     "weekly_discount_rate", 0.0
                 ),
+                freq_mase_scale=freq_mase_scale,
+                spend_mase_scale=spend_mase_scale if pred_spend_per_week is not None else None,
                 **freq_week_kwargs,
                 **spend_kwargs,
             )

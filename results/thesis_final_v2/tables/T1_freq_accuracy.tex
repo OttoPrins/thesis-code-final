@@ -1,0 +1,32 @@
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Frequency prediction accuracy across models and datasets. Mean $\pm$ SD over 3 seeds; Pareto/NBD is a single run.}
+\label{tab:freq_accuracy}
+\begin{tabular}{llrrrr}
+\toprule
+Model & Dataset & Freq RMSE & Freq MAE & Freq MAPE\,\% & Bias\,\% \\
+\midrule
+Pareto/NBD & CDNOW & 1.99 & 0.85 & 13.99 & -6.96 \\
+Base LSTM & CDNOW & 2.03 $\pm$ 0.04 & 0.90 $\pm$ 0.09 & 31.11 $\pm$ 8.98 & -18.48 $\pm$ 29.95 \\
+Joint LSTM & CDNOW & 2.14 $\pm$ 0.03 & 0.95 $\pm$ 0.02 & 19.32 $\pm$ 0.26 & -2.50 $\pm$ 5.99 \\
+Joint Transformer & CDNOW & 2.21 $\pm$ 0.06 & 0.84 $\pm$ 0.02 & 40.55 $\pm$ 8.41 & -38.48 $\pm$ 6.92 \\
+\midrule
+Pareto/NBD & UCI & 3.44 & 1.19 & 20.33 & -11.30 \\
+Base LSTM & UCI & 2.32 $\pm$ 0.06 & 1.30 $\pm$ 0.06 & 19.01 $\pm$ 8.83 & 16.95 $\pm$ 11.25 \\
+Joint LSTM & UCI & 2.28 $\pm$ 0.05 & 1.19 $\pm$ 0.02 & 10.01 $\pm$ 0.47 & 1.22 $\pm$ 4.85 \\
+Joint Transformer & UCI & 2.25 $\pm$ 0.11 & 1.15 $\pm$ 0.03 & 18.44 $\pm$ 1.87 & -3.82 $\pm$ 4.50 \\
+\midrule
+Pareto/NBD & Ta-Feng & 1.29 & 0.92 & 16.79 & 14.80 \\
+Base LSTM & Ta-Feng & 1.37 $\pm$ 0.06 & 0.94 $\pm$ 0.02 & 23.71 $\pm$ 5.32 & 23.28 $\pm$ 5.42 \\
+Joint LSTM & Ta-Feng & 1.31 $\pm$ 0.02 & 0.89 $\pm$ 0.02 & 13.32 $\pm$ 2.78 & 7.38 $\pm$ 5.09 \\
+Joint Transformer & Ta-Feng & 1.26 $\pm$ 0.01 & 0.87 $\pm$ 0.03 & 20.88 $\pm$ 18.11 & -2.09 $\pm$ 12.59 \\
+\midrule
+Pareto/NBD & Dunnhumby & 33.92 & 19.46 & 74.21 & -74.21 \\
+Base LSTM & Dunnhumby & 13.79 $\pm$ 0.19 & 8.57 $\pm$ 0.06 & 4.87 $\pm$ 0.14 & 1.65 $\pm$ 0.55 \\
+Joint LSTM & Dunnhumby & 14.77 $\pm$ 0.45 & 9.12 $\pm$ 0.22 & 5.07 $\pm$ 0.89 & 0.87 $\pm$ 2.58 \\
+Joint Transformer & Dunnhumby & 13.93 $\pm$ 0.16 & 8.67 $\pm$ 0.13 & 5.89 $\pm$ 0.44 & 2.37 $\pm$ 1.96 \\
+\bottomrule
+\end{tabular}
+\end{table}

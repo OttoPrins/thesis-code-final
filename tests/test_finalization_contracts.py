@@ -225,9 +225,11 @@ def test_split_metric_artifacts_rejects_non_scalar_non_numeric_values():
 
 
 def test_gamma_poisson_is_explicit_diagnostic_not_gppm():
-    model = get_benchmark_model("gamma_poisson")
+    model = GammaPoissonPropensityModel()
     assert isinstance(model, GammaPoissonPropensityModel)
     assert model.name() == "gamma_poisson"
+    with pytest.raises(ValueError, match="Unknown benchmark"):
+        get_benchmark_model("gamma_poisson")
 
 
 def test_true_gppm_requires_weekly_event_log_or_dependencies():
@@ -420,7 +422,7 @@ def test_comparison_filter_skips_stale_deep_results_without_run_valid(tmp_path):
     assert str(stale_gppm) not in kept
     assert str(valid) in kept
     assert str(bench) in kept
-    assert str(valid_gppm) in kept
+    assert str(valid_gppm) not in kept
 
 
 def test_final_filter_requires_deep_arrays_and_checkpoint(tmp_path, monkeypatch):
@@ -1234,9 +1236,9 @@ def test_final_configs_freeze_valendin_fixed_tuning_protocol():
         assert dataset["split_seed"] == 42, path
         assert training["epochs"] == 150, path
         assert training["max_epochs"] == 150, path
-        assert training["early_stopping_patience"] == 30, path
+        assert training["early_stopping_patience"] == 20, path
         assert training["restore_best_checkpoint"] is True, path
-        assert training["final_finetune"]["enabled"] is False, path
+        assert training["final_finetune"]["enabled"] is True, path
         assert training["amp_enabled"] is False, path
         assert inference["mode"] == "sample", path
         assert inference["n_scenarios"] == 30, path
@@ -1263,26 +1265,11 @@ def test_final_configs_freeze_valendin_fixed_tuning_protocol():
             assert dataset["keep_zero_amount_transactions"] is True, path
 
 
-def test_cdnow_v4_soft_configs_parse_and_use_conservative_frequency_loss():
-    expected = {
-        "lstm_base_cdnow_v4_soft": False,
-        "lstm_joint_cdnow_v4_soft": True,
-        "transformer_joint_cdnow_v4_soft": True,
-    }
-    for stem, joint in expected.items():
-        path = f"experiments/configs/{stem}.yaml"
-        cfg = yaml.safe_load(open(path))
-        assert cfg["dataset"]["name"] == "cdnow"
-        assert cfg["output"]["run_name"] == stem
-        assert cfg["model"]["joint"] is joint
-
-        freq_loss = cfg["loss"]["frequency_loss"]
-        assert freq_loss["enabled"] is True
-        assert freq_loss["class_weights"] is None
-        assert freq_loss["activity_bce_weight"] == pytest.approx(0.05)
-        assert freq_loss["count_huber_weight"] == pytest.approx(0.10)
-        assert freq_loss["aggregate_bias_weight"] == pytest.approx(0.10)
-        assert freq_loss["temporal_tail_weight"] == pytest.approx(0.15)
+def test_obsolete_cdnow_v4_soft_configs_are_not_in_final_manifest():
+    manifest = yaml.safe_load(open("experiments/final_manifest.yaml"))
+    assert not any(
+        "v4_soft" in path for path in manifest["deep_learning_configs"]
+    )
 
 
 def test_hpo_objective_penalizes_invalid_and_degenerate_runs():
@@ -1464,6 +1451,30 @@ def test_final_manifest_rejects_hash_and_runtime_overrides(tmp_path):
     bad_scenarios["final_manifest_n_scenarios"] = 1
     ok, reason = result_matches_manifest("toy_cdnow_v1_seed7_sample", bad_scenarios, manifest)
     assert not ok and "scenario" in reason
+
+
+def test_final_manifest_uses_benchmark_specific_hashes():
+    manifest = {
+        "version": "test-final",
+        "methodology": {"seeds": [42], "inference_primary": "sample"},
+        "deep_learning_configs": [],
+        "deep_learning_config_hashes": {},
+        "benchmark_run_names": ["pareto_nbd_cdnow"],
+        "benchmark_config_hashes": {"pareto_nbd_cdnow": "benchmark123"},
+    }
+    metrics = {
+        "final_manifest_version": "test-final",
+        "final_manifest_run_name": "pareto_nbd_cdnow",
+        "final_manifest_benchmark_name": "pareto_nbd_cdnow",
+        "final_manifest_config_hash": "benchmark123",
+    }
+
+    ok, reason = result_matches_manifest("pareto_nbd_cdnow", metrics, manifest)
+    assert ok, reason
+
+    metrics["final_manifest_config_hash"] = "stale"
+    ok, reason = result_matches_manifest("pareto_nbd_cdnow", metrics, manifest)
+    assert not ok and "benchmark config hash" in reason
 
 
 def test_final_manifest_hash_uses_frozen_config_not_runtime_mutations(tmp_path):

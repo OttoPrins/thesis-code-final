@@ -1,0 +1,24 @@
+{
+  "selected_integration_samples": {
+    "lstm": 128,
+    "transformer": 128
+  },
+  "architectures": [
+    "lstm",
+    "transformer"
+  ],
+  "seeds": [
+    7,
+    42,
+    2024
+  ],
+  "analysis_seed": 42,
+  "n_background": 100,
+  "n_explain": 701,
+  "sensitivity_n_explain": 100,
+  "primary_sample_manifest": "/kaggle/working/results/final_kaggle/shap/samples/observed_demographics_seed42_100x701.json",
+  "sensitivity_sample_manifest": "/kaggle/working/results/final_kaggle/shap/samples/all_households_seed42_100x100.json",
+  "primary_cohort": "observed_demographics",
+  "sensitivity_cohort": "all_households",
+  "causal_warning": "Interventional model attribution conditional on transaction history; not a causal campaign-effect estimate."
+}

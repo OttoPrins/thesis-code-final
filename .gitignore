@@ -59,6 +59,9 @@ env/
 *.ipynb
 # Exception: Kaggle notebook entry point
 !kaggle_runner.ipynb
+!kaggle_shap_runner.ipynb
+# Exception: final Extension 3 SHAP analysis
+!notebooks/07_extension3_shap.ipynb
 
 # Experiments
 experiments/*.log

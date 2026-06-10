@@ -1,0 +1,16 @@
+{
+  "id": "ottoprins/clv-thesis-shap-full-cohort",
+  "title": "CLV Thesis SHAP Full Cohort",
+  "code_file": "kaggle_shap_runner.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "ottoprins/dunnhumby",
+    "ottoprins/thesis-shap-full-run"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

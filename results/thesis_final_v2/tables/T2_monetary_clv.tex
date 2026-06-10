@@ -1,0 +1,28 @@
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Monetary and CLV prediction across models and datasets. Mean $\pm$ SD over 3 seeds; Pareto/NBD + Gamma--Gamma is a single fit. All models are rescored against the same directly aggregated raw holdout spend. Base LSTM omitted (frequency-only model).}
+\label{tab:monetary_clv}
+\begin{tabular}{llrrrrr}
+\toprule
+Model & Dataset & Spend MAE (\$) & Spend $R^2$ (log) & CLV MAE (\$) & CLV $\rho$ & Decile Lift \\
+\midrule
+Pareto/NBD + Gamma-Gamma & CDNOW & 31.266 & 0.068 & 30.267 & 0.490 & 5.139 \\
+Joint LSTM & CDNOW & 36.348 $\pm$ 0.663 & -0.499 $\pm$ 0.048 & 35.149 $\pm$ 0.637 & 0.406 $\pm$ 0.010 & 5.029 $\pm$ 0.034 \\
+Joint Transformer & CDNOW & 31.839 $\pm$ 0.308 & -0.036 $\pm$ 0.044 & 30.839 $\pm$ 0.284 & 0.411 $\pm$ 0.008 & 5.026 $\pm$ 0.018 \\
+\midrule
+Pareto/NBD + Gamma-Gamma & UCI & 592.472 & 0.073 & 577.564 & 0.592 & 5.405 \\
+Joint LSTM & UCI & 604.647 $\pm$ 16.931 & -0.176 $\pm$ 0.035 & 589.025 $\pm$ 16.310 & 0.609 $\pm$ 0.003 & 6.221 $\pm$ 0.034 \\
+Joint Transformer & UCI & 598.121 $\pm$ 3.217 & -0.031 $\pm$ 0.037 & 583.162 $\pm$ 3.094 & 0.608 $\pm$ 0.004 & 6.280 $\pm$ 0.077 \\
+\midrule
+Pareto/NBD + Gamma-Gamma & Ta-Feng & 946.538 & -0.225 & 943.091 & 0.414 & 3.130 \\
+Joint LSTM & Ta-Feng & 1012.606 $\pm$ 25.656 & -0.746 $\pm$ 0.045 & 1008.954 $\pm$ 25.573 & 0.383 $\pm$ 0.009 & 3.277 $\pm$ 0.016 \\
+Joint Transformer & Ta-Feng & 1010.427 $\pm$ 119.323 & -0.731 $\pm$ 0.132 & 1006.754 $\pm$ 118.687 & 0.385 $\pm$ 0.008 & 3.447 $\pm$ 0.029 \\
+\midrule
+Pareto/NBD + Gamma-Gamma & Dunnhumby & 604.188 & -2.232 & 592.987 & 0.277 & 2.146 \\
+Joint LSTM & Dunnhumby & 312.862 $\pm$ 9.666 & 0.439 $\pm$ 0.019 & 306.524 $\pm$ 9.477 & 0.812 $\pm$ 0.007 & 3.271 $\pm$ 0.022 \\
+Joint Transformer & Dunnhumby & 290.310 $\pm$ 5.782 & 0.504 $\pm$ 0.010 & 284.597 $\pm$ 5.628 & 0.823 $\pm$ 0.002 & 3.278 $\pm$ 0.028 \\
+\bottomrule
+\end{tabular}
+\end{table}

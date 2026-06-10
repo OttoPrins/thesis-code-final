@@ -1,0 +1,28 @@
+\begin{table}
+\centering
+\small
+\caption{Holdout spend performance by model and dataset (mean $\pm$ SD, 3 seeds). Pareto/NBD is a single run. Base LSTM is frequency-only ($-$ for spend/CLV). Pareto/NBD is paired with Gamma--Gamma for monetary prediction.}
+\label{tab:headline_summary_spend}
+\begin{tabular}{lllllll}
+\toprule
+Model & Dataset & Spend $R^2$ & Spend MAE (\$) & Spend MAPE \% & Spend MASE & Spend Bias \% \\
+\midrule
+Pareto/NBD + Gamma--Gamma & CDNOW & 0.07 & 31.27 & 19.1\% & 0.93 & -14.4\% \\
+Base LSTM & CDNOW & — & — & — & — & — \\
+Joint LSTM & CDNOW & -0.50 $\pm$ 0.05 & 36.35 $\pm$ 0.66 & 21.7 $\pm$ 0.7\% & 0.75 $\pm$ 0.02 & -3.8 $\pm$ 4.1\% \\
+Joint Transformer & CDNOW & -0.04 $\pm$ 0.04 & 31.84 $\pm$ 0.31 & 42.5 $\pm$ 7.3\% & 0.63 $\pm$ 0.02 & -38.4 $\pm$ 5.6\% \\
+Pareto/NBD + Gamma--Gamma & UCI & 0.07 & 592.47 & 31.5\% & 0.82 & -26.7\% \\
+Base LSTM & UCI & — & — & — & — & — \\
+Joint LSTM & UCI & -0.18 $\pm$ 0.04 & 604.65 $\pm$ 16.93 & 17.1 $\pm$ 1.0\% & 1.39 $\pm$ 0.03 & -10.9 $\pm$ 3.1\% \\
+Joint Transformer & UCI & -0.03 $\pm$ 0.04 & 598.12 $\pm$ 3.22 & 23.4 $\pm$ 1.6\% & 1.36 $\pm$ 0.02 & -12.4 $\pm$ 3.2\% \\
+Pareto/NBD + Gamma--Gamma & Ta-Feng & -0.23 & 946.54 & 15.9\% & 0.95 & 15.9\% \\
+Base LSTM & Ta-Feng & — & — & — & — & — \\
+Joint LSTM & Ta-Feng & -0.75 $\pm$ 0.05 & 1012.61 $\pm$ 25.66 & 44.9 $\pm$ 5.4\% & 1.05 $\pm$ 0.03 & 44.9 $\pm$ 5.4\% \\
+Joint Transformer & Ta-Feng & -0.73 $\pm$ 0.13 & 1010.43 $\pm$ 119.32 & 51.9 $\pm$ 13.5\% & 1.05 $\pm$ 0.10 & 42.0 $\pm$ 25.1\% \\
+Pareto/NBD + Gamma--Gamma & Dunnhumby & -2.23 & 604.19 & 73.6\% & 0.93 & -73.6\% \\
+Base LSTM & Dunnhumby & — & — & — & — & — \\
+Joint LSTM & Dunnhumby & 0.44 $\pm$ 0.02 & 312.86 $\pm$ 9.67 & 6.8 $\pm$ 0.4\% & 1.13 $\pm$ 0.02 & 0.9 $\pm$ 3.5\% \\
+Joint Transformer & Dunnhumby & 0.50 $\pm$ 0.01 & 290.31 $\pm$ 5.78 & 8.4 $\pm$ 0.3\% & 1.10 $\pm$ 0.01 & 0.7 $\pm$ 3.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}

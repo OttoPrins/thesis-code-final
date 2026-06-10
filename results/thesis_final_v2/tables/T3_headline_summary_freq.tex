@@ -1,0 +1,28 @@
+\begin{table}
+\centering
+\small
+\caption{Holdout frequency performance by model and dataset (mean $\pm$ SD, 3 seeds). Pareto/NBD is a single run. Base LSTM is frequency-only ($-$ for spend/CLV).}
+\label{tab:headline_summary_freq}
+\begin{tabular}{llllll}
+\toprule
+Model & Dataset & Seeds & Freq Bias \% & Freq MAPE \% & Freq MASE \\
+\midrule
+Pareto/NBD & CDNOW & — & -7.0\% & 14.0\% & 1.01 \\
+Base LSTM & CDNOW & 3 & -18.5 $\pm$ 29.9\% & 31.1 $\pm$ 9.0\% & 0.39 $\pm$ 0.06 \\
+Joint LSTM & CDNOW & 3 & -2.5 $\pm$ 6.0\% & 19.3 $\pm$ 0.3\% & 0.43 $\pm$ 0.01 \\
+Joint Transformer & CDNOW & 3 & -38.5 $\pm$ 6.9\% & 40.6 $\pm$ 8.4\% & 0.35 $\pm$ 0.01 \\
+Pareto/NBD & UCI & — & -11.3\% & 20.3\% & 0.94 \\
+Base LSTM & UCI & 3 & 17.0 $\pm$ 11.2\% & 19.0 $\pm$ 8.8\% & 1.01 $\pm$ 0.05 \\
+Joint LSTM & UCI & 3 & 1.2 $\pm$ 4.9\% & 10.0 $\pm$ 0.5\% & 0.94 $\pm$ 0.02 \\
+Joint Transformer & UCI & 3 & -3.8 $\pm$ 4.5\% & 18.4 $\pm$ 1.9\% & 0.90 $\pm$ 0.02 \\
+Pareto/NBD & Ta-Feng & — & 14.8\% & 16.8\% & 1.08 \\
+Base LSTM & Ta-Feng & 3 & 23.3 $\pm$ 5.4\% & 23.7 $\pm$ 5.3\% & 0.89 $\pm$ 0.02 \\
+Joint LSTM & Ta-Feng & 3 & 7.4 $\pm$ 5.1\% & 13.3 $\pm$ 2.8\% & 0.85 $\pm$ 0.02 \\
+Joint Transformer & Ta-Feng & 3 & -2.1 $\pm$ 12.6\% & 20.9 $\pm$ 18.1\% & 0.83 $\pm$ 0.04 \\
+Pareto/NBD & Dunnhumby & — & -74.2\% & 74.2\% & 1.18 \\
+Base LSTM & Dunnhumby & 3 & 1.7 $\pm$ 0.5\% & 4.9 $\pm$ 0.1\% & 1.04 $\pm$ 0.00 \\
+Joint LSTM & Dunnhumby & 3 & 0.9 $\pm$ 2.6\% & 5.1 $\pm$ 0.9\% & 1.05 $\pm$ 0.01 \\
+Joint Transformer & Dunnhumby & 3 & 2.4 $\pm$ 2.0\% & 5.9 $\pm$ 0.4\% & 1.04 $\pm$ 0.00 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -4,19 +4,21 @@ build_thesis_results.py — One-shot generator for thesis-ready figures, tables,
 Usage:
     python build_thesis_results.py
 
-Reads from:  results/KAGGLE_RUNNER_FINAL/
-Writes to:   results/thesis_final/
-              ├── figures/    F1–F7 as .pdf + .png @ 300 DPI
-              ├── tables/     T1–T4 as .tex (booktabs) + .csv
-              └── RESULTS_WRITING_GUIDE.md
+Reads from:  results/final_kaggle/
+Writes to:   results/thesis_final_v2/
+             ├── figures/       F1–F9 as .pdf + .png @ 300 DPI
+             ├── tables/        T1–T6 as .tex (booktabs) + .csv
+             ├── supplementary/ Extension 3 SHAP diagnostics and provenance
+             ├── RESULTS_WRITING_GUIDE.md
+             └── ARTIFACT_MANIFEST.json
 """
 
 from __future__ import annotations
 
-import glob
+import hashlib
 import json
-import math
-import sys
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -25,18 +27,22 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
-import seaborn as sns
 
 from src.evaluation.compare import aggregate_all_results, aggregate_seeds
-from src.evaluation.significance import paired_bootstrap
+from src.evaluation.metrics import (
+    compute_all_metrics,
+    per_customer_clv,
+)
+from src.utils.final_manifest import load_final_manifest
 
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-FINAL = Path("results/KAGGLE_RUNNER_FINAL")
-OUT = Path("results/thesis_final")
+FINAL = Path("results/final_kaggle")
+OUT = Path("results/thesis_final_v2")
 FIGURES = OUT / "figures"
 TABLES = OUT / "tables"
+SUPPLEMENTARY = OUT / "supplementary" / "extension3_shap"
 
 MAIN_MODELS = ["pareto_nbd", "lstm_base", "lstm_joint", "transformer_joint"]
 DATASETS = ["cdnow", "uci", "tafeng", "dunnhumby"]
@@ -46,6 +52,14 @@ MODEL_LABELS = {
     "lstm_base":         "Base LSTM",
     "lstm_joint":        "Joint LSTM",
     "transformer_joint": "Joint Transformer",
+}
+MONEY_MODEL_LABELS = {
+    **MODEL_LABELS,
+    "pareto_nbd": "Pareto/NBD + Gamma-Gamma",
+}
+MONEY_MODEL_LABELS_SHORT = {
+    **MODEL_LABELS,
+    "pareto_nbd": "Pareto/NBD + GG",
 }
 DATASET_LABELS = {
     "cdnow":     "CDNOW",
@@ -62,6 +76,40 @@ MODEL_COLORS = {
 DATASET_DISPLAY_ORDER = ["cdnow", "uci", "tafeng", "dunnhumby"]
 
 SEEDS = [7, 42, 2024]
+WEEKLY_DISCOUNT_RATE = 0.0018
+F3_COMPLETE_HOLDOUT_WEEKS = {"dunnhumby": 21}
+
+EXTENSION3_MODELS = [
+    "extension3_lstm_none",
+    "extension3_lstm_static",
+    "extension3_lstm_dynamic",
+    "extension3_lstm_full",
+    "extension3_transformer_none",
+    "extension3_transformer_static",
+    "extension3_transformer_dynamic",
+    "extension3_transformer_full",
+]
+EXTENSION3_VARIANTS = ["none", "static", "dynamic", "full"]
+EXTENSION3_LABELS = {
+    "none": "None",
+    "static": "Static",
+    "dynamic": "Dynamic",
+    "full": "Full",
+}
+EXTENSION3_COLORS = {
+    "static": "#4C72B0",
+    "dynamic": "#DD8452",
+    "full": "#55A868",
+}
+SHAP_CSV = FINAL / "tables" / "shap_extension3_summary.csv"
+SHAP_ADDITIVITY_CSV = FINAL / "tables" / "shap_extension3_additivity.csv"
+SHAP_RUN_MANIFEST = FINAL / "tables" / "shap_extension3_run_manifest.json"
+SHAP_FEATURE_LABELS = {
+    "income": "Income",
+    "household_size": "Household size",
+    "coupon_redemptions_week": "Weekly coupon redemptions",
+    "campaign_active_flag": "Active campaign",
+}
 
 # ---------------------------------------------------------------------------
 # Style
@@ -75,6 +123,8 @@ plt.rcParams.update({
     "legend.fontsize": 9,
     "axes.spines.top": False,
     "axes.spines.right": False,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 
@@ -108,13 +158,112 @@ def _savetable(df: pd.DataFrame, name: str, tex_content: str | None = None) -> l
 # Data loading
 # ---------------------------------------------------------------------------
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (df_all, df_seeds) filtered to main models only."""
-    df = aggregate_all_results(results_dir=str(FINAL), final_only=False)
-    # Drop extension3 / SHAP
-    df = df[df["model"].isin(MAIN_MODELS)].copy()
+    """Return manifest-qualified result rows and their seed aggregates."""
+    df = aggregate_all_results(results_dir=str(FINAL), final_only=True)
+    _validate_result_inventory(df)
+    df = _rescore_monetary_against_raw_truth(df)
     seeds = aggregate_seeds(df)
-    seeds = seeds[seeds["model"].isin(MAIN_MODELS)].copy()
     return df, seeds
+
+
+def _validate_result_inventory(df: pd.DataFrame) -> None:
+    if df.empty:
+        raise RuntimeError("No manifest-qualified result files were found.")
+
+    expected_models = MAIN_MODELS + EXTENSION3_MODELS
+    missing: list[str] = []
+    for model in expected_models:
+        datasets = DATASETS if model in MAIN_MODELS else ["dunnhumby"]
+        for dataset in datasets:
+            sub = df[(df["model"] == model) & (df["dataset"] == dataset)]
+            if model == "pareto_nbd":
+                if len(sub) != 1:
+                    missing.append(f"{model}/{dataset}: expected 1 benchmark, found {len(sub)}")
+                continue
+            found_seeds = {
+                int(seed) for seed in sub["seed"].dropna().astype(int).tolist()
+            }
+            if found_seeds != set(SEEDS):
+                missing.append(
+                    f"{model}/{dataset}: expected seeds {SEEDS}, found {sorted(found_seeds)}"
+                )
+
+    if missing:
+        raise RuntimeError("Incomplete publication result inventory:\n  " + "\n  ".join(missing))
+
+
+def _arrays_path(run_name: str) -> Path:
+    path = FINAL / "tables" / f"{run_name}_arrays.npz"
+    if not path.exists():
+        raise FileNotFoundError(f"Missing array artifact: {path}")
+    return path
+
+
+def _canonical_targets(dataset: str) -> tuple[np.ndarray, np.ndarray]:
+    """Use direct raw benchmark aggregation as the common holdout truth."""
+    with np.load(_arrays_path(f"pareto_nbd_{dataset}"), allow_pickle=False) as data:
+        return (
+            np.asarray(data["per_week_true_freq"], dtype=np.float64),
+            np.asarray(data["per_week_true_spend"], dtype=np.float64),
+        )
+
+
+def _rescore_monetary_against_raw_truth(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recompute monetary and CLV metrics against one raw holdout matrix per dataset.
+
+    Deep-model artifacts store inverse-transformed spend truth, which can differ
+    slightly from direct raw aggregation. Publication comparisons use the direct
+    raw benchmark matrix for every monetary model while preserving predictions.
+    """
+    out = df.copy()
+    money_models = {"pareto_nbd", "lstm_joint", "transformer_joint"}
+    monetary_prefixes = ("spend_", "clv_")
+
+    for dataset in DATASETS:
+        true_freq_week, true_spend_week = _canonical_targets(dataset)
+        true_freq_total = true_freq_week.sum(axis=1)
+        customer_ids = np.arange(len(true_freq_total))
+
+        row_indices = out[
+            (out["dataset"] == dataset) & (out["model"].isin(money_models))
+        ].index
+        for idx in row_indices:
+            run_name = str(out.at[idx, "run_name"])
+            with np.load(_arrays_path(run_name), allow_pickle=False) as data:
+                pred_freq_week = np.asarray(data["per_week_pred_freq"], dtype=np.float64)
+                pred_spend_week = np.asarray(data["per_week_pred_spend"], dtype=np.float64)
+                stored_true_freq = np.asarray(data["per_week_true_freq"], dtype=np.float64)
+
+            if not np.array_equal(stored_true_freq, true_freq_week):
+                raise RuntimeError(
+                    f"Customer/holdout frequency alignment failed for {run_name}."
+                )
+            if pred_freq_week.shape != true_freq_week.shape:
+                raise RuntimeError(f"Frequency shape mismatch for {run_name}.")
+            if pred_spend_week.shape != true_spend_week.shape:
+                raise RuntimeError(f"Spend shape mismatch for {run_name}.")
+
+            rescored = compute_all_metrics(
+                y_freq_true=true_freq_total,
+                y_freq_pred=pred_freq_week.sum(axis=1),
+                customer_ids=customer_ids,
+                y_freq_true_per_week=true_freq_week,
+                y_freq_pred_per_week=pred_freq_week,
+                y_spend_true_per_week_raw=true_spend_week,
+                y_spend_pred_per_week_raw=pred_spend_week,
+                freq_mase_scale=out.at[idx, "freq_mase_scale"]
+                if "freq_mase_scale" in out.columns and pd.notna(out.at[idx, "freq_mase_scale"])
+                else None,
+                spend_mase_scale=out.at[idx, "spend_mase_scale"]
+                if "spend_mase_scale" in out.columns and pd.notna(out.at[idx, "spend_mase_scale"])
+                else None,
+                weekly_discount_rate=WEEKLY_DISCOUNT_RATE,
+            )
+            for key, value in rescored.items():
+                if key.startswith(monetary_prefixes) and not key.startswith("_"):
+                    out.at[idx, key] = value
+    return out
 
 
 def _load_arrays(model_prefix: str, dataset: str, seed: int | None = None) -> np.lib.npyio.NpzFile | None:
@@ -234,6 +383,8 @@ def _build_freq_latex(df: pd.DataFrame, metrics: list[str]) -> str:
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
+        r"\small",
+        r"\setlength{\tabcolsep}{4pt}",
         r"\caption{Frequency prediction accuracy across models and datasets. "
         r"Mean $\pm$ SD over 3 seeds; Pareto/NBD is a single run.}",
         r"\label{tab:freq_accuracy}",
@@ -262,7 +413,7 @@ def _build_freq_latex(df: pd.DataFrame, metrics: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# T2 — Monetary and CLV table (Pareto/NBD + Joint LSTM + Transformer)
+# T2 — Monetary and CLV table
 # ---------------------------------------------------------------------------
 def make_table_t2(df_all: pd.DataFrame, df_seeds: pd.DataFrame) -> pd.DataFrame:
     """spend MAE, spend R², CLV MAE, CLV Spearman, CLV decile lift."""
@@ -279,7 +430,11 @@ def make_table_t2(df_all: pd.DataFrame, df_seeds: pd.DataFrame) -> pd.DataFrame:
                 if sub.empty:
                     continue
                 row_src = sub.iloc[0]
-                r = {"Model": MODEL_LABELS[model], "Dataset": DATASET_LABELS[ds], "N seeds": "—"}
+                r = {
+                    "Model": MONEY_MODEL_LABELS[model],
+                    "Dataset": DATASET_LABELS[ds],
+                    "N seeds": "—",
+                }
                 for m in money_metrics:
                     v = row_src.get(m, float("nan"))
                     r[m] = float(v) if not pd.isna(v) else float("nan")
@@ -328,8 +483,11 @@ def _build_money_latex(df: pd.DataFrame, metrics: list[str]) -> str:
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
+        r"\small",
+        r"\setlength{\tabcolsep}{4pt}",
         r"\caption{Monetary and CLV prediction across models and datasets. "
-        r"Mean $\pm$ SD over 3 seeds; Pareto/NBD is a single run. "
+        r"Mean $\pm$ SD over 3 seeds; Pareto/NBD + Gamma--Gamma is a single fit. "
+        r"All models are rescored against the same directly aggregated raw holdout spend. "
         r"Base LSTM omitted (frequency-only model).}",
         r"\label{tab:monetary_clv}",
         r"\begin{tabular}{ll" + "r" * len(metrics) + "}",
@@ -370,7 +528,8 @@ def make_table_t3(df_all: pd.DataFrame, df_seeds: pd.DataFrame) -> None:
         out_path=str(TABLES / "T3_headline_summary.tex"),
         caption=(
             r"Holdout performance by model and dataset (mean $\pm$ SD, 3 seeds). "
-            r"Pareto/NBD is a single run. Base LSTM is frequency-only ($-$ for spend/CLV)."
+            r"Pareto/NBD is a single run. "
+            r"Base LSTM is frequency-only ($-$ for spend/CLV)."
         ),
         label="tab:headline_summary",
     )
@@ -381,36 +540,15 @@ def make_table_t3(df_all: pd.DataFrame, df_seeds: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 def make_table_t4() -> pd.DataFrame:
     """
-    Paired bootstrap on CDNOW and Dunnhumby:
-      joint-vs-base (freq_rmse, freq_mae)
-      joint-vs-pareto (freq_rmse, clv_mae)
-      transformer-vs-joint (freq_rmse, spend_mae_raw)
-    Uses seed 42 arrays directly (most representative seed).
+    Paired customer bootstrap on errors averaged over all available DL seeds.
+
+    The same customer indices are resampled for both models. For deep models,
+    each bootstrap statistic is computed per seed and then averaged, matching
+    the mean-over-seeds estimand reported in the main tables. Holm-adjusted
+    p-values control family-wise error across the comparisons in this table.
     """
     print("[T4] Significance tests...")
-    tables_dir = FINAL / "tables"
-    seed = 42
-    N_RESAMPLES = 5_000
-
-    KEY_MAP = {
-        "freq_rmse":     ("per_customer_freq_se", True),
-        "freq_mae":      ("per_customer_freq_ae", False),
-        "spend_mae_raw": ("per_customer_spend_ae", False),
-        "clv_mae":       ("per_customer_clv_ae", False),
-    }
-
-    def _load_arr(prefix: str, ds: str, key: str, s: int) -> np.ndarray | None:
-        pats = [
-            f"{prefix}_{ds}_final_seed{s}_sample_arrays.npz",
-            f"{prefix}_{ds}_arrays.npz",
-        ]
-        for pat in pats:
-            matches = sorted(tables_dir.glob(pat))
-            if matches:
-                z = np.load(matches[0], allow_pickle=False)
-                if key in z.files:
-                    return np.asarray(z[key], dtype=np.float64)
-        return None
+    n_resamples = 5_000
 
     comparisons = [
         # (model_a, model_b, metric, dataset)
@@ -428,70 +566,428 @@ def make_table_t4() -> pd.DataFrame:
 
     rows = []
     for model_a, model_b, metric, ds in comparisons:
-        arr_key, is_sq = KEY_MAP[metric]
-        prefix_a = f"lstm_base" if model_a == "lstm_base" else model_a.replace("_", "_")
-        prefix_b = f"pareto_nbd" if model_b == "pareto_nbd" else model_b.replace("_", "_")
+        errors_a, seeds_a = _model_error_stack(model_a, ds, metric)
+        errors_b, seeds_b = _model_error_stack(model_b, ds, metric)
+        if errors_a.shape[1] != errors_b.shape[1]:
+            raise RuntimeError(
+                f"Customer count mismatch for {model_a} vs {model_b} / {metric} / {ds}."
+            )
 
-        arr_a = _load_arr(model_a, ds, arr_key, seed) if model_a != "pareto_nbd" else _load_arr("pareto_nbd", ds, arr_key, 42)
-        arr_b = _load_arr(model_b, ds, arr_key, seed) if model_b != "pareto_nbd" else _load_arr("pareto_nbd", ds, arr_key, 42)
-
-        if arr_a is None or arr_b is None or len(arr_a) == 0 or len(arr_b) == 0:
-            print(f"  [T4] Missing arrays for {model_a} vs {model_b} / {metric} / {ds}; skipping")
-            continue
-
-        # Align lengths (cohort sizes may differ between benchmark and DL)
-        n = min(len(arr_a), len(arr_b))
-        arr_a, arr_b = arr_a[:n], arr_b[:n]
-
-        result = paired_bootstrap(arr_a, arr_b, n_resamples=N_RESAMPLES, seed=42, is_squared=is_sq)
+        result = _paired_bootstrap_seed_mean(
+            errors_a,
+            errors_b,
+            n_resamples=n_resamples,
+            seed=42,
+            is_squared=metric == "freq_rmse",
+        )
         rows.append({
-            "Model A":      MODEL_LABELS.get(model_a, model_a),
-            "Model B":      MODEL_LABELS.get(model_b, model_b),
-            "Metric":       metric,
+            "Model A":      _comparison_label(model_a, metric),
+            "Model B":      _comparison_label(model_b, metric),
+            "Metric":       _metric_label(metric),
             "Dataset":      DATASET_LABELS.get(ds, ds),
             "Delta":        result["delta"],
             "CI_low":       result["ci_low"],
             "CI_high":      result["ci_high"],
             "p_value":      result["p_value"],
+            "N seeds A":    seeds_a,
+            "N seeds B":    seeds_b,
             "N customers":  result["n_customers"],
-            "sig p<0.05":   "✓" if result["p_value"] < 0.05 else "✗",
         })
 
     df = pd.DataFrame(rows)
     if df.empty:
-        print("  [T4] No significance results — all arrays missing.")
+        print("  [T4] No significance results.")
         return df
+    df["p_holm"] = _holm_adjust(df["p_value"].to_numpy(dtype=float))
+    df["sig_holm_p<0.05"] = df["p_holm"] < 0.05
 
     tex = _build_sig_latex(df)
     _savetable(df, "T4_significance", tex)
     return df
 
 
+def _comparison_label(model: str, metric: str) -> str:
+    if model == "pareto_nbd" and metric in {"spend_mae_raw", "clv_mae"}:
+        return MONEY_MODEL_LABELS[model]
+    return MODEL_LABELS.get(model, model)
+
+
+def _metric_label(metric: str) -> str:
+    return {
+        "freq_rmse": "Frequency RMSE",
+        "freq_mae": "Frequency MAE",
+        "spend_mae_raw": r"Spend MAE (\$)",
+        "clv_mae": "CLV MAE",
+    }.get(metric, metric)
+
+
+def _model_error_stack(
+    model: str,
+    dataset: str,
+    metric: str,
+) -> tuple[np.ndarray, int]:
+    true_freq_week, true_spend_week = _canonical_targets(dataset)
+    true_freq = true_freq_week.sum(axis=1)
+    true_spend = true_spend_week.sum(axis=1)
+    true_clv = per_customer_clv(true_spend_week, WEEKLY_DISCOUNT_RATE)
+
+    run_names = (
+        [f"pareto_nbd_{dataset}"]
+        if model == "pareto_nbd"
+        else [f"{model}_{dataset}_final_seed{seed}_sample" for seed in SEEDS]
+    )
+    errors = []
+    for run_name in run_names:
+        with np.load(_arrays_path(run_name), allow_pickle=False) as data:
+            stored_true_freq = np.asarray(data["per_week_true_freq"], dtype=np.float64)
+            pred_freq_week = np.asarray(data["per_week_pred_freq"], dtype=np.float64)
+            if not np.array_equal(stored_true_freq, true_freq_week):
+                raise RuntimeError(f"Customer ordering mismatch for {run_name}.")
+
+            if metric == "freq_rmse":
+                pred = pred_freq_week.sum(axis=1)
+                err = (true_freq - pred) ** 2
+            elif metric == "freq_mae":
+                pred = pred_freq_week.sum(axis=1)
+                err = np.abs(true_freq - pred)
+            elif metric == "spend_mae_raw":
+                pred_spend = np.asarray(data["per_week_pred_spend"], dtype=np.float64)
+                err = np.abs(true_spend - pred_spend.sum(axis=1))
+            elif metric == "clv_mae":
+                pred_spend = np.asarray(data["per_week_pred_spend"], dtype=np.float64)
+                pred_clv = per_customer_clv(pred_spend, WEEKLY_DISCOUNT_RATE)
+                err = np.abs(true_clv - pred_clv)
+            else:
+                raise ValueError(f"Unsupported significance metric: {metric}")
+        errors.append(np.asarray(err, dtype=np.float64))
+    return np.stack(errors, axis=0), len(run_names)
+
+
+def _paired_bootstrap_seed_mean(
+    errors_a: np.ndarray,
+    errors_b: np.ndarray,
+    *,
+    n_resamples: int,
+    seed: int,
+    is_squared: bool,
+) -> dict[str, float | int]:
+    errors_a = np.asarray(errors_a, dtype=np.float64)
+    errors_b = np.asarray(errors_b, dtype=np.float64)
+    if errors_a.ndim != 2 or errors_b.ndim != 2:
+        raise ValueError("Seed-aware bootstrap expects arrays shaped (S, N).")
+    if errors_a.shape[1] != errors_b.shape[1]:
+        raise ValueError("Paired bootstrap requires equal customer counts.")
+
+    def aggregate(values: np.ndarray, idx: np.ndarray) -> float:
+        per_seed_mean = values[:, idx].mean(axis=1)
+        if is_squared:
+            per_seed_mean = np.sqrt(per_seed_mean)
+        return float(per_seed_mean.mean())
+
+    n_customers = errors_a.shape[1]
+    full_idx = np.arange(n_customers)
+    observed_delta = aggregate(errors_a, full_idx) - aggregate(errors_b, full_idx)
+    rng = np.random.default_rng(seed)
+    draws = np.empty(n_resamples, dtype=np.float64)
+    for i in range(n_resamples):
+        idx = rng.integers(0, n_customers, size=n_customers)
+        draws[i] = aggregate(errors_a, idx) - aggregate(errors_b, idx)
+
+    wrong_side = np.mean(draws >= 0) if observed_delta < 0 else np.mean(draws <= 0)
+    return {
+        "delta": observed_delta,
+        "ci_low": float(np.percentile(draws, 2.5)),
+        "ci_high": float(np.percentile(draws, 97.5)),
+        "p_value": min(1.0, float(2.0 * wrong_side)),
+        "n_customers": n_customers,
+        "n_resamples": n_resamples,
+    }
+
+
+def _holm_adjust(p_values: np.ndarray) -> np.ndarray:
+    p_values = np.asarray(p_values, dtype=np.float64)
+    order = np.argsort(p_values)
+    adjusted_sorted = np.empty_like(p_values)
+    running_max = 0.0
+    m = len(p_values)
+    for rank, idx in enumerate(order):
+        running_max = max(running_max, (m - rank) * p_values[idx])
+        adjusted_sorted[rank] = min(1.0, running_max)
+    adjusted = np.empty_like(p_values)
+    adjusted[order] = adjusted_sorted
+    return adjusted
+
+
+def _format_p(value: float, significant: bool) -> str:
+    if value < 0.001:
+        return r"$<0.001^{*}$" if significant else r"$<0.001$"
+    return f"{value:.3f}" + (r"$^{*}$" if significant else "")
+
+
 def _build_sig_latex(df: pd.DataFrame) -> str:
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
-        r"\caption{Paired bootstrap significance tests (5{,}000 resamples, seed 42). "
+        r"\small",
+        r"\begin{threeparttable}",
+        r"\caption{Paired customer-bootstrap tests (5{,}000 resamples, bootstrap seed 42). "
+        r"Deep-model statistics are averaged across seeds 7, 42, and 2024; "
+        r"probabilistic benchmarks use one deterministic fit. "
         r"$\Delta$ = mean error of Model A $-$ mean error of Model B; "
         r"negative $\Delta$ means Model A is better. "
-        r"95\% bootstrap CI and two-sided $p$-value shown.}",
+        r"Two-sided $p$-values are Holm-adjusted across the displayed comparisons.}",
         r"\label{tab:significance}",
-        r"\begin{tabular}{llllrrrl}",
+        r"\begin{tabular}{llllrrrr}",
         r"\toprule",
-        r"Model A & Model B & Metric & Dataset & $\Delta$ & CI$_{2.5}$ & CI$_{97.5}$ & $p$ \\",
+        r"Model A & Model B & Metric & Dataset & $\Delta$ & CI$_{2.5}$ & CI$_{97.5}$ & $p_{\mathrm{Holm}}$ \\",
         r"\midrule",
     ]
     for _, r in df.iterrows():
-        sig = r"$^*$" if r["p_value"] < 0.05 else ""
         lines.append(
             f"{r['Model A']} & {r['Model B']} & {r['Metric']} & {r['Dataset']} & "
             f"{r['Delta']:.4f} & {r['CI_low']:.4f} & {r['CI_high']:.4f} & "
-            f"{r['p_value']:.3f}{sig} \\\\"
+            f"{_format_p(r['p_holm'], r['p_holm'] < 0.05)} \\\\"
         )
     lines += [r"\bottomrule", r"\end{tabular}",
-              r"\begin{tablenotes}\small\item[$^*$] $p < 0.05$.\end{tablenotes}",
+              r"\begin{tablenotes}\footnotesize",
+              r"\item[$^*$] Holm-adjusted $p < 0.05$. Confidence intervals are unadjusted.",
+              r"\end{tablenotes}",
+              r"\end{threeparttable}",
               r"\end{table}"]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# T5 — Extension 3 covariate ablation
+# ---------------------------------------------------------------------------
+def make_table_t5(df_all: pd.DataFrame) -> pd.DataFrame:
+    print("[T5] Extension 3 covariate ablation...")
+    metrics = [
+        "freq_rmse",
+        "freq_mape",
+        "bias_pct",
+        "spend_r2_log",
+        "clv_spearman",
+    ]
+    rows = []
+    for architecture in ("lstm", "transformer"):
+        for variant in EXTENSION3_VARIANTS:
+            model = f"extension3_{architecture}_{variant}"
+            sub = df_all[(df_all["model"] == model) & (df_all["dataset"] == "dunnhumby")]
+            row = {
+                "Architecture": "LSTM" if architecture == "lstm" else "Transformer",
+                "Covariates": EXTENSION3_LABELS[variant],
+                "N seeds": int(sub["seed"].notna().sum()),
+            }
+            for metric in metrics:
+                values = sub[metric].dropna().astype(float).to_numpy()
+                row[metric] = float(values.mean())
+                row[f"{metric}_std"] = float(values.std(ddof=1))
+            rows.append(row)
+    df = pd.DataFrame(rows)
+
+    display_rows = []
+    for _, row in df.iterrows():
+        display = {
+            "Architecture": row["Architecture"],
+            "Covariates": row["Covariates"],
+            "N_seeds": row["N seeds"],
+        }
+        for metric in metrics:
+            display[metric] = f"{row[metric]:.3f} ± {row[f'{metric}_std']:.3f}"
+        display_rows.append(display)
+    display_df = pd.DataFrame(display_rows)
+
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\small",
+        r"\setlength{\tabcolsep}{4pt}",
+        r"\caption{Dunnhumby covariate ablation over the 80-week calibration and "
+        r"4-week holdout protocol. Values are mean $\pm$ SD over three seeds.}",
+        r"\label{tab:covariate_ablation}",
+        r"\begin{tabular}{llrrrrr}",
+        r"\toprule",
+        r"Architecture & Covariates & Freq RMSE & Freq MAPE\,\% & Bias\,\% & Spend $R^2$ & CLV $\rho$ \\",
+        r"\midrule",
+    ]
+    previous_architecture = None
+    for _, row in df.iterrows():
+        if previous_architecture and row["Architecture"] != previous_architecture:
+            lines.append(r"\midrule")
+        previous_architecture = row["Architecture"]
+        cells = [row["Architecture"], row["Covariates"]]
+        for metric in metrics:
+            cells.append(f"{row[metric]:.3f} $\\pm$ {row[f'{metric}_std']:.3f}")
+        lines.append(" & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
+
+    _savetable(display_df, "T5_covariate_ablation", "\n".join(lines))
+    return df
+
+
+def _extension3_seed_deltas(
+    df_all: pd.DataFrame,
+    architecture: str,
+    variant: str,
+    metric: str,
+) -> np.ndarray:
+    base_model = f"extension3_{architecture}_none"
+    variant_model = f"extension3_{architecture}_{variant}"
+    base = (
+        df_all[df_all["model"] == base_model]
+        .set_index("seed")[metric]
+        .astype(float)
+    )
+    changed = (
+        df_all[df_all["model"] == variant_model]
+        .set_index("seed")[metric]
+        .astype(float)
+    )
+    common = sorted(set(base.index) & set(changed.index))
+    if {int(seed) for seed in common} != set(SEEDS):
+        raise RuntimeError(
+            f"Extension 3 seed alignment failed for {architecture}/{variant}/{metric}."
+        )
+    return np.asarray([changed.loc[seed] - base.loc[seed] for seed in common])
+
+
+# ---------------------------------------------------------------------------
+# T6 — Extension 3 SHAP attribution
+# ---------------------------------------------------------------------------
+def _load_shap_frame() -> pd.DataFrame:
+    if not SHAP_CSV.exists():
+        raise FileNotFoundError(
+            f"Missing final dual-head SHAP summary: {SHAP_CSV}. "
+            "Run scripts/run_extension3_shap.py with the final full-covariate checkpoints."
+        )
+    df = pd.read_csv(SHAP_CSV)
+    required = {
+        "architecture",
+        "head",
+        "feature_type",
+        "feature",
+        "mean_abs_shap",
+        "seed_sd",
+        "bootstrap_ci_low",
+        "bootstrap_ci_high",
+        "relative_importance_pct",
+        "relative_seed_sd_pp",
+        "n_seeds",
+        "n_households",
+        "n_integration_samples",
+        "cohort",
+    }
+    if not required.issubset(df.columns):
+        raise RuntimeError(f"Malformed SHAP summary; missing {sorted(required - set(df.columns))}.")
+    if set(df["head"]) != {"freq", "spend"}:
+        raise RuntimeError("Publication SHAP summary must contain frequency and spend heads.")
+    if set(df["architecture"]) != {"lstm", "transformer"}:
+        raise RuntimeError("Publication SHAP summary must contain LSTM and Transformer rows.")
+    if set(df["cohort"]) != {"observed_demographics"}:
+        raise RuntimeError("Publication SHAP summary must use the observed-demographics cohort.")
+    if set(df["n_households"]) != {701}:
+        raise RuntimeError("Publication SHAP summary must contain all 701 explained households.")
+    if set(df["n_seeds"]) != {3}:
+        raise RuntimeError("Publication SHAP summary must aggregate seeds 7, 42, and 2024.")
+    if set(df["n_integration_samples"]) != {128}:
+        raise RuntimeError("Publication SHAP summary must use the escalated 128-sample budget.")
+    if not SHAP_RUN_MANIFEST.exists():
+        raise FileNotFoundError(f"Missing SHAP run manifest: {SHAP_RUN_MANIFEST}")
+    run_manifest = json.loads(SHAP_RUN_MANIFEST.read_text())
+    expected_manifest = {
+        "n_background": 100,
+        "n_explain": 701,
+        "primary_cohort": "observed_demographics",
+    }
+    mismatches = {
+        key: (run_manifest.get(key), expected)
+        for key, expected in expected_manifest.items()
+        if run_manifest.get(key) != expected
+    }
+    if mismatches:
+        raise RuntimeError(f"Publication SHAP manifest mismatch: {mismatches}")
+    df = df.copy()
+    df["Architecture"] = df["architecture"].map(
+        {"lstm": "LSTM", "transformer": "Transformer"}
+    )
+    df["Head"] = df["head"].map(
+        {"freq": "Frequency", "spend": "Conditional log1p-spend"}
+    )
+    df["Feature type"] = df["feature_type"].map(
+        {"static": "Static", "dynamic": "Dynamic"}
+    )
+    df["Feature"] = df["feature"].map(SHAP_FEATURE_LABELS).fillna(df["feature"])
+    df["Relative importance (%)"] = df["relative_importance_pct"]
+    return df
+
+
+def make_table_t6() -> pd.DataFrame:
+    print("[T6] Dual-head SHAP attribution...")
+    df = _load_shap_frame()
+    additivity = pd.read_csv(SHAP_ADDITIVITY_CSV)
+    additivity_low = 100 * additivity["normalized_additivity_error"].min()
+    additivity_high = 100 * additivity["normalized_additivity_error"].max()
+    display = df[
+        [
+            "Architecture",
+            "Head",
+            "Feature type",
+            "Feature",
+            "mean_abs_shap",
+            "seed_sd",
+            "bootstrap_ci_low",
+            "bootstrap_ci_high",
+            "Relative importance (%)",
+        ]
+    ].copy()
+    display = display.sort_values(
+        ["Architecture", "Head", "Relative importance (%)"],
+        ascending=[True, True, False],
+    )
+    display = display.rename(
+        columns={
+            "mean_abs_shap": "Mean absolute SHAP",
+            "seed_sd": "Seed SD",
+            "bootstrap_ci_low": "CI low",
+            "bootstrap_ci_high": "CI high",
+        }
+    )
+
+    lines = [
+        r"\begin{table}[htbp]",
+        r"\centering",
+        r"\scriptsize",
+        r"\setlength{\tabcolsep}{3pt}",
+        r"\caption{Extension 3 covariate attribution for the full-covariate LSTM "
+        r"and Transformer on Dunnhumby. Values are means over three seeds; uncertainty "
+        r"is the seed SD and a customer-bootstrap 95\% CI. Dynamic SHAP values are "
+        r"summed with their signs over 80 calibration weeks before absolute importance. "
+        f"The 100-background/701-explanation expected-gradient runs have normalized "
+        f"additivity residuals of {additivity_low:.1f}--{additivity_high:.1f}\\%.}}",
+        r"\label{tab:shap_attribution}",
+        r"\resizebox{\textwidth}{!}{%",
+        r"\begin{tabular}{llllrrrr}",
+        r"\toprule",
+        r"Architecture & Head & Type & Feature & Mean $|\mathrm{SHAP}|$ & Seed SD & 95\% CI & Rel.\,\% \\",
+        r"\midrule",
+    ]
+    previous_group = None
+    for _, row in display.iterrows():
+        group = (row["Architecture"], row["Head"])
+        if previous_group and group != previous_group:
+            lines.append(r"\midrule")
+        previous_group = group
+        lines.append(
+            f"{row['Architecture']} & {row['Head']} & {row['Feature type']} & "
+            f"{row['Feature']} & {row['Mean absolute SHAP']:.5f} & "
+            f"{row['Seed SD']:.5f} & "
+            f"[{row['CI low']:.5f}, {row['CI high']:.5f}] & "
+            f"{row['Relative importance (%)']:.1f} \\\\"
+        )
+    lines += [r"\bottomrule", r"\end{tabular}", r"}", r"\end{table}"]
+    _savetable(display, "T6_shap_attribution", "\n".join(lines))
+    return display
 
 
 # ---------------------------------------------------------------------------
@@ -566,80 +1062,241 @@ def fig_freq_mape(df_all: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
-# F3 — Weekly cohort tracking (actual vs predicted)
+# F3 — Cumulative cohort calibration
 # ---------------------------------------------------------------------------
+def _cumulative_calibration_summary(
+    true_weekly: np.ndarray,
+    pred_weekly_by_seed: np.ndarray,
+    plot_weeks: int | None = None,
+) -> dict[str, np.ndarray]:
+    """Summarise cumulative predicted/actual calibration across training seeds."""
+    true = np.asarray(true_weekly, dtype=np.float64)
+    pred = np.asarray(pred_weekly_by_seed, dtype=np.float64)
+    if true.ndim != 1:
+        raise ValueError(f"true_weekly must be 1D, got shape {true.shape}.")
+    if pred.ndim == 1:
+        pred = pred[None, :]
+    if pred.ndim != 2:
+        raise ValueError(f"pred_weekly_by_seed must be 1D or 2D, got shape {pred.shape}.")
+    if pred.shape[1] != true.shape[0]:
+        raise ValueError(
+            "Weekly truth/prediction length mismatch: "
+            f"{true.shape[0]} vs {pred.shape[1]}."
+        )
+
+    source_weeks = true.shape[0]
+    plotted_weeks = source_weeks if plot_weeks is None else int(plot_weeks)
+    if not 1 <= plotted_weeks <= source_weeks:
+        raise ValueError(
+            f"plot_weeks must be between 1 and {source_weeks}, got {plotted_weeks}."
+        )
+
+    true_plot = true[:plotted_weeks]
+    pred_plot = pred[:, :plotted_weeks]
+    cumulative_true = np.cumsum(true_plot)
+    if np.any(cumulative_true <= 0):
+        raise ValueError("Cumulative actual transactions must remain positive.")
+
+    seed_ratios = 100.0 * np.cumsum(pred_plot, axis=1) / cumulative_true[None, :]
+    return {
+        "weeks": np.arange(1, plotted_weeks + 1),
+        "seed_ratios": seed_ratios,
+        "mean": seed_ratios.mean(axis=0),
+        "lower": seed_ratios.min(axis=0),
+        "upper": seed_ratios.max(axis=0),
+    }
+
+
+def _annotate_final_calibration(
+    ax: plt.Axes,
+    week: int,
+    value: float,
+    color: str,
+    y_offset_points: float,
+) -> None:
+    ax.annotate(
+        f"{value:.0f}%",
+        xy=(week, value),
+        xytext=(-5, y_offset_points),
+        textcoords="offset points",
+        ha="right",
+        va="center",
+        fontsize=8,
+        fontweight="bold",
+        color=color,
+        bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.72, "pad": 0.8},
+    )
+
+
+def _holdout_week_ticks(plot_weeks: int, max_ticks: int = 6) -> np.ndarray:
+    """Return sparse integer ticks that always include the first and final week."""
+    if plot_weeks <= max_ticks:
+        return np.arange(1, plot_weeks + 1)
+    return np.unique(np.rint(np.linspace(1, plot_weeks, max_ticks)).astype(int))
+
+
 def fig_weekly_tracking(df_all: pd.DataFrame) -> None:
-    print("[F3] Weekly cohort tracking figure...")
+    print("[F3] Cumulative cohort calibration figure...")
     models_to_plot = ["pareto_nbd", "lstm_joint", "transformer_joint"]
     model_line_styles = {
         "pareto_nbd":        ("--", MODEL_COLORS["pareto_nbd"]),
         "lstm_joint":        ("-",  MODEL_COLORS["lstm_joint"]),
         "transformer_joint": ("-.", MODEL_COLORS["transformer_joint"]),
     }
+    endpoint_offsets = {
+        "cdnow": {"pareto_nbd": 9, "lstm_joint": -9, "transformer_joint": 0},
+        "uci": {"pareto_nbd": 0, "lstm_joint": 9, "transformer_joint": -9},
+        "tafeng": {"pareto_nbd": 9, "lstm_joint": 0, "transformer_joint": -9},
+        "dunnhumby": {"pareto_nbd": 0, "lstm_joint": -9, "transformer_joint": 9},
+    }
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+    fig, axes = plt.subplots(2, 2, figsize=(10.5, 5.8), sharey=True)
     axes_flat = axes.flatten()
 
-    for ax, ds in zip(axes_flat, DATASET_DISPLAY_ORDER):
-        true_loaded = False
+    for panel_label, ax, ds in zip("abcd", axes_flat, DATASET_DISPLAY_ORDER):
+        true_weekly, _ = _canonical_targets(ds)
+        true_cohort_weekly = true_weekly.sum(axis=0)
+        source_weeks = len(true_cohort_weekly)
+        plot_weeks = F3_COMPLETE_HOLDOUT_WEEKS.get(ds, source_weeks)
+        if ds == "dunnhumby" and source_weeks != 22:
+            raise RuntimeError(
+                "F3 expects the publication Dunnhumby artifact to retain all 22 "
+                f"holdout bins, found {source_weeks}."
+            )
+
+        ax.axhline(100.0, color="black", linewidth=1.8, zorder=4, label="Perfect calibration")
         for model in models_to_plot:
-            # Average per-week cohort totals across seeds
             all_pred_weeks = []
-            all_true_weeks = None
             for seed in SEEDS:
                 z = _load_arrays(model, ds, seed)
                 if z is None:
                     continue
                 if "per_week_pred_freq" not in z.files:
                     continue
-                pred_wk = z["per_week_pred_freq"].sum(axis=0)  # (T,)
-                all_pred_weeks.append(pred_wk)
-                if all_true_weeks is None and "per_week_true_freq" in z.files:
-                    all_true_weeks = z["per_week_true_freq"].sum(axis=0)
+                all_pred_weeks.append(z["per_week_pred_freq"].sum(axis=0))
 
             if not all_pred_weeks:
-                # Try benchmark (no seed)
                 z = _load_arrays(model, ds, seed=None)
                 if z is not None and "per_week_pred_freq" in z.files:
                     all_pred_weeks = [z["per_week_pred_freq"].sum(axis=0)]
-                    if all_true_weeks is None and "per_week_true_freq" in z.files:
-                        all_true_weeks = z["per_week_true_freq"].sum(axis=0)
             if not all_pred_weeks:
                 continue
 
-            # Mean and std across seeds
-            pred_mat = np.array(all_pred_weeks)
-            pred_mean = pred_mat.mean(axis=0)
-            T = len(pred_mean)
-            weeks = np.arange(1, T + 1)
+            summary = _cumulative_calibration_summary(
+                true_cohort_weekly,
+                np.stack(all_pred_weeks, axis=0),
+                plot_weeks=plot_weeks,
+            )
+            weeks = summary["weeks"]
 
             style, color = model_line_styles[model]
-            ax.plot(weeks, pred_mean, style, color=color, linewidth=1.5,
+            ax.plot(weeks, summary["mean"], style, color=color, linewidth=1.7,
                     label=MODEL_LABELS[model])
-            if pred_mat.shape[0] > 1:
-                pred_std = pred_mat.std(axis=0)
-                ax.fill_between(weeks, pred_mean - pred_std, pred_mean + pred_std,
-                                alpha=0.15, color=color)
+            if summary["seed_ratios"].shape[0] > 1:
+                ax.fill_between(
+                    weeks,
+                    summary["lower"],
+                    summary["upper"],
+                    color=color,
+                    alpha=0.12,
+                    linewidth=0,
+                )
+            _annotate_final_calibration(
+                ax,
+                int(weeks[-1]),
+                float(summary["mean"][-1]),
+                color,
+                endpoint_offsets[ds][model],
+            )
 
-            if not true_loaded and all_true_weeks is not None:
-                ax.plot(weeks, all_true_weeks, "-", color="black", linewidth=2.0,
-                        label="Actual", zorder=5)
-                true_loaded = True
+        ax.set_title(f"({panel_label}) {DATASET_LABELS[ds]}", fontsize=10.5, loc="left")
+        ax.set_ylim(0, 205)
+        ax.set_xlim(1, plot_weeks)
+        ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=100, decimals=0))
+        ax.set_xticks(_holdout_week_ticks(plot_weeks))
+        ax.grid(axis="y", alpha=0.2)
 
-        ax.set_title(DATASET_LABELS[ds])
-        ax.set_xlabel("Holdout week")
-        ax.set_ylabel("Total transactions (cohort)")
-        ax.legend(fontsize=8)
+        if ds == "dunnhumby":
+            ax.text(
+                0.985,
+                0.04,
+                "Complete weeks 1-21",
+                transform=ax.transAxes,
+                ha="right",
+                va="bottom",
+                fontsize=8,
+                color="#7A5A20",
+            )
 
-    fig.suptitle("Weekly cohort-level transaction forecast vs. actual (holdout period)\n"
-                 "Shaded bands = ±1 SD across 3 seeds", y=1.02)
-    fig.tight_layout()
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.925),
+        ncol=4,
+        frameon=False,
+        fontsize=8.5,
+    )
+    fig.supxlabel("Holdout week", y=0.015, fontsize=10)
+    fig.supylabel("Cumulative predicted / actual (%)", x=0.015, fontsize=10)
+    fig.tight_layout(rect=(0.035, 0.04, 1, 0.89))
     _savefig(fig, "F3_weekly_tracking")
 
 
 # ---------------------------------------------------------------------------
 # F4 — CLV decile lift
 # ---------------------------------------------------------------------------
+def _tie_preserving_groups(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    n_groups: int = 10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build approximately equal ordered groups without splitting tied scores."""
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_score = np.asarray(y_score, dtype=np.float64)
+    order = np.argsort(y_score, kind="mergesort")
+    sorted_true = y_true[order]
+    sorted_score = y_score[order]
+    starts = np.flatnonzero(
+        np.r_[True, sorted_score[1:] != sorted_score[:-1]]
+    )
+    ends = np.r_[starts[1:], len(sorted_score)]
+    blocks = list(zip(starts, ends))
+
+    group_true = []
+    group_score = []
+    group_size = []
+    block_idx = 0
+    groups_left = min(n_groups, len(blocks))
+    observations_left = len(sorted_score)
+    while block_idx < len(blocks):
+        target_size = observations_left / groups_left
+        group_start = blocks[block_idx][0]
+        size = 0
+        while block_idx < len(blocks):
+            block_start, block_end = blocks[block_idx]
+            block_size = block_end - block_start
+            if size and abs(size - target_size) <= abs(size + block_size - target_size):
+                break
+            size += block_size
+            block_idx += 1
+            if size >= target_size:
+                break
+        group_end = blocks[block_idx - 1][1]
+        group_true.append(float(sorted_true[group_start:group_end].mean()))
+        group_score.append(float(sorted_score[group_start:group_end].mean()))
+        group_size.append(group_end - group_start)
+        observations_left -= group_end - group_start
+        groups_left -= 1
+
+    return (
+        np.asarray(group_true),
+        np.asarray(group_score),
+        np.asarray(group_size),
+    )
+
+
 def fig_clv_decile(df_all: pd.DataFrame) -> None:
     print("[F4] CLV decile lift figure...")
     money_models = ["pareto_nbd", "lstm_joint", "transformer_joint"]
@@ -659,7 +1316,7 @@ def fig_clv_decile(df_all: pd.DataFrame) -> None:
             vals_mean.append(np.mean(vals) if vals else float("nan"))
             vals_err.append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
         ax.bar(x + offsets[i], vals_mean, bar_width, color=MODEL_COLORS[model],
-               alpha=0.85, yerr=vals_err, capsize=3, label=MODEL_LABELS[model],
+               alpha=0.85, yerr=vals_err, capsize=3, label=MONEY_MODEL_LABELS_SHORT[model],
                error_kw={"elinewidth": 1.2, "ecolor": "black"})
 
     ax.axhline(1.0, color="grey", linestyle="--", linewidth=0.8, label="Random (lift=1)")
@@ -672,22 +1329,44 @@ def fig_clv_decile(df_all: pd.DataFrame) -> None:
     # ---- subplot 2: predicted-rank calibration on Dunnhumby (best dataset) ----
     ax2 = axes[1]
     ds = "dunnhumby"
+    _, true_spend_week = _canonical_targets(ds)
+    true_clv = per_customer_clv(true_spend_week, WEEKLY_DISCOUNT_RATE)
     for model in money_models:
-        z = _load_arrays(model, ds, seed=42)
-        if z is None:
-            z = _load_arrays(model, ds, seed=None)
-        if z is None or "clv_decile_actual_mean" not in z.files:
+        pred_spend_weeks = []
+        seeds = [None] if model == "pareto_nbd" else SEEDS
+        for seed in seeds:
+            z = _load_arrays(model, ds, seed=seed)
+            if z is not None and "per_week_pred_spend" in z.files:
+                pred_spend_weeks.append(
+                    np.asarray(z["per_week_pred_spend"], dtype=np.float64)
+                )
+        if not pred_spend_weeks:
             continue
-        decile_actual = np.asarray(z["clv_decile_actual_mean"])
-        # Array is stored highest-to-lowest predicted rank; reverse so x increases
-        decile_actual = decile_actual[::-1]
-        x_decile = np.arange(1, len(decile_actual) + 1)
-        ax2.plot(x_decile, decile_actual, "o-", color=MODEL_COLORS[model],
-                 label=MODEL_LABELS[model], linewidth=1.5, markersize=5)
+        pred_clv = per_customer_clv(
+            np.mean(pred_spend_weeks, axis=0),
+            WEEKLY_DISCOUNT_RATE,
+        )
+        group_actual, group_predicted, group_sizes = _tie_preserving_groups(
+            true_clv,
+            pred_clv,
+        )
+        x_group = np.arange(1, len(group_actual) + 1)
+        ax2.plot(x_group, group_actual, "o-", color=MODEL_COLORS[model],
+                 label=MONEY_MODEL_LABELS_SHORT[model], linewidth=1.5, markersize=5)
+        if model == "pareto_nbd" and group_predicted[0] == 0:
+            ax2.text(
+                0.02,
+                0.97,
+                f"Pareto/NBD group 1: {group_sizes[0]} tied zero predictions",
+                transform=ax2.transAxes,
+                va="top",
+                fontsize=8,
+                color=MODEL_COLORS[model],
+            )
 
-    ax2.set_xlabel("Predicted CLV decile (1=lowest, 10=highest)")
-    ax2.set_ylabel("Mean actual CLV")
-    ax2.set_title("CLV calibration by predicted decile — Dunnhumby")
+    ax2.set_xlabel("Ordered predicted-CLV group (1=lowest, 10=highest; ties intact)")
+    ax2.set_ylabel("Mean actual holdout CLV ($)")
+    ax2.set_title("Realized CLV by ordered prediction group - Dunnhumby")
     ax2.legend(fontsize=8)
 
     fig.tight_layout()
@@ -713,7 +1392,7 @@ def fig_spend_r2(df_all: pd.DataFrame) -> None:
             vals_mean.append(np.mean(vals) if vals else float("nan"))
             vals_err.append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
         ax.bar(x + offsets[i], vals_mean, bar_width, color=MODEL_COLORS[model],
-               alpha=0.85, yerr=vals_err, capsize=3, label=MODEL_LABELS[model],
+               alpha=0.85, yerr=vals_err, capsize=3, label=MONEY_MODEL_LABELS_SHORT[model],
                error_kw={"elinewidth": 1.2, "ecolor": "black"})
 
     ax.axhline(0, color="black", linewidth=0.8, linestyle="--", label="R²=0 baseline")
@@ -732,6 +1411,8 @@ def fig_spend_r2(df_all: pd.DataFrame) -> None:
 def fig_kendall_weights() -> None:
     print("[F6] Kendall task-weight trajectories...")
     joint_models = ["lstm_joint", "transformer_joint"]
+    freq_color = "#4C72B0"
+    spend_color = "#DD8452"
 
     fig, axes = plt.subplots(len(joint_models), len(DATASETS), figsize=(16, 7), sharey="row")
 
@@ -748,9 +1429,8 @@ def fig_kendall_weights() -> None:
                 if not tw_freq:
                     continue
                 ep = np.arange(1, len(tw_freq) + 1)
-                color_freq = MODEL_COLORS["lstm_joint"] if model == "lstm_joint" else MODEL_COLORS["transformer_joint"]
-                ax.plot(ep, tw_freq,  "-",  color=color_freq,   alpha=0.7, linewidth=1.2)
-                ax.plot(ep, tw_spend, "--", color=MODEL_COLORS["pareto_nbd"], alpha=0.7, linewidth=1.2)
+                ax.plot(ep, tw_freq, "-", color=freq_color, alpha=0.62, linewidth=1.2)
+                ax.plot(ep, tw_spend, "--", color=spend_color, alpha=0.62, linewidth=1.2)
                 loaded_any = True
 
             if col_j == 0:
@@ -763,12 +1443,14 @@ def fig_kendall_weights() -> None:
             if not loaded_any:
                 ax.text(0.5, 0.5, "N/A", transform=ax.transAxes,
                         ha="center", va="center", color="grey")
+            else:
+                ax.set_yscale("log")
 
     # Legend in first subplot
     from matplotlib.lines import Line2D
     legend_handles = [
-        Line2D([0], [0], linestyle="-",  color="steelblue",   label="Task weight: freq"),
-        Line2D([0], [0], linestyle="--", color=MODEL_COLORS["pareto_nbd"], label="Task weight: spend"),
+        Line2D([0], [0], linestyle="-", color=freq_color, label="Task weight: frequency"),
+        Line2D([0], [0], linestyle="--", color=spend_color, label="Task weight: spend"),
     ]
     axes[0][0].legend(handles=legend_handles, fontsize=8)
     fig.suptitle("Kendall task-weight evolution during training\n(each line = one seed)", y=1.01)
@@ -807,6 +1489,172 @@ def fig_learning_curves() -> None:
     fig.suptitle("Training & validation loss curves — CDNOW (solid=train, dashed=val, each line=1 seed)")
     fig.tight_layout()
     _savefig(fig, "F7_learning_curves")
+
+
+# ---------------------------------------------------------------------------
+# F8 — Extension 3 Comic Ablation
+# ---------------------------------------------------------------------------
+def fig_covariate_ablation(df_all: pd.DataFrame) -> None:
+    print("[F8] Extension 3 covariate ablation deltas...")
+    variants = ["static", "dynamic", "full"]
+    architectures = ["lstm", "transformer"]
+    architecture_labels = {"lstm": "LSTM", "transformer": "Transformer"}
+    x = np.arange(len(variants))
+    width = 0.34
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+    metric_specs = [
+        ("freq_rmse", "Change in frequency RMSE", "Lower than zero is better"),
+        ("spend_r2_log", r"Change in spend $R^2$ (log)", "Higher than zero is better"),
+    ]
+
+    for ax, (metric, ylabel, subtitle) in zip(axes, metric_specs):
+        for arch_idx, architecture in enumerate(architectures):
+            means, stds = [], []
+            for variant in variants:
+                deltas = _extension3_seed_deltas(
+                    df_all, architecture, variant, metric
+                )
+                means.append(float(deltas.mean()))
+                stds.append(float(deltas.std(ddof=1)))
+            offset = (arch_idx - 0.5) * width
+            ax.bar(
+                x + offset,
+                means,
+                width,
+                yerr=stds,
+                capsize=4,
+                alpha=0.88,
+                label=architecture_labels[architecture],
+                color=MODEL_COLORS[
+                    "lstm_joint" if architecture == "lstm" else "transformer_joint"
+                ],
+                error_kw={"elinewidth": 1.1, "ecolor": "black"},
+            )
+        ax.axhline(0, color="black", linewidth=0.8)
+        ax.set_xticks(x)
+        ax.set_xticklabels([EXTENSION3_LABELS[v] for v in variants])
+        ax.set_xlabel("Covariates added relative to none")
+        ax.set_ylabel(ylabel)
+        ax.set_title(subtitle)
+
+    axes[0].legend()
+    fig.suptitle(
+        "Dunnhumby covariate ablation: paired seed-wise change from no covariates\n"
+        "(error bars = SD across three seeds)"
+    )
+    fig.tight_layout()
+    _savefig(fig, "F8_covariate_ablation")
+
+
+# ---------------------------------------------------------------------------
+# F9 — Extension 3 SHAP attribution
+# ---------------------------------------------------------------------------
+def fig_shap_attribution() -> None:
+    print("[F9] Dual-head SHAP attribution...")
+    df = _load_shap_frame()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+    head_specs = [
+        ("freq", "Frequency"),
+        ("spend", "Conditional log1p-spend"),
+    ]
+    architectures = ["lstm", "transformer"]
+    architecture_colors = {"lstm": "#4C72B0", "transformer": "#DD8452"}
+    feature_order = list(SHAP_FEATURE_LABELS)
+    x = np.arange(len(feature_order))
+    width = 0.36
+
+    for ax, (head, title) in zip(axes, head_specs):
+        for index, architecture in enumerate(architectures):
+            sub = (
+                df[
+                    (df["head"] == head)
+                    & (df["architecture"] == architecture)
+                ]
+                .set_index("feature")
+                .reindex(feature_order)
+            )
+            offset = (index - 0.5) * width
+            ax.bar(
+                x + offset,
+                sub["Relative importance (%)"],
+                width,
+                yerr=sub["relative_seed_sd_pp"],
+                capsize=3,
+                color=architecture_colors[architecture],
+                alpha=0.9,
+                label=architecture.upper(),
+            )
+        ax.set_xticks(x)
+        ax.set_xticklabels(
+            [SHAP_FEATURE_LABELS[value] for value in feature_order],
+            rotation=25,
+            ha="right",
+        )
+        ax.set_ylabel("Relative importance within head (%)")
+        ax.set_title(title)
+        ax.legend()
+    fig.suptitle(
+        "Dunnhumby covariate attribution by architecture and prediction head\n"
+        "(mean over three seeds; error bars = seed SD)"
+    )
+    fig.tight_layout()
+    _savefig(fig, "F9_shap_attribution")
+
+
+# ---------------------------------------------------------------------------
+# Extension 3 SHAP supplement
+# ---------------------------------------------------------------------------
+def copy_shap_supplement() -> None:
+    print("[Supplement] Copying Extension 3 SHAP diagnostics...")
+    if SUPPLEMENTARY.exists():
+        shutil.rmtree(SUPPLEMENTARY)
+    SUPPLEMENTARY.mkdir(parents=True, exist_ok=True)
+    table_names = [
+        "shap_extension3_summary.csv",
+        "shap_extension3_seed_summary.csv",
+        "shap_extension3_customer_values.csv.gz",
+        "shap_extension3_additivity.csv",
+        "shap_extension3_convergence.csv",
+        "shap_extension3_sensitivity_all_households.csv",
+        "shap_extension3_run_manifest.json",
+        "shap_extension3_method_notes.md",
+    ]
+    for name in table_names:
+        shutil.copy2(FINAL / "tables" / name, SUPPLEMENTARY / name)
+
+    plot_dir = SUPPLEMENTARY / "plots"
+    plot_dir.mkdir(exist_ok=True)
+    for source in sorted((FINAL / "plots" / "shap").glob("*")):
+        if source.is_file():
+            shutil.copy2(source, plot_dir / source.name)
+
+    provenance_dir = SUPPLEMENTARY / "provenance"
+    provenance_dir.mkdir(exist_ok=True)
+    for source in sorted((FINAL / "shap").glob("*/*/seed*/nsamples*/provenance.json")):
+        relative = source.relative_to(FINAL / "shap")
+        destination = provenance_dir / (
+            "__".join(relative.parts[:-1]) + ".json"
+        )
+        shutil.copy2(source, destination)
+
+    readme = """# Extension 3 SHAP Publication Supplement
+
+The primary result explains 701 Dunnhumby households with observed demographics,
+using a disjoint empirical background of 100 households. It aggregates LSTM and
+Transformer checkpoints trained with seeds 7, 42, and 2024 at 128 expected-gradient
+samples.
+
+Use `shap_extension3_summary.csv` for the thesis table and headline architecture
+comparison. The beeswarm and temporal plots provide distributional and weekly detail.
+The all-household file is a sensitivity analysis only: missing demographics are
+zero-coded and therefore confounded with valid lowest-category values.
+
+These are interventional model attributions conditional on each household's fixed
+80-week transaction history, not causal campaign-effect estimates. Expected-gradient
+additivity is approximate; see `shap_extension3_additivity.csv` and the method notes.
+"""
+    (SUPPLEMENTARY / "README.md").write_text(readme)
 
 
 # ---------------------------------------------------------------------------
@@ -857,8 +1705,33 @@ def make_writing_guide(df_all: pd.DataFrame, df_seeds: pd.DataFrame, sig_df: pd.
     jlstm_tafeng_rmse = _m("lstm_joint", "tafeng", "freq_rmse")
     pnbd_tafeng_rmse = _b("pareto_nbd", "tafeng", "freq_rmse")
 
+    lstm_static_freq_delta = _extension3_seed_deltas(
+        df_all, "lstm", "static", "freq_rmse"
+    ).mean()
+    lstm_static_spend_delta = _extension3_seed_deltas(
+        df_all, "lstm", "static", "spend_r2_log"
+    ).mean()
+    transformer_static_spend_delta = _extension3_seed_deltas(
+        df_all, "transformer", "static", "spend_r2_log"
+    ).mean()
+    shap_df = _load_shap_frame()
+    shap_additivity = pd.read_csv(SHAP_ADDITIVITY_CSV)
+    shap_additivity_low = 100 * shap_additivity["normalized_additivity_error"].min()
+    shap_additivity_high = 100 * shap_additivity["normalized_additivity_error"].max()
+    shap_top = {}
+    for architecture in ("lstm", "transformer"):
+        for head in ("freq", "spend"):
+            row = shap_df[
+                (shap_df["architecture"] == architecture)
+                & (shap_df["head"] == head)
+            ].sort_values("Relative importance (%)", ascending=False).iloc[0]
+            shap_top[(architecture, head)] = (
+                row["Feature"],
+                row["Relative importance (%)"],
+            )
+
     guide = f"""# Results Section Writing Guide
-*Auto-generated by build_thesis_results.py — numbers pulled directly from KAGGLE_RUNNER_FINAL.*
+*Auto-generated by build_thesis_results.py from manifest-qualified files in `{FINAL}`.*
 *Update by re-running the script. Do not edit numbers by hand.*
 
 ---
@@ -870,58 +1743,66 @@ def make_writing_guide(df_all: pd.DataFrame, df_seeds: pd.DataFrame, sig_df: pd.
 | T1 | T1_freq_accuracy.csv / .tex | Section 5.1–5.2: full frequency accuracy table |
 | T2 | T2_monetary_clv.csv / .tex | Section 5.3: spend + CLV table |
 | T3 | T3_headline_summary.tex (+ _freq, _spend) | Section 5.0 or summary: compact overview |
-| T4 | T4_significance.csv / .tex | Section 5.5: statistical significance |
+| T4 | T4_significance.csv / .tex | Section 5.6: statistical significance |
+| T5 | T5_covariate_ablation.csv / .tex | Section 5.5: Extension 3 ablation |
+| T6 | T6_shap_attribution.csv / .tex | Section 5.5: dual-head SHAP attribution |
 | F1 | F1_cohort_bias.png/.pdf | Section 5.2: bias comparison (headline) |
 | F2 | F2_freq_mape.png/.pdf | Section 5.2: MAPE comparison |
-| F3 | F3_weekly_tracking.png/.pdf | Section 5.1 + 5.2: Valendin-style tracking |
+| F3 | F3_weekly_tracking.png/.pdf | Section 5.1 + 5.2: Cumulative calibration over the holdout |
 | F4 | F4_clv_decile.png/.pdf | Section 5.3: CLV ranking quality |
 | F5 | F5_spend_r2.png/.pdf | Section 5.3: spend point-accuracy |
 | F6 | F6_kendall_weights.png/.pdf | Section 5.3 or methodology appendix |
 | F7 | F7_learning_curves.png/.pdf | Appendix: convergence evidence |
+| F8 | F8_covariate_ablation.png/.pdf | Section 5.5: marginal covariate effects |
+| F9 | F9_shap_attribution.png/.pdf | Section 5.5: attribution by prediction head |
 
 ---
 
 ## Recommended Narrative Structure
 
 ### 5.0 Experimental Setup (half page)
-- **Datasets:** CDNOW (2,357 → 23,570 customers, 39+39 week split), UCI (78+26 weeks),
+- **Datasets:** CDNOW master cohort (23,570 customers, 39+39 week split), UCI (78+26 weeks),
   Ta-Feng (12+5 weeks), Dunnhumby (80+22 weeks).
-- **Models:** Pareto/NBD (probabilistic baseline), Base LSTM (frequency only, replication),
+- **Models:** Pareto/NBD for frequency, paired with Gamma-Gamma for monetary outcomes;
+  Base LSTM (frequency only, replication),
   Joint LSTM (frequency + spend, Extension 1), Joint Transformer (Extension 2).
-  *Note: BG/NBD, Gamma-Gamma, Pareto/GGG, and GPPM are discussed in the Methods section
-  as theoretical benchmarks but are not included in the final empirical run.*
+- **Extension 3:** none/static/dynamic/full covariate variants on Dunnhumby using an 80+4
+  week protocol, followed by dual-head SHAP on the full-covariate LSTM and Transformer.
 - **Training protocol:** 3 seeds (7, 42, 2024); autoregressive inference, 30 sampled scenarios.
-  No HPO — pre-specified architecture defaults per Valendin et al. (2022).
 - **Metrics:** Valendin MAPE, cohort bias %, individual RMSE/MAE, spend R² (log-space), CLV
   Spearman ρ, CLV decile lift (McCarthy & Fader, 2018).
+- **Comparability:** monetary and CLV metrics are rescored against the same directly aggregated
+  raw holdout-spend matrices for every model.
+- **Dunnhumby coverage:** the 22nd holdout bin contains four observed days (days 708-711)
+  because the public transaction file ends on day 711. Headline tables retain the fixed 80+22
+  protocol; F3 ends at week 21 so its calibration trajectories compare complete weeks only.
 
 ---
 
 ### 5.1 Replication on CDNOW (≈ 1 page)
 
-**Claim:** On the sparse CDNOW benchmark, Pareto/NBD is competitive or superior to DL models;
-adding deep sequence learning does not yield an unconditional gain on this dataset.
+**Claim:** On sparse CDNOW data, Pareto/NBD remains the strongest model on aggregate frequency
+MAPE, while the Joint LSTM improves calibration relative to the Base LSTM.
 
 **Key numbers to cite:**
 | Model | Freq MAPE | Bias % | Spend R² | CLV ρ |
 |-------|----------|--------|---------|-------|
-| Pareto/NBD | {pnbd_cdnow_mape}% | {pnbd_cdnow_bias}% | {pnbd_cdnow_r2} | {pnbd_cdnow_rho} |
+| Pareto/NBD + Gamma-Gamma | {pnbd_cdnow_mape}% | {pnbd_cdnow_bias}% | {pnbd_cdnow_r2} | {pnbd_cdnow_rho} |
 | Base LSTM | {base_cdnow_mape}% | — | N/A | N/A |
 | Joint LSTM | {jlstm_cdnow_mape}% | — | see T2 | see T2 |
 | Joint Transformer | {tformer_cdnow_mape}% (bias {tformer_cdnow_bias}%) | — | see T2 | see T2 |
 
 **To write:**
-- Pareto/NBD achieves MAPE of {pnbd_cdnow_mape}% with bias {pnbd_cdnow_bias}%, meeting the
-  ≤10% bias criterion of Fader et al. (2005). The Base LSTM achieves a higher MAPE of
-  {base_cdnow_mape}%, highlighting that a well-specified parametric model remains competitive
-  on the sparse music-retail panel.
+- Pareto/NBD achieves MAPE of {pnbd_cdnow_mape}% with bias {pnbd_cdnow_bias}%. The Base LSTM
+  has a higher MAPE of {base_cdnow_mape}%, so the replication does not reproduce a universal
+  deep-learning advantage on this sparse panel.
+- The Joint LSTM reduces MAPE relative to the Base LSTM ({jlstm_cdnow_mape}% versus
+  {base_cdnow_mape}%) and substantially improves cohort bias, but individual RMSE is worse.
+  Report this as a metric-dependent trade-off rather than a uniform gain.
 - The Joint Transformer shows the largest miscalibration on CDNOW (bias {tformer_cdnow_bias}%,
-  high seed variance); this is consistent with the architectural expectation that self-attention
-  models need longer sequences to generalize.
-- Spend R² is negative for DL models on CDNOW, indicating point-spend prediction is harder
-  than frequency on sparse data. CLV *ranking* (Spearman ρ) is positive and in line with
-  Pareto/NBD. **Honest framing:** DL does not automatically beat a well-specified probabilistic
-  model on sparse panel data; the value proposition emerges at higher transaction density.
+  with substantial seed variation).
+- Spend R² is negative for both joint deep models. Their CLV ranking remains positive but below
+  the Pareto/NBD + Gamma-Gamma benchmark on CDNOW.
 
 **Key figures/tables:** F1 (CDNOW panel), F3 (CDNOW weekly tracking), T1 (rows for CDNOW).
 
@@ -929,8 +1810,8 @@ adding deep sequence learning does not yield an unconditional gain on this datas
 
 ### 5.2 Frequency across datasets: the density effect (≈ 1 page)
 
-**Claim:** DL advantage in frequency prediction grows with transaction density; Pareto/NBD
-collapses on the dense long-horizon Dunnhumby dataset.
+**Claim:** The relative performance of sequence models improves on denser retail panels,
+especially UCI and Dunnhumby, but the pattern is not uniform across every metric.
 
 **Key numbers to cite:**
 | Dataset | Pareto/NBD MAPE | Joint LSTM MAPE | Pareto/NBD bias | DL bias |
@@ -941,15 +1822,18 @@ collapses on the dense long-horizon Dunnhumby dataset.
 | Dunnhumby | see T1 | see T1 | {pnbd_dunn_bias}% | {jlstm_dunn_bias}% |
 
 **To write:**
-- Moving from CDNOW (sparse) to UCI and Ta-Feng (medium density), the DL models reduce MAPE:
+- On UCI, the Joint LSTM reduces MAPE:
   Joint LSTM achieves {jlstm_uci_mape}% on UCI vs Pareto/NBD's {pnbd_uci_mape}%.
 - On Ta-Feng (high-frequency grocery), the Joint Transformer achieves RMSE {tformer_tafeng_rmse}
-  vs Joint LSTM {jlstm_tafeng_rmse} and Pareto/NBD {pnbd_tafeng_rmse}, consistent with the
-  proposal hypothesis that Transformers benefit from longer-range dependency in dense sequences.
-- **The Dunnhumby result is the sharpest finding:** Pareto/NBD collapses to a cohort bias of
-  {pnbd_dunn_bias}%, essentially useless for long-horizon forecasting. Joint LSTM and
+  vs Joint LSTM {jlstm_tafeng_rmse} and Pareto/NBD {pnbd_tafeng_rmse}, supporting, but not
+  proving, the proposed density-dependent Transformer advantage.
+- On Dunnhumby, Pareto/NBD underpredicts aggregate frequency by {pnbd_dunn_bias}%. Joint LSTM and
   Transformer maintain near-zero bias ({jlstm_dunn_bias}% and {tformer_dunn_bias}% respectively),
-  demonstrating the value of learned sequence representations for dense, long-horizon panels.
+  providing the strongest evidence for learned sequence representations in this study.
+- The complete-week Dunnhumby sensitivity (weeks 1-21) reaches bias/MAPE of
+  -74.66%/74.66% for Pareto/NBD, -1.15%/3.16% for the Joint LSTM, and
+  +0.29%/3.89% for the Joint Transformer. The partial final bin therefore does not drive
+  the substantive result.
 
 **Key figures/tables:** F1 (all 4 panels), F2, F3 (all panels), T1.
 
@@ -957,30 +1841,28 @@ collapses on the dense long-horizon Dunnhumby dataset.
 
 ### 5.3 Joint monetary prediction and CLV ranking (≈ 1 page)
 
-**Claim:** Adding the spend head (Extension 1) enables monetary and CLV prediction at no
-frequency cost; CLV *ranking* quality is strong even when point-spend R² is negative.
+**Claim:** Joint learning enables monetary and CLV outputs, with frequency trade-offs that vary
+by dataset; CLV ranking can remain useful even where spend point accuracy is weak.
 
 **Key numbers to cite (Dunnhumby, best dataset):**
 | Model | Spend R² (log) | CLV ρ | CLV decile lift |
 |-------|---------------|-------|----------------|
-| Pareto/NBD | {_b("pareto_nbd", "dunnhumby", "spend_r2_log")} | {_b("pareto_nbd", "dunnhumby", "clv_spearman")} | see T2 |
+| Pareto/NBD + Gamma-Gamma | {_b("pareto_nbd", "dunnhumby", "spend_r2_log")} | {_b("pareto_nbd", "dunnhumby", "clv_spearman")} | see T2 |
 | Joint LSTM | {jlstm_dunn_r2} | {jlstm_dunn_rho} | see T2 |
 | Joint Transformer | {tformer_dunn_r2} | {tformer_dunn_rho} | see T2 |
 
 **To write:**
 - On Dunnhumby, the Joint LSTM achieves spend R² = {jlstm_dunn_r2} (log-space) and CLV
   Spearman ρ = {jlstm_dunn_rho}; the Joint Transformer achieves R² = {tformer_dunn_r2}
-  and ρ = {tformer_dunn_rho}. Pareto/NBD achieves ρ = {_b("pareto_nbd", "dunnhumby", "clv_spearman")}
-  at R² = {_b("pareto_nbd", "dunnhumby", "spend_r2_log")} (negative: the gamma-gamma
-  spend sub-model breaks down on the long horizon).
+  and ρ = {tformer_dunn_rho}. Pareto/NBD + Gamma-Gamma achieves ρ =
+  {_b("pareto_nbd", "dunnhumby", "clv_spearman")} at R² =
+  {_b("pareto_nbd", "dunnhumby", "spend_r2_log")}.
 - On CDNOW, UCI, and Ta-Feng, spend R² is negative for DL models too — point-spend
-  prediction is generally hard at the individual level. **This is honest and expected:**
-  the literature acknowledges individual-level spend is noisy; CLV ranking quality (decile
-  lift 3–6×) is the commercially relevant criterion, and this is achieved.
-- The Kendall task-weight evolution (F6) shows the model allocating roughly 2–3× more weight
-  to frequency than spend, consistent with the different signal-to-noise ratios.
-- Base LSTM vs Joint LSTM frequency gap is small or reversed, confirming that the joint
-  objective does not compromise frequency accuracy (see T4, significance).
+  prediction is generally hard at the individual level. Report CLV ranking alongside point error
+  rather than using ranking as a substitute for calibration.
+- Kendall weights vary by orders of magnitude on some datasets (F6). Treat them as optimization
+  diagnostics, not direct measures of economic feature importance.
+- T4 shows that the frequency effect of adding the spend head is dataset- and metric-dependent.
 
 **Key figures/tables:** T2, F4, F5, F6.
 
@@ -988,16 +1870,16 @@ frequency cost; CLV *ranking* quality is strong even when point-spend R² is neg
 
 ### 5.4 Transformer vs LSTM (≈ 0.5 page)
 
-**Claim:** The Transformer is the best-calibrated model on high-frequency datasets and the
-worst on sparse CDNOW; this confirms the density-dependency hypothesis in the proposal.
+**Claim:** The Transformer performs best on selected dense-data outcomes and worst on sparse
+CDNOW, offering qualified support for the density-dependency hypothesis.
 
 **To write:**
 - On Ta-Feng, the Transformer achieves RMSE {tformer_tafeng_rmse} vs LSTM {jlstm_tafeng_rmse}
-  and the best bias across all models, consistent with long-range dependency in dense sequences.
+  and the lowest absolute cohort bias among the evaluated models.
 - On Dunnhumby, the Transformer edges the LSTM on spend R² ({tformer_dunn_r2} vs {jlstm_dunn_r2})
   and CLV ρ ({tformer_dunn_rho} vs {jlstm_dunn_rho}).
 - On CDNOW, the Transformer has the worst frequency MAPE ({tformer_cdnow_mape}%) and highest
-  seed variance, suggesting it requires more calibration data than the 39-week CDNOW window.
+  seed variance. This is consistent with, but does not identify, a calibration-data limitation.
 - **Limitation:** time complexity of the Transformer is O(T²) vs O(T) for the LSTM; for
   long sequences (Dunnhumby 80 weeks) this is still tractable but would scale poorly.
 
@@ -1005,23 +1887,52 @@ worst on sparse CDNOW; this confirms the density-dependency hypothesis in the pr
 
 ---
 
-### 5.5 Statistical significance (≈ 0.5 page)
+### 5.5 Covariate ablation and attribution (≈ 1 page)
+
+**Claim:** Dunnhumby demographics and campaign variables provide small, architecture-specific
+gains rather than a uniform improvement.
+
+- Static covariates change LSTM frequency RMSE by {lstm_static_freq_delta:+.3f} and spend R² by
+  {lstm_static_spend_delta:+.3f} relative to no covariates.
+- Static covariates change Transformer spend R² by {transformer_static_spend_delta:+.3f}, while
+  frequency effects are small and mixed across variants.
+- For the LSTM, the largest normalized contribution is
+  **{shap_top[("lstm", "freq")][0]}** ({shap_top[("lstm", "freq")][1]:.1f}%)
+  for frequency and **{shap_top[("lstm", "spend")][0]}**
+  ({shap_top[("lstm", "spend")][1]:.1f}%) for conditional log-spend.
+- For the Transformer, the corresponding largest contributions are
+  **{shap_top[("transformer", "freq")][0]}**
+  ({shap_top[("transformer", "freq")][1]:.1f}%) and
+  **{shap_top[("transformer", "spend")][0]}**
+  ({shap_top[("transformer", "spend")][1]:.1f}%).
+- SHAP magnitudes are interventional model attributions conditional on each household's
+  fixed transaction history. They do not identify causal campaign effects.
+- The primary SHAP cohort uses 100 disjoint background households and all remaining
+  701 households with observed demographics, across seeds 7, 42, and 2024.
+- Expected-gradient additivity is approximate: normalized residuals range from
+  {shap_additivity_low:.1f}% to {shap_additivity_high:.1f}% after escalation to 128 samples.
+
+**Key figures/tables:** T5, T6, F8, F9.
+
+---
+
+### 5.6 Statistical significance (≈ 0.5 page)
 
 Refer to T4. Key claims to test:
 - Joint LSTM vs Base LSTM on frequency (CDNOW, UCI) — does the spend head hurt frequency?
 - Joint LSTM vs Pareto/NBD on Dunnhumby — is the DL advantage significant?
 - Transformer vs Joint LSTM on spend/CLV on Dunnhumby.
 
-**Reporting template:** "A paired bootstrap test (N=5,000 resamples) on per-customer errors
-finds Δ = X.XX (95% CI [Y.YY, Z.ZZ], p = W.WW) for Joint LSTM vs Base LSTM on CDNOW
-frequency RMSE, indicating [the difference is / is not] statistically significant."
+**Reporting template:** "A paired customer bootstrap (5,000 resamples), averaging each
+deep model over three training seeds, finds Δ = X.XX (95% CI [Y.YY, Z.ZZ],
+Holm-adjusted p = W.WW) for Joint LSTM versus Base LSTM on CDNOW frequency RMSE."
 
 ---
 
-### 5.6 Synthesis and honest limitations (0.5 page)
+### 5.7 Synthesis and limitations (0.5 page)
 
 **Where DL wins:**
-1. Long-horizon, dense datasets (Dunnhumby): Pareto/NBD catastrophically misfits; DL stays calibrated.
+1. Long-horizon Dunnhumby: Pareto/NBD substantially underpredicts; DL remains near aggregate calibration.
 2. Medium-density datasets (UCI, Ta-Feng): DL improves frequency MAPE over Pareto/NBD.
 3. CLV ranking is strong across all datasets (ρ 0.39–0.82, lift 3–6×).
 
@@ -1032,21 +1943,26 @@ frequency RMSE, indicating [the difference is / is not] statistically significan
 **Acknowledged limitations:**
 - Single probabilistic benchmark (Pareto/NBD): BG/NBD, Pareto/GGG, and GPPM are discussed in
   the methods chapter but were not included in the final comparative run.
-- Extension 3 (covariate ablation, SHAP) is a separate stage reported later.
-- 3 seeds per configuration; statistical claims are qualified accordingly (T4).
+- Dunnhumby's final holdout bin is a four-day partial week. Headline tables retain the
+  pre-specified 80+22 protocol, while F3 reports complete weeks 1-21 as a sensitivity view.
+- Pareto/NBD + Gamma-Gamma assigns zero predicted CLV to 369 Dunnhumby customers. F4 keeps
+  that tie intact, so its ordered groups are approximately rather than exactly equal-sized.
+- Three seeds per deep configuration; bootstrap inference captures customer sampling uncertainty
+  after seed averaging, not uncertainty over the population of possible training seeds.
+- SHAP attribution is associational and conditional on each household's fixed transaction history.
 
 ---
 
 ## Numbers quick-reference (paste into writing)
 
 ### CDNOW
-- Pareto/NBD: MAPE={pnbd_cdnow_mape}%, bias={pnbd_cdnow_bias}%, spend R²={pnbd_cdnow_r2}, CLV ρ={pnbd_cdnow_rho}
+- Pareto/NBD + Gamma-Gamma: MAPE={pnbd_cdnow_mape}%, bias={pnbd_cdnow_bias}%, spend R²={pnbd_cdnow_r2}, CLV ρ={pnbd_cdnow_rho}
 - Base LSTM: MAPE={base_cdnow_mape}%
 - Joint LSTM: MAPE={jlstm_cdnow_mape}%
 - Transformer: MAPE={tformer_cdnow_mape}%, bias={tformer_cdnow_bias}%
 
 ### Dunnhumby
-- Pareto/NBD: bias={pnbd_dunn_bias}%  ← catastrophic collapse
+- Pareto/NBD: bias={pnbd_dunn_bias}% (substantial aggregate underprediction)
 - Joint LSTM: bias={jlstm_dunn_bias}%, spend R²={jlstm_dunn_r2}, CLV ρ={jlstm_dunn_rho}
 - Transformer: bias={tformer_dunn_bias}%, spend R²={tformer_dunn_r2}, CLV ρ={tformer_dunn_rho}
 
@@ -1063,6 +1979,83 @@ frequency RMSE, indicating [the difference is / is not] statistically significan
 
     (OUT / "RESULTS_WRITING_GUIDE.md").write_text(guide)
     print(f"  Saved {OUT / 'RESULTS_WRITING_GUIDE.md'}")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_artifact_manifest(df_all: pd.DataFrame) -> Path:
+    print("[Manifest] Recording provenance and checksums...")
+    final_manifest = load_final_manifest() or {}
+    source_files = []
+    for run_name in sorted(df_all["run_name"].astype(str).unique()):
+        for suffix in ("_metrics.json", "_arrays.npz"):
+            path = FINAL / "tables" / f"{run_name}{suffix}"
+            if path.exists():
+                source_files.append({
+                    "path": str(path),
+                    "sha256": _sha256(path),
+                })
+    for path in (
+        SHAP_CSV,
+        FINAL / "tables" / "shap_extension3_summary.csv",
+        FINAL / "tables" / "shap_extension3_seed_summary.csv",
+        FINAL / "tables" / "shap_extension3_additivity.csv",
+        FINAL / "tables" / "shap_extension3_convergence.csv",
+        FINAL / "tables" / "shap_extension3_run_manifest.json",
+        FINAL / "tables" / "shap_extension3_method_notes.md",
+        FINAL / "tables" / "shap_extension3_sensitivity_all_households.csv",
+        FINAL / "tables" / "shap_extension3_customer_values.csv.gz",
+    ):
+        if path.exists():
+            source_files.append({"path": str(path), "sha256": _sha256(path)})
+
+    output_files = []
+    for path in sorted(
+        list(TABLES.glob("*"))
+        + list(FIGURES.glob("*"))
+        + list(SUPPLEMENTARY.rglob("*"))
+    ):
+        if path.is_file():
+            output_files.append({
+                "path": str(path.relative_to(OUT)),
+                "sha256": _sha256(path),
+            })
+    guide_path = OUT / "RESULTS_WRITING_GUIDE.md"
+    if guide_path.exists():
+        output_files.append({
+            "path": str(guide_path.relative_to(OUT)),
+            "sha256": _sha256(guide_path),
+        })
+
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source_results_dir": str(FINAL),
+        "output_dir": str(OUT),
+        "final_manifest_version": final_manifest.get("version"),
+        "final_manifest_status": final_manifest.get("results_status"),
+        "result_rows": int(len(df_all)),
+        "deep_learning_seeds": SEEDS,
+        "monetary_ground_truth": (
+            "Direct raw holdout aggregation from each dataset's Pareto/NBD array artifact; "
+            "all monetary models rescored against this common truth."
+        ),
+        "significance_method": (
+            "Paired customer bootstrap with 5,000 resamples; deep-model statistics "
+            "averaged across seeds; Holm adjustment across displayed tests."
+        ),
+        "source_files": source_files,
+        "output_files": output_files,
+    }
+    path = OUT / "ARTIFACT_MANIFEST.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"  Saved {path}")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -1082,6 +2075,8 @@ def main() -> None:
     make_table_t2(df_all, df_seeds)
     make_table_t3(df_all, df_seeds)
     sig_df = make_table_t4()
+    make_table_t5(df_all)
+    make_table_t6()
 
     print("\n=== Figures ===")
     fig_cohort_bias(df_all)
@@ -1091,13 +2086,22 @@ def main() -> None:
     fig_spend_r2(df_all)
     fig_kendall_weights()
     fig_learning_curves()
+    fig_covariate_ablation(df_all)
+    fig_shap_attribution()
+
+    print("\n=== Supplementary materials ===")
+    copy_shap_supplement()
 
     print("\n=== Writing guide ===")
     make_writing_guide(df_all, df_seeds, sig_df)
+    artifact_manifest = write_artifact_manifest(df_all)
 
     print("\n=== Manifest ===")
     written = sorted(
-        list(TABLES.glob("*")) + list(FIGURES.glob("*")) + [OUT / "RESULTS_WRITING_GUIDE.md"]
+        list(TABLES.glob("*"))
+        + list(FIGURES.glob("*"))
+        + list(SUPPLEMENTARY.rglob("*"))
+        + [OUT / "RESULTS_WRITING_GUIDE.md", artifact_manifest]
     )
     for p in written:
         print(f"  {p.relative_to(OUT)}")

@@ -45,7 +45,7 @@ FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 plt.rcParams.update(
     {
         "font.family": "DejaVu Sans",
-        "font.size": 6.4,
+        "font.size": 7.0,
         "axes.linewidth": 0.6,
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
@@ -82,8 +82,8 @@ def fbox(
     body_color: str = C_TEXT,
     lw: float = 0.8,
     radius: float = 0.013,
-    title_size: float = 6.9,
-    body_size: float = 6.1,
+    title_size: float = 7.6,
+    body_size: float = 6.7,
     align: str = "left",
     wrap: int | None = None,
 ) -> None:
@@ -146,7 +146,7 @@ def tag(ax, x: float, y: float, text: str, *, fc: str = "#ffffff") -> None:
         text,
         ha="center",
         va="center",
-        fontsize=6.4,
+        fontsize=7.0,
         fontweight="bold",
         color=C_TEXT,
         bbox=dict(
@@ -229,7 +229,7 @@ def column(
         title,
         ha="left",
         va="center",
-        fontsize=7.6,
+        fontsize=8.3,
         fontweight="bold",
         color=C_TEXT,
         transform=ax.transData,
@@ -241,7 +241,7 @@ def column(
         subtitle,
         ha="right",
         va="center",
-        fontsize=5.6,
+        fontsize=6.1,
         color=C_MUTED,
         transform=ax.transData,
         zorder=3,
@@ -256,7 +256,7 @@ def ht_label(ax, cx: float, y: float, text: str) -> None:
         text,
         ha="center",
         va="center",
-        fontsize=5.9,
+        fontsize=6.5,
         color=C_MUTED,
         fontstyle="italic",
         bbox=dict(boxstyle="round,pad=0.15,rounding_size=0.010", fc=C_CANVAS, ec="none"),
@@ -278,7 +278,7 @@ ax.text(
     "Sequence-model architectures used in the final CLV protocol",
     ha="left",
     va="top",
-    fontsize=9.0,
+    fontsize=9.8,
     fontweight="bold",
     color=C_TEXT,
     transform=ax.transData,
@@ -290,7 +290,7 @@ ax.text(
     "losses applied at every time step.",
     ha="left",
     va="top",
-    fontsize=6.2,
+    fontsize=6.8,
     color=C_MUTED,
     transform=ax.transData,
 )
@@ -309,8 +309,8 @@ fbox(
         "spend(t−1) → Linear (8d)┘  [joint models only]",
     ],
     C_INPUT,
-    title_size=7.6,
-    body_size=6.4,
+    title_size=8.3,
+    body_size=7.0,
     align="left",
 )
 
@@ -358,9 +358,9 @@ LSTM_BODY = [
 ]
 
 fbox(ax, X_BASE + _PX, ENC_BOT, _IW, ENC_H,
-     "LSTM encoder", LSTM_BODY, C_BASE, title_size=7.0, body_size=6.1)
+     "LSTM encoder", LSTM_BODY, C_BASE, title_size=7.6, body_size=6.7)
 fbox(ax, X_JOINT + _PX, ENC_BOT, _IW, ENC_H,
-     "LSTM encoder", LSTM_BODY, C_JOINT, title_size=7.0, body_size=6.1)
+     "LSTM encoder", LSTM_BODY, C_JOINT, title_size=7.6, body_size=6.7)
 fbox(
     ax,
     X_TRANS + _PX,
@@ -378,8 +378,8 @@ fbox(
         "  causal mask",
     ],
     C_TRANS,
-    title_size=7.0,
-    body_size=5.95,
+    title_size=7.6,
+    body_size=6.5,
 )
 
 # ── h_t dimension labels ──────────────────────────────────────────────────────
@@ -388,7 +388,7 @@ HT_Y = (ENC_BOT + FREQ_TOP) / 2  # midpoint ~0.544
 
 for cx in (CX_BASE, CX_JOINT, CX_TRANS):
     arrow(ax, cx, ENC_BOT, cx, FREQ_TOP + 0.002)
-    ht_label(ax, cx, HT_Y, "h_t  (128d)")
+    ht_label(ax, cx, HT_Y, r"$h_t$  (128d)")
 
 # ── Frequency head boxes ───────────────────────────────────────────────────────
 FREQ_H = 0.112
@@ -408,8 +408,8 @@ fbox(
         "C fitted on calibration data",
     ],
     C_HEAD,
-    title_size=6.6,
-    body_size=5.9,
+    title_size=7.3,
+    body_size=6.5,
 )
 
 # Joint and Transformer: frequency head (Kendall handles the weighting)
@@ -423,8 +423,8 @@ for x in (X_JOINT, X_TRANS):
         "Frequency head",
         ["Linear (→ C) + Softmax"],
         C_HEAD,
-        title_size=6.6,
-        body_size=5.9,
+        title_size=7.3,
+        body_size=6.5,
     )
 
 # ── Spend head boxes (joint models only) ──────────────────────────────────────
@@ -442,12 +442,12 @@ for cx, x in ((CX_JOINT, X_JOINT), (CX_TRANS, X_TRANS)):
         SPEND_H,
         "Spend head",
         [
-            "Linear (→ 2): μₛ, log σₛ²",
+            r"Linear ($\rightarrow$ 2): $\mu_s$, $\log\,\sigma_s^2$",
             "hurdle-lognormal NLL",
         ],
         C_HEAD,
-        title_size=6.6,
-        body_size=5.9,
+        title_size=7.3,
+        body_size=6.5,
     )
 
 # ── Kendall multi-task loss box ────────────────────────────────────────────────
@@ -465,13 +465,13 @@ fbox(
     LOSS_H,
     "Joint objective — Kendall et al. (2018)",
     [
-        "L = Σ_i [ L_i / (2σ_i²) + log σ_i ]",
-        "task weights σ²_f, σ²_s learnable",
-        "log-var bounds:  freq ≤ −1,  spend ≤ 2",
+        r"$\mathcal{L} = \sum_i \left[ L_i / (2\sigma_i^2) + \log\sigma_i \right]$",
+        r"task weights $\sigma^2_f,\, \sigma^2_s$ learnable",
+        r"log-var bounds: freq $\leq -1$,  spend $\leq 2$",
     ],
     C_LOSS,
-    title_size=6.9,
-    body_size=6.1,
+    title_size=7.6,
+    body_size=6.7,
 )
 
 # Dashed arrows: spend heads -> Kendall box
@@ -496,8 +496,8 @@ fbox(
         "Extension 3 Dunnhumby 80/4",
     ],
     C_INFER,
-    title_size=7.0,
-    body_size=5.85,
+    title_size=7.6,
+    body_size=6.4,
     wrap=130,
 )
 

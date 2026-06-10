@@ -1,66 +1,80 @@
 """
-Dual-head SHAP analysis for Extension 3 (Dunnhumby covariate ablation).
+Customer-specific SHAP attribution for Extension 3 on Dunnhumby.
 
-Attributes per-feature importance separately for:
-    - Frequency classification head (expected next-week transaction count)
-    - Log-spend regression head (predicted log-spend at last calibration step)
+The analysis explains the first holdout-week predictions from the full-covariate
+models while holding each household's own 80-week transaction history fixed.
+Only the two static demographic covariates and two dynamic campaign covariates
+are varied against a shared empirical background.
 
-Attribution method: shap.GradientExplainer (PyTorch-native, gradient-based).
-    - Handles 3D dynamic covariate tensors (B, T, D) natively.
-    - Uses integration over gradients w.r.t. the input covariates.
-    - Dynamic SHAP values (B, T, D) are summed across the time axis T to obtain
-      a 2D (B, D) total temporal contribution per feature — comparable to the
-      static (B, S) values on the same plot.
+The two explained outputs are:
+    - expected first-holdout-week transaction frequency;
+    - conditional first-holdout-week log1p-spend.
 
-Usage:
-    python -m src.evaluation.shap_analysis \\
-        --config experiments/configs/extension3_dunnhumby.yaml \\
-        --checkpoint results/checkpoints/<run>.pt \\
-        [--n_background 100] [--n_explain 200] [--out_dir experiments/insights]
+Attributions are associational model explanations conditional on transaction
+history. They do not identify causal campaign effects.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Iterable, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import shap
 import torch
 import torch.nn as nn
-import shap
-import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 
-from src.utils.config import load_config
-from src.utils.seed import set_seed
 from src.data.datasets import DunnhumbyPipeline
 from src.models import LSTMModel, TransformerModel
+from src.utils.config import load_config
+from src.utils.seed import set_seed
 from train import build_model
 
 
-class _CovariateShapWrapper(nn.Module):
+HEADS = ("freq", "spend")
+STATIC_FEATURES = ("income", "household_size")
+DYNAMIC_FEATURES = ("coupon_redemptions_week", "campaign_active_flag")
+
+
+@dataclass(frozen=True)
+class ShapSample:
+    background_ids: np.ndarray
+    explain_ids: np.ndarray
+    cohort: str
+    analysis_seed: int
+
+
+class CovariateShapWrapper(nn.Module):
     """
-    Differentiable wrapper that exposes only the covariate tensors as SHAP inputs.
+    Expose only covariates as differentiable inputs for one household history.
 
-    Fixes week, trans, spend, and delta_t as buffers. Forward takes
-    (static_cov, dynamic_cov) and returns a scalar prediction per sample
-    (expected frequency or log-spend at the last calibration step).
-
-    This lets GradientExplainer differentiate through the model w.r.t. covariates,
-    attributing the prediction to each static and dynamic feature independently.
+    A separate wrapper is used for each explained household. The empirical
+    background covariates are therefore evaluated under that same household's
+    fixed transaction, spend, week, and elapsed-time history.
     """
 
     def __init__(
         self,
         model: nn.Module,
-        seed_week: torch.Tensor,   # (1, T_calib) — representative customer
-        seed_trans: torch.Tensor,  # (1, T_calib)
-        seed_spend: torch.Tensor,  # (1, T_calib)
-        seed_delta_t: Optional[torch.Tensor],  # (1, T_calib) or None
+        *,
+        seed_week: torch.Tensor,
+        seed_trans: torch.Tensor,
+        seed_spend: torch.Tensor,
+        seed_delta_t: Optional[torch.Tensor],
         head: str,
+        spend_center: float = 0.0,
+        spend_scale: float = 1.0,
     ):
         super().__init__()
+        if head not in HEADS:
+            raise ValueError(f"Unknown SHAP head: {head!r}")
         self.model = model
         self.register_buffer("seed_week", seed_week)
         self.register_buffer("seed_trans", seed_trans)
@@ -70,342 +84,711 @@ class _CovariateShapWrapper(nn.Module):
         else:
             self.seed_delta_t = None
         self.head = head
+        self.spend_center = float(spend_center)
+        self.spend_scale = float(spend_scale)
+        self._force_lstm_train_for_cudnn = False
+
+    def train(self, mode: bool = True) -> "CovariateShapWrapper":
+        super().train(mode)
+        if self._force_lstm_train_for_cudnn:
+            self.model.lstm.train()
+        return self
 
     def forward(
         self,
-        static_cov: torch.Tensor,   # (B, S)
-        dynamic_cov: torch.Tensor,  # (B, T, D)
-    ) -> torch.Tensor:              # (B,) scalar prediction
-        B = static_cov.shape[0]
-        week = self.seed_week.expand(B, -1)
-        trans = self.seed_trans.expand(B, -1)
-        spend = self.seed_spend.expand(B, -1)
+        static_cov: torch.Tensor,
+        dynamic_cov: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size = static_cov.shape[0]
+        week = self.seed_week.expand(batch_size, -1)
+        trans = self.seed_trans.expand(batch_size, -1)
+        spend = self.seed_spend.expand(batch_size, -1)
         delta_t = (
-            self.seed_delta_t.expand(B, -1)
-            if self.seed_delta_t is not None else None
+            self.seed_delta_t.expand(batch_size, -1)
+            if self.seed_delta_t is not None
+            else None
         )
         state_features = None
         if delta_t is not None and getattr(self.model, "state_feature_dim", 0) > 0:
             state_features = delta_t.unsqueeze(-1)
 
-        joint = getattr(self.model, "joint", False)
         if isinstance(self.model, LSTMModel):
-            if joint:
-                out = self.model(
-                    week, trans,
-                    spend=spend,
-                    state_features=state_features,
-                    static_covariates=static_cov,
-                    dynamic_covariates=dynamic_cov,
-                )
-                if len(out) == 4:
-                    logits, log_spend, _, _ = out
-                else:
-                    logits, log_spend, _ = out
-            else:
-                logits, _ = self.model(
-                    week, trans,
-                    state_features=state_features,
-                    static_covariates=static_cov,
-                    dynamic_covariates=dynamic_cov,
-                )
-                log_spend = None
-        else:
-            # Transformer
-            if joint:
-                out = self.model(
-                    week, trans,
-                    spend=spend,
-                    state_features=state_features,
-                    static_covariates=static_cov,
-                    dynamic_covariates=dynamic_cov,
-                    delta_t=delta_t,
-                )
-                if len(out) == 3:
-                    logits, log_spend, _ = out
-                else:
-                    logits, log_spend = out
-            else:
-                logits = self.model(
-                    week, trans,
-                    state_features=state_features,
-                    static_covariates=static_cov,
-                    dynamic_covariates=dynamic_cov,
-                    delta_t=delta_t,
-                )
-                log_spend = None
-
-        # Scalar prediction from last calibration time step
-        if self.head == "freq":
-            probs = torch.softmax(logits[:, -1, :], dim=-1)
-            n_classes = probs.shape[1]
-            class_vals = torch.arange(
-                n_classes, dtype=probs.dtype, device=probs.device
+            output = self.model(
+                week,
+                trans,
+                spend=spend,
+                state_features=state_features,
+                static_covariates=static_cov,
+                dynamic_covariates=dynamic_cov,
             )
-            # unsqueeze → (B, 1): GradientExplainer requires 2D output (does outputs[:, idx] internally)
-            return (probs * class_vals).sum(dim=-1).unsqueeze(-1)
-        if self.head == "spend":
-            if log_spend is None:
-                raise ValueError("Spend head requires a joint model.")
-            return log_spend[:, -1].unsqueeze(-1)  # (B, 1)
-        raise ValueError(f"Unknown head: {self.head!r}")
+            if getattr(self.model, "joint", False):
+                if len(output) == 4:
+                    logits, spend_mu, _, _ = output
+                else:
+                    logits, spend_mu, _ = output
+            else:
+                logits, _ = output
+                spend_mu = None
+        elif isinstance(self.model, TransformerModel):
+            output = self.model(
+                week,
+                trans,
+                spend=spend,
+                state_features=state_features,
+                static_covariates=static_cov,
+                dynamic_covariates=dynamic_cov,
+                delta_t=delta_t,
+            )
+            if getattr(self.model, "joint", False):
+                if len(output) == 3:
+                    logits, spend_mu, _ = output
+                else:
+                    logits, spend_mu = output
+            else:
+                logits = output
+                spend_mu = None
+        else:
+            raise TypeError(f"Unsupported SHAP model type: {type(self.model)!r}")
+
+        if self.head == "freq":
+            probabilities = torch.softmax(logits[:, -1, :], dim=-1)
+            class_values = torch.arange(
+                probabilities.shape[-1],
+                dtype=probabilities.dtype,
+                device=probabilities.device,
+            )
+            prediction = (probabilities * class_values).sum(dim=-1)
+        else:
+            if spend_mu is None:
+                raise ValueError("Conditional spend attribution requires a joint model.")
+            prediction = spend_mu[:, -1]
+            prediction = prediction * self.spend_scale + self.spend_center
+
+        # GradientExplainer indexes outputs[:, output_index].
+        return prediction.unsqueeze(-1)
 
 
-def _load_model(config: dict, checkpoint_path: str, device: torch.device):
+def _sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _json_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resolve_device(device_name: str) -> torch.device:
+    if device_name != "auto":
+        return torch.device(device_name)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def _load_model(
+    config: dict,
+    checkpoint_path: str | Path,
+    device: torch.device,
+) -> nn.Module:
     model = build_model(config).to(device)
-    state = torch.load(checkpoint_path, map_location=device)
+    try:
+        state = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    except TypeError:
+        state = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(state)
     model.eval()
     return model
 
 
-def _collect_covariate_tensors(
-    inference_ds,
-    calibration_weeks: int,
-) -> Tuple[
-    np.ndarray,
-    np.ndarray,
-    List[torch.Tensor],
-    List[torch.Tensor],
-    List[torch.Tensor],
-    List[Optional[torch.Tensor]],
-]:
+def _prepare_wrapper_for_gradients(
+    wrapper: CovariateShapWrapper,
+    device: torch.device,
+) -> None:
     """
-    Pull per-customer static and dynamic calibration covariates and seed tensors.
+    Preserve deterministic inference while enabling cuDNN LSTM backward.
 
-    Returns:
-        static_vals:  (N, S) float32 — static covariate vectors per customer
-        dynamic_calib: (N, T_calib, D) float32 — dynamic calibration trajectories
-        seed_weeks:   list of (T_calib,) tensors
-        seed_trans:   list of (T_calib,) tensors
-        seed_spend:   list of (T_calib,) tensors
-        seed_delta_t: list of (T_calib,) tensors or None
+    cuDNN rejects RNN backward in evaluation mode. Only the recurrent module is
+    switched when CUDA is used; the full model, including Transformer dropout,
+    remains in evaluation mode.
     """
-    all_static: List[np.ndarray] = []
-    all_dynamic: List[np.ndarray] = []
-    all_seed_week: List[torch.Tensor] = []
-    all_seed_trans: List[torch.Tensor] = []
-    all_seed_spend: List[torch.Tensor] = []
-    all_seed_delta_t: List[Optional[torch.Tensor]] = []
-
-    for i in range(len(inference_ds)):
-        item = inference_ds[i]
-        if "static_covariates" not in item or "dynamic_covariates" not in item:
-            raise RuntimeError(
-                "Inference dataset contains no covariates. "
-                "Set include_covariates: true in the config."
-            )
-        all_static.append(item["static_covariates"].numpy())
-        all_dynamic.append(item["dynamic_covariates"][:calibration_weeks, :].numpy())
-        all_seed_week.append(item["seed_week"])
-        all_seed_trans.append(item["seed_trans"])
-        all_seed_spend.append(item.get("seed_spend", torch.zeros_like(item["seed_week"], dtype=torch.float32)))
-        all_seed_delta_t.append(item.get("seed_delta_t"))
-
-    return (
-        np.stack(all_static, axis=0),   # (N, S)
-        np.stack(all_dynamic, axis=0),  # (N, T_calib, D)
-        all_seed_week,
-        all_seed_trans,
-        all_seed_spend,
-        all_seed_delta_t,
+    wrapper._force_lstm_train_for_cudnn = (
+        device.type == "cuda" and isinstance(wrapper.model, LSTMModel)
     )
+    wrapper.eval()
+
+
+def normalise_shap_values(
+    shap_values: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Normalize current and legacy GradientExplainer multi-input layouts."""
+    if isinstance(shap_values, np.ndarray):
+        raise RuntimeError(
+            "GradientExplainer returned one array for a two-input model."
+        )
+
+    if (
+        isinstance(shap_values, list)
+        and len(shap_values) == 2
+        and not isinstance(shap_values[0], list)
+    ):
+        static_shap = np.asarray(shap_values[0])
+        dynamic_shap = np.asarray(shap_values[1])
+    elif (
+        isinstance(shap_values, list)
+        and len(shap_values) == 1
+        and isinstance(shap_values[0], list)
+        and len(shap_values[0]) == 2
+    ):
+        static_shap = np.asarray(shap_values[0][0])
+        dynamic_shap = np.asarray(shap_values[0][1])
+    else:
+        raise RuntimeError(
+            "Unexpected GradientExplainer output layout for two model inputs."
+        )
+
+    if static_shap.ndim == 3 and static_shap.shape[-1] == 1:
+        static_shap = static_shap[..., 0]
+    if dynamic_shap.ndim == 4 and dynamic_shap.shape[-1] == 1:
+        dynamic_shap = dynamic_shap[..., 0]
+    if static_shap.ndim != 2 or dynamic_shap.ndim != 3:
+        raise RuntimeError(
+            "Unexpected SHAP array shapes: "
+            f"static={static_shap.shape}, dynamic={dynamic_shap.shape}."
+        )
+    return static_shap, dynamic_shap
+
+
+def aggregate_dynamic_signed(dynamic_shap: np.ndarray) -> np.ndarray:
+    """
+    Group a dynamic feature across time while preserving SHAP additivity.
+
+    Summing signed contributions before taking absolute values prevents positive
+    and negative weekly effects from being counted as independent features.
+    """
+    values = np.asarray(dynamic_shap, dtype=np.float64)
+    if values.ndim != 3:
+        raise ValueError("Dynamic SHAP values must have shape (N, T, D).")
+    return values.sum(axis=1)
+
+
+def additivity_diagnostics(
+    prediction: np.ndarray,
+    baseline: np.ndarray,
+    static_shap: np.ndarray,
+    dynamic_shap: np.ndarray,
+) -> dict[str, Any]:
+    prediction = np.asarray(prediction, dtype=np.float64).reshape(-1)
+    baseline = np.asarray(baseline, dtype=np.float64).reshape(-1)
+    attributed = (
+        np.asarray(static_shap, dtype=np.float64).sum(axis=1)
+        + np.asarray(dynamic_shap, dtype=np.float64).sum(axis=(1, 2))
+    )
+    delta = prediction - baseline
+    residual = delta - attributed
+    denominator = max(float(np.mean(np.abs(delta))), 1e-8)
+    normalized_error = float(np.mean(np.abs(residual)) / denominator)
+    return {
+        "prediction": prediction,
+        "baseline": baseline,
+        "prediction_delta": delta,
+        "attributed_delta": attributed,
+        "residual": residual,
+        "normalized_error": normalized_error,
+        "mean_abs_residual": float(np.mean(np.abs(residual))),
+    }
+
+
+def observed_demographic_customer_ids(raw_dir: str | Path) -> set[int]:
+    path = Path(raw_dir) / "hh_demographic.csv"
+    frame = pd.read_csv(path, usecols=["household_key"])
+    return set(frame["household_key"].astype(int).tolist())
+
+
+def eligible_customer_ids(
+    inference_ds,
+    *,
+    raw_dir: str | Path,
+    cohort: str,
+) -> np.ndarray:
+    customer_ids = inference_ds.customer_ids.cpu().numpy().astype(np.int64)
+    if cohort == "observed_demographics":
+        observed = observed_demographic_customer_ids(raw_dir)
+        return customer_ids[np.isin(customer_ids, list(observed))]
+    if cohort == "all_households":
+        return customer_ids
+    raise ValueError(
+        "cohort must be 'observed_demographics' or 'all_households'"
+    )
+
+
+def make_disjoint_sample(
+    customer_ids: Iterable[int],
+    *,
+    n_background: int,
+    n_explain: int,
+    analysis_seed: int,
+    cohort: str,
+) -> ShapSample:
+    ids = np.asarray(list(customer_ids), dtype=np.int64)
+    required = int(n_background) + int(n_explain)
+    if len(ids) < required:
+        raise ValueError(
+            f"Cohort {cohort!r} has {len(ids)} households; {required} are required."
+        )
+    rng = np.random.RandomState(analysis_seed)
+    selected = rng.choice(ids, size=required, replace=False)
+    return ShapSample(
+        background_ids=selected[:n_background],
+        explain_ids=selected[n_background:],
+        cohort=cohort,
+        analysis_seed=analysis_seed,
+    )
+
+
+def save_sample_manifest(sample: ShapSample, path: str | Path) -> Path:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "cohort": sample.cohort,
+        "analysis_seed": int(sample.analysis_seed),
+        "background_customer_ids": sample.background_ids.astype(int).tolist(),
+        "explain_customer_ids": sample.explain_ids.astype(int).tolist(),
+        "disjoint": bool(
+            not set(sample.background_ids.tolist())
+            & set(sample.explain_ids.tolist())
+        ),
+    }
+    output.write_text(json.dumps(payload, indent=2))
+    return output
+
+
+def load_sample_manifest(path: str | Path) -> ShapSample:
+    payload = json.loads(Path(path).read_text())
+    sample = ShapSample(
+        background_ids=np.asarray(
+            payload["background_customer_ids"], dtype=np.int64
+        ),
+        explain_ids=np.asarray(
+            payload["explain_customer_ids"], dtype=np.int64
+        ),
+        cohort=str(payload["cohort"]),
+        analysis_seed=int(payload["analysis_seed"]),
+    )
+    overlap = set(sample.background_ids.tolist()) & set(sample.explain_ids.tolist())
+    if overlap:
+        raise ValueError("SHAP background and explanation samples overlap.")
+    return sample
+
+
+def _indices_for_ids(inference_ds, customer_ids: np.ndarray) -> np.ndarray:
+    all_ids = inference_ds.customer_ids.cpu().numpy().astype(np.int64)
+    index = {int(customer_id): row for row, customer_id in enumerate(all_ids)}
+    missing = [int(customer_id) for customer_id in customer_ids if int(customer_id) not in index]
+    if missing:
+        raise ValueError(f"Sample manifest contains unknown customer IDs: {missing[:5]}")
+    return np.asarray([index[int(customer_id)] for customer_id in customer_ids])
+
+
+def run_output_dir(
+    root: str | Path,
+    *,
+    cohort: str,
+    architecture: str,
+    seed: int,
+    n_integration_samples: int,
+) -> Path:
+    return (
+        Path(root)
+        / cohort
+        / architecture
+        / f"seed{seed}"
+        / f"nsamples{n_integration_samples}"
+    )
+
+
+def _feature_names(inference_ds) -> tuple[list[str], list[str]]:
+    static_names = getattr(inference_ds, "static_feature_names", None)
+    dynamic_names = getattr(inference_ds, "dynamic_feature_names", None)
+    return (
+        list(static_names or STATIC_FEATURES),
+        list(dynamic_names or DYNAMIC_FEATURES),
+    )
+
+
+def _run_cache_payload(
+    *,
+    config_path: str | Path,
+    checkpoint_path: str | Path,
+    sample_manifest_path: str | Path,
+    head_names: tuple[str, ...],
+    n_integration_samples: int,
+    analysis_seed: int,
+    device: torch.device,
+) -> dict[str, Any]:
+    return {
+        "config_sha256": _sha256(config_path),
+        "checkpoint_sha256": _sha256(checkpoint_path),
+        "sample_manifest_sha256": _sha256(sample_manifest_path),
+        "source_sha256": _sha256(__file__),
+        "heads": list(head_names),
+        "n_integration_samples": int(n_integration_samples),
+        "analysis_seed": int(analysis_seed),
+        "device_type": device.type,
+        "shap_version": shap.__version__,
+        "torch_version": torch.__version__,
+    }
+
+
+def _cache_is_valid(output_dir: Path, cache_key: str) -> bool:
+    provenance_path = output_dir / "provenance.json"
+    values_path = output_dir / "shap_values.npz"
+    summary_path = output_dir / "summary.csv"
+    if not (provenance_path.exists() and values_path.exists() and summary_path.exists()):
+        return False
+    try:
+        provenance = json.loads(provenance_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return provenance.get("cache_key") == cache_key and provenance.get("complete") is True
+
+
+def _plot_run_importance(
+    summary: pd.DataFrame,
+    output_path: Path,
+    *,
+    architecture: str,
+    seed: int,
+) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.3))
+    colors = {"static": "#4C72B0", "dynamic": "#DD8452"}
+    for axis, head in zip(axes, HEADS):
+        subset = summary[summary["head"] == head].sort_values("mean_abs_shap")
+        axis.barh(
+            subset["feature"],
+            subset["mean_abs_shap"],
+            color=[colors[value] for value in subset["feature_type"]],
+        )
+        axis.set_title("Frequency" if head == "freq" else "Conditional log1p-spend")
+        axis.set_xlabel("Mean absolute grouped SHAP value")
+    fig.suptitle(f"{architecture.upper()} covariate attribution, seed {seed}")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def run_shap(
+    *,
     config_path: str,
     checkpoint_path: str,
-    n_background: int = 100,
-    n_explain: int = 200,
-    out_dir: str = "experiments/insights",
-    seed: int = 42,
-):
-    set_seed(seed)
+    sample_manifest_path: str,
+    output_root: str = "results/final_kaggle/shap",
+    n_integration_samples: int = 64,
+    device_name: str = "auto",
+    model_seed: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
     config = load_config(config_path)
-    set_seed(config.get("training", {}).get("seed", seed))
+    analysis_sample = load_sample_manifest(sample_manifest_path)
+    analysis_seed = analysis_sample.analysis_seed
+    set_seed(analysis_seed)
+    device = _resolve_device(device_name)
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
+    if config.get("dataset", {}).get("name") != "dunnhumby":
+        raise ValueError("Extension 3 SHAP is defined only for Dunnhumby.")
+    if config.get("dataset", {}).get("covariate_mode") != "full":
+        raise ValueError("SHAP requires the full-covariate Extension 3 config.")
+    if not config.get("model", {}).get("joint", False):
+        raise ValueError("Dual-head SHAP requires a joint model.")
+
+    architecture = str(config["model"]["type"])
+    seed = int(
+        config["training"]["seed"] if model_seed is None else model_seed
     )
+    output_dir = run_output_dir(
+        output_root,
+        cohort=analysis_sample.cohort,
+        architecture=architecture,
+        seed=seed,
+        n_integration_samples=n_integration_samples,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Loading Dunnhumby pipeline ...")
+    cache_payload = _run_cache_payload(
+        config_path=config_path,
+        checkpoint_path=checkpoint_path,
+        sample_manifest_path=sample_manifest_path,
+        head_names=HEADS,
+        n_integration_samples=n_integration_samples,
+        analysis_seed=analysis_seed,
+        device=device,
+    )
+    cache_key = _json_hash(cache_payload)
+    if not force and _cache_is_valid(output_dir, cache_key):
+        print(f"[SHAP] cache hit: {output_dir}")
+        return json.loads((output_dir / "provenance.json").read_text())
+
+    print(
+        f"[SHAP] {architecture} seed={seed} cohort={analysis_sample.cohort} "
+        f"nsamples={n_integration_samples} device={device}"
+    )
     pipeline = DunnhumbyPipeline()
-    _, _, inference_ds, _, _ = pipeline.run(config)
-
+    _, _, inference_ds, _, scaler = pipeline.run(config)
     model = _load_model(config, checkpoint_path, device)
-    joint = getattr(model, "joint", False)
-    calib_weeks = config["dataset"]["calibration_weeks"]
+    calibration_weeks = int(config["dataset"]["calibration_weeks"])
 
-    print("Collecting covariate tensors ...")
-    static_vals, dynamic_calib, seed_weeks, seed_trans_list, seed_spend_list, seed_delta_t_list = (
-        _collect_covariate_tensors(inference_ds, calib_weeks)
+    background_indices = _indices_for_ids(
+        inference_ds, analysis_sample.background_ids
     )
-    N = static_vals.shape[0]
+    explain_indices = _indices_for_ids(inference_ds, analysis_sample.explain_ids)
+    static_names, dynamic_names = _feature_names(inference_ds)
 
-    # Feature names
-    static_names = getattr(inference_ds, "static_feature_names", None) or [
-        f"static_{i}" for i in range(static_vals.shape[1])
-    ]
-    dynamic_names = getattr(inference_ds, "dynamic_feature_names", None) or [
-        f"dynamic_{i}" for i in range(dynamic_calib.shape[2])
-    ]
+    background_static = inference_ds.static_covariates[background_indices].to(device)
+    background_dynamic = inference_ds.dynamic_covariates[
+        background_indices, :calibration_weeks, :
+    ].to(device)
+    explain_static_values = inference_ds.static_covariates[
+        explain_indices
+    ].cpu().numpy()
+    explain_dynamic_values = inference_ds.dynamic_covariates[
+        explain_indices, :calibration_weeks, :
+    ].cpu().numpy()
 
-    rng = np.random.RandomState(seed)
-    idx_bg = rng.choice(N, size=min(n_background, N), replace=False)
-    idx_ex = rng.choice(N, size=min(n_explain, N), replace=False)
+    results: dict[str, dict[str, np.ndarray | float]] = {}
+    summary_rows: list[dict[str, Any]] = []
+    additivity_rows: list[dict[str, Any]] = []
 
-    # Use the median customer's seed sequence as the fixed history backbone for the
-    # SHAP wrapper. Holding the transaction history constant isolates covariate effects.
-    median_idx = int(N // 2)
-    seed_week_t = seed_weeks[median_idx].unsqueeze(0).to(device)    # (1, T)
-    seed_trans_t = seed_trans_list[median_idx].unsqueeze(0).to(device)  # (1, T)
-    seed_spend_t = seed_spend_list[median_idx].unsqueeze(0).to(device)  # (1, T)
-    delta_t_seed = (
-        seed_delta_t_list[median_idx].unsqueeze(0).to(device)
-        if seed_delta_t_list[median_idx] is not None else None
-    )
+    for head in HEADS:
+        static_values: list[np.ndarray] = []
+        dynamic_values: list[np.ndarray] = []
+        predictions: list[float] = []
+        baselines: list[float] = []
 
-    # Background and explain tensors as float32 (GradientExplainer needs floats)
-    bg_static = torch.tensor(static_vals[idx_bg], dtype=torch.float32)
-    bg_dynamic = torch.tensor(dynamic_calib[idx_bg], dtype=torch.float32)
-    ex_static = torch.tensor(static_vals[idx_ex], dtype=torch.float32)
-    ex_dynamic = torch.tensor(dynamic_calib[idx_ex], dtype=torch.float32)
-
-    out_path = Path(out_dir)
-    out_path.mkdir(parents=True, exist_ok=True)
-
-    heads = ["freq"]
-    if joint:
-        heads.append("spend")
-
-    summary: dict = {}
-    summary_rows: list[dict] = []
-
-    for head in heads:
-        print(f"\n=== GradientExplainer attribution for '{head}' head ===")
-
-        wrapper = _CovariateShapWrapper(
-            model=model,
-            seed_week=seed_week_t,
-            seed_trans=seed_trans_t,
-            seed_spend=seed_spend_t,
-            seed_delta_t=delta_t_seed,
-            head=head,
-        ).to(device)
-        # cuDNN LSTM backward requires training mode; GradientExplainer calls autograd.grad
-        wrapper.train()
-
-        # GradientExplainer: background is a list of [static_bg, dynamic_bg]
-        explainer = shap.GradientExplainer(
-            wrapper, [bg_static.to(device), bg_dynamic.to(device)]
+        iterator = tqdm(
+            explain_indices,
+            desc=f"{architecture} seed {seed} {head}",
+            unit="household",
         )
-        # shap_values is a list: [static_shap, dynamic_shap]
-        # static_shap:  (n_explain, S)
-        # dynamic_shap: (n_explain, T, D)
-        shap_vals = explainer.shap_values(
-            [ex_static.to(device), ex_dynamic.to(device)]
-        )
+        for local_row, dataset_index in enumerate(iterator):
+            item = inference_ds[int(dataset_index)]
+            wrapper = CovariateShapWrapper(
+                model,
+                seed_week=item["seed_week"].unsqueeze(0).to(device),
+                seed_trans=item["seed_trans"].unsqueeze(0).to(device),
+                seed_spend=item["seed_spend"].unsqueeze(0).to(device),
+                seed_delta_t=item.get("seed_delta_t").unsqueeze(0).to(device)
+                if item.get("seed_delta_t") is not None
+                else None,
+                head=head,
+                spend_center=scaler.center_,
+                spend_scale=scaler.scale_,
+            ).to(device)
+            _prepare_wrapper_for_gradients(wrapper, device)
 
-        # (B,1) output → multi_output=True → shap_vals = [[static, dynamic]]
-        static_shap = np.asarray(shap_vals[0][0])   # (n_explain, S)
-        dynamic_shap = np.asarray(shap_vals[0][1])  # (n_explain, T, D)
-
-        # Aggregate dynamic SHAP across time: sum |shap| over T → (n_explain, D)
-        dynamic_shap_agg = np.abs(dynamic_shap).sum(axis=1)   # (n_explain, D)
-
-        static_mean_abs = np.abs(static_shap).mean(axis=0)    # (S,)
-        dynamic_mean_abs = dynamic_shap_agg.mean(axis=0)      # (D,)
-
-        # Save raw SHAP arrays
-        np.save(out_path / f"shap_{head}_static_values.npy", static_shap)
-        np.save(out_path / f"shap_{head}_dynamic_values.npy", dynamic_shap)
-        with open(out_path / f"shap_{head}_feature_names.json", "w") as f:
-            json.dump({"static": static_names, "dynamic": dynamic_names}, f)
-
-        # Combined bar chart: static and dynamic on the same axis
-        all_names = static_names + dynamic_names
-        all_importance = np.concatenate([static_mean_abs, dynamic_mean_abs])
-        method_labels = (
-            ["static (SHAP)"] * len(static_names)
-            + ["time-varying (SHAP, Σ_T)"] * len(dynamic_names)
-        )
-
-        if all_importance.size > 0:
-            sort_idx = np.argsort(all_importance)[::-1]
-            fig, ax = plt.subplots(figsize=(8, 4))
-            colours = [
-                "#4C72B0" if "static" in method_labels[i] else "#DD8452"
-                for i in sort_idx
-            ]
-            ax.bar(range(len(all_names)), all_importance[sort_idx], color=colours)
-            ax.set_xticks(range(len(all_names)))
-            ax.set_xticklabels(
-                [f"{all_names[i]}\n[{method_labels[i]}]" for i in sort_idx],
-                rotation=30, ha="right",
+            explainer = shap.GradientExplainer(
+                wrapper,
+                [background_static, background_dynamic],
+                batch_size=min(100, len(background_indices)),
             )
-            ax.set_ylabel("Mean |SHAP value|")
-            ax.set_title(
-                f"Feature importance — "
-                f"{'frequency' if head == 'freq' else 'log-spend'} head"
+            explain_static = torch.as_tensor(
+                explain_static_values[local_row : local_row + 1],
+                dtype=torch.float32,
+                device=device,
             )
-            fig.tight_layout()
-            fig.savefig(out_path / f"shap_{head}_dunnhumby.png", dpi=300)
-            plt.close(fig)
-            print(f"  Saved: {out_path / f'shap_{head}_dunnhumby.png'}")
+            explain_dynamic = torch.as_tensor(
+                explain_dynamic_values[local_row : local_row + 1],
+                dtype=torch.float32,
+                device=device,
+            )
+            raw_shap = explainer.shap_values(
+                [explain_static, explain_dynamic],
+                nsamples=n_integration_samples,
+                rseed=analysis_seed + local_row,
+            )
+            static_shap, dynamic_shap = normalise_shap_values(raw_shap)
+            static_values.append(static_shap[0])
+            dynamic_values.append(dynamic_shap[0])
 
-        summary[head] = {
-            "static_features": dict(zip(static_names, static_mean_abs.tolist())),
-            "dynamic_features": dict(zip(dynamic_names, dynamic_mean_abs.tolist())),
+            with torch.no_grad():
+                prediction = wrapper(explain_static, explain_dynamic)
+                background_prediction = wrapper(
+                    background_static, background_dynamic
+                )
+            predictions.append(float(prediction[0, 0].detach().cpu()))
+            baselines.append(
+                float(background_prediction[:, 0].mean().detach().cpu())
+            )
+
+        static_array = np.stack(static_values).astype(np.float32)
+        dynamic_array = np.stack(dynamic_values).astype(np.float32)
+        grouped_dynamic = aggregate_dynamic_signed(dynamic_array).astype(np.float32)
+        diagnostics = additivity_diagnostics(
+            np.asarray(predictions),
+            np.asarray(baselines),
+            static_array,
+            dynamic_array,
+        )
+        results[head] = {
+            "static_shap": static_array,
+            "dynamic_shap": dynamic_array,
+            "dynamic_grouped_shap": grouped_dynamic,
+            "prediction": diagnostics["prediction"],
+            "baseline": diagnostics["baseline"],
+            "prediction_delta": diagnostics["prediction_delta"],
+            "attributed_delta": diagnostics["attributed_delta"],
+            "residual": diagnostics["residual"],
+            "normalized_error": diagnostics["normalized_error"],
         }
-        for name, value in zip(static_names, static_mean_abs.tolist()):
-            summary_rows.append({
-                "run_name": config["output"]["run_name"],
-                "head": head,
-                "feature_type": "static",
-                "feature": name,
-                "mean_abs_shap": float(value),
-            })
-        for name, value in zip(dynamic_names, dynamic_mean_abs.tolist()):
-            summary_rows.append({
-                "run_name": config["output"]["run_name"],
-                "head": head,
-                "feature_type": "dynamic",
-                "feature": name,
-                "mean_abs_shap": float(value),
-            })
 
-    with open(out_path / "shap_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
-    if summary_rows:
-        import pandas as pd
+        for feature_type, names, values in (
+            ("static", static_names, static_array),
+            ("dynamic", dynamic_names, grouped_dynamic),
+        ):
+            for feature_index, feature_name in enumerate(names):
+                per_customer = values[:, feature_index]
+                summary_rows.append(
+                    {
+                        "architecture": architecture,
+                        "seed": seed,
+                        "cohort": analysis_sample.cohort,
+                        "head": head,
+                        "feature_type": feature_type,
+                        "feature": feature_name,
+                        "mean_abs_shap": float(np.mean(np.abs(per_customer))),
+                        "mean_signed_shap": float(np.mean(per_customer)),
+                        "n_households": len(explain_indices),
+                        "n_integration_samples": n_integration_samples,
+                    }
+                )
 
-        csv_path = out_path / f"shap_{config['output']['run_name']}.csv"
-        pd.DataFrame(summary_rows).to_csv(csv_path, index=False)
-        print(f"  Saved: {csv_path}")
+        for row, customer_id in enumerate(analysis_sample.explain_ids):
+            additivity_rows.append(
+                {
+                    "architecture": architecture,
+                    "seed": seed,
+                    "cohort": analysis_sample.cohort,
+                    "head": head,
+                    "customer_id": int(customer_id),
+                    "prediction": float(diagnostics["prediction"][row]),
+                    "background_prediction": float(diagnostics["baseline"][row]),
+                    "prediction_delta": float(diagnostics["prediction_delta"][row]),
+                    "attributed_delta": float(diagnostics["attributed_delta"][row]),
+                    "residual": float(diagnostics["residual"][row]),
+                }
+            )
 
-    print("\nSHAP analysis complete.")
-    return summary
+    arrays: dict[str, np.ndarray] = {
+        "customer_ids": analysis_sample.explain_ids.astype(np.int64),
+        "background_customer_ids": analysis_sample.background_ids.astype(np.int64),
+        "static_feature_values": explain_static_values.astype(np.float32),
+        "dynamic_feature_values": explain_dynamic_values.astype(np.float32),
+        "dynamic_feature_totals": explain_dynamic_values.sum(axis=1).astype(np.float32),
+    }
+    for head in HEADS:
+        for key, value in results[head].items():
+            if isinstance(value, np.ndarray):
+                arrays[f"{head}_{key}"] = value
+    np.savez_compressed(output_dir / "shap_values.npz", **arrays)
+
+    feature_payload = {
+        "static": static_names,
+        "dynamic": dynamic_names,
+        "dynamic_grouping": "signed_sum_over_calibration_weeks",
+        "spend_output": "conditional_unscaled_log1p_spend",
+    }
+    (output_dir / "feature_names.json").write_text(
+        json.dumps(feature_payload, indent=2)
+    )
+    summary = pd.DataFrame(summary_rows)
+    summary.to_csv(output_dir / "summary.csv", index=False)
+    pd.DataFrame(additivity_rows).to_csv(
+        output_dir / "additivity_diagnostics.csv", index=False
+    )
+    _plot_run_importance(
+        summary,
+        output_dir / "importance.png",
+        architecture=architecture,
+        seed=seed,
+    )
+
+    normalized_errors = {
+        head: float(results[head]["normalized_error"]) for head in HEADS
+    }
+    provenance = {
+        **cache_payload,
+        "cache_key": cache_key,
+        "complete": True,
+        "config_path": str(config_path),
+        "checkpoint_path": str(checkpoint_path),
+        "sample_manifest_path": str(sample_manifest_path),
+        "output_dir": str(output_dir),
+        "run_name": config["output"]["run_name"],
+        "architecture": architecture,
+        "seed": seed,
+        "cohort": analysis_sample.cohort,
+        "n_background": len(background_indices),
+        "n_explain": len(explain_indices),
+        "calibration_weeks": calibration_weeks,
+        "heads": list(HEADS),
+        "method": "shap.GradientExplainer",
+        "explanation_target": {
+            "freq": "first-holdout-week expected transaction count",
+            "spend": "first-holdout-week conditional log1p-spend",
+        },
+        "history_policy": "each explained household retains its own calibration history",
+        "dynamic_aggregation": "sum_signed_over_time_then_absolute_for_importance",
+        "normalized_additivity_error": normalized_errors,
+        "causal_warning": (
+            "Interventional model attribution conditional on transaction history; "
+            "not a causal campaign-effect estimate."
+        ),
+    }
+    (output_dir / "provenance.json").write_text(
+        json.dumps(provenance, indent=2)
+    )
+    print(
+        "[SHAP] complete "
+        + ", ".join(
+            f"{head} additivity={normalized_errors[head]:.3f}" for head in HEADS
+        )
+    )
+    return provenance
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Dual-head SHAP analysis (Extension 3).")
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Customer-specific dual-head SHAP analysis for Extension 3."
+    )
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--n_background", type=int, default=100)
-    parser.add_argument("--n_explain", type=int, default=200)
-    parser.add_argument("--out_dir", default="experiments/insights")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--sample_manifest", required=True)
+    parser.add_argument(
+        "--output_root", default="results/final_kaggle/shap"
+    )
+    parser.add_argument("--n_integration_samples", type=int, default=64)
+    parser.add_argument("--model_seed", type=int)
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps"],
+        default="auto",
+    )
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     run_shap(
         config_path=args.config,
         checkpoint_path=args.checkpoint,
-        n_background=args.n_background,
-        n_explain=args.n_explain,
-        out_dir=args.out_dir,
-        seed=args.seed,
+        sample_manifest_path=args.sample_manifest,
+        output_root=args.output_root,
+        n_integration_samples=args.n_integration_samples,
+        device_name=args.device,
+        model_seed=args.model_seed,
+        force=args.force,
     )
 
 

@@ -1,0 +1,27 @@
+\begin{table}[htbp]
+\centering
+\small
+\begin{threeparttable}
+\caption{Paired customer-bootstrap tests (5{,}000 resamples, bootstrap seed 42). Deep-model statistics are averaged across seeds 7, 42, and 2024; probabilistic benchmarks use one deterministic fit. $\Delta$ = mean error of Model A $-$ mean error of Model B; negative $\Delta$ means Model A is better. Two-sided $p$-values are Holm-adjusted across the displayed comparisons.}
+\label{tab:significance}
+\begin{tabular}{llllrrrr}
+\toprule
+Model A & Model B & Metric & Dataset & $\Delta$ & CI$_{2.5}$ & CI$_{97.5}$ & $p_{\mathrm{Holm}}$ \\
+\midrule
+Joint LSTM & Base LSTM & Frequency RMSE & CDNOW & 0.1079 & 0.0182 & 0.2226 & 0.020$^{*}$ \\
+Joint LSTM & Base LSTM & Frequency MAE & CDNOW & 0.0515 & 0.0444 & 0.0591 & $<0.001^{*}$ \\
+Joint LSTM & Pareto/NBD & Frequency RMSE & CDNOW & 0.1494 & 0.0744 & 0.2384 & $<0.001^{*}$ \\
+Joint LSTM & Pareto/NBD & Frequency RMSE & Dunnhumby & -19.1480 & -21.2682 & -17.0261 & $<0.001^{*}$ \\
+Joint LSTM & Pareto/NBD + Gamma-Gamma & CLV MAE & Dunnhumby & -286.4625 & -313.3368 & -261.0750 & $<0.001^{*}$ \\
+Joint Transformer & Joint LSTM & Frequency RMSE & Ta-Feng & -0.0431 & -0.0562 & -0.0303 & $<0.001^{*}$ \\
+Joint Transformer & Joint LSTM & Spend MAE (\$) & Dunnhumby & -22.5519 & -29.4633 & -15.6445 & $<0.001^{*}$ \\
+Joint Transformer & Joint LSTM & CLV MAE & Dunnhumby & -21.9269 & -28.6955 & -15.1818 & $<0.001^{*}$ \\
+Joint LSTM & Base LSTM & Frequency RMSE & UCI & -0.0367 & -0.1491 & 0.0671 & 0.999 \\
+Joint Transformer & Joint LSTM & Frequency RMSE & UCI & -0.0319 & -0.1503 & 0.0966 & 0.999 \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}\footnotesize
+\item[$^*$] Holm-adjusted $p < 0.05$. Confidence intervals are unadjusted.
+\end{tablenotes}
+\end{threeparttable}
+\end{table}

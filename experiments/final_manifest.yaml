@@ -2,7 +2,7 @@
 # HPO artifacts are deliberately excluded from the thesis evidence set.
 
 version: 2026-06-04-valendin-fixed-v1
-results_status: fixed_protocol_pending_rerun
+results_status: fixed_protocol_complete
 methodology:
   tuning_protocol: valendin_fixed_validation
   hyperparameter_policy: pre_specified_architecture_defaults_no_hpo
@@ -57,29 +57,34 @@ deep_learning_configs:
 - experiments/configs_final/extension3_transformer_dynamic_dunnhumby_final.yaml
 - experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml
 deep_learning_config_hashes:
-  experiments/configs_final/lstm_base_cdnow_final.yaml: 288be0e4722f
-  experiments/configs_final/lstm_base_uci_final.yaml: b5aa31d753b1
-  experiments/configs_final/lstm_base_tafeng_final.yaml: 343e38877271
-  experiments/configs_final/lstm_base_dunnhumby_final.yaml: b03e9ee430cc
-  experiments/configs_final/lstm_joint_cdnow_final.yaml: 32f4647ac2ee
-  experiments/configs_final/lstm_joint_uci_final.yaml: 87673975757b
-  experiments/configs_final/lstm_joint_tafeng_final.yaml: 8ad118cb6480
-  experiments/configs_final/lstm_joint_dunnhumby_final.yaml: 80cc31cf2140
-  experiments/configs_final/transformer_joint_cdnow_final.yaml: 0a7337d0f615
-  experiments/configs_final/transformer_joint_uci_final.yaml: b004f2e5da3b
-  experiments/configs_final/transformer_joint_tafeng_final.yaml: 440973f463cc
-  experiments/configs_final/transformer_joint_dunnhumby_final.yaml: d25599aea50f
-  experiments/configs_final/extension3_lstm_none_dunnhumby_final.yaml: 9dca4aa6ab70
-  experiments/configs_final/extension3_lstm_static_dunnhumby_final.yaml: 0a095209db06
-  experiments/configs_final/extension3_lstm_dynamic_dunnhumby_final.yaml: 084bd8bab7c1
-  experiments/configs_final/extension3_lstm_full_dunnhumby_final.yaml: 8f5bf4cc13e8
-  experiments/configs_final/extension3_transformer_none_dunnhumby_final.yaml: 3d83d67b71bc
-  experiments/configs_final/extension3_transformer_static_dunnhumby_final.yaml: 9e0adec349e7
-  experiments/configs_final/extension3_transformer_dynamic_dunnhumby_final.yaml: 6786617b2bad
-  experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml: cd947d0e095b
+  experiments/configs_final/lstm_base_cdnow_final.yaml: "a4018154fa30"
+  experiments/configs_final/lstm_base_uci_final.yaml: "bb54bd9ee73e"
+  experiments/configs_final/lstm_base_tafeng_final.yaml: "631940381140"
+  experiments/configs_final/lstm_base_dunnhumby_final.yaml: "cb1ddc3b61d7"
+  experiments/configs_final/lstm_joint_cdnow_final.yaml: "be243b6f38ce"
+  experiments/configs_final/lstm_joint_uci_final.yaml: "87673975757b"
+  experiments/configs_final/lstm_joint_tafeng_final.yaml: "8ad118cb6480"
+  experiments/configs_final/lstm_joint_dunnhumby_final.yaml: "80cc31cf2140"
+  experiments/configs_final/transformer_joint_cdnow_final.yaml: "0a7337d0f615"
+  experiments/configs_final/transformer_joint_uci_final.yaml: "b004f2e5da3b"
+  experiments/configs_final/transformer_joint_tafeng_final.yaml: "440973f463cc"
+  experiments/configs_final/transformer_joint_dunnhumby_final.yaml: "d25599aea50f"
+  experiments/configs_final/extension3_lstm_none_dunnhumby_final.yaml: "2ccab8684997"
+  experiments/configs_final/extension3_lstm_static_dunnhumby_final.yaml: "966038da65ba"
+  experiments/configs_final/extension3_lstm_dynamic_dunnhumby_final.yaml: "f99939403394"
+  experiments/configs_final/extension3_lstm_full_dunnhumby_final.yaml: "b6cfb0371d1f"
+  experiments/configs_final/extension3_transformer_none_dunnhumby_final.yaml: "7c9a3d011ade"
+  experiments/configs_final/extension3_transformer_static_dunnhumby_final.yaml: "5f0dc0c569d3"
+  experiments/configs_final/extension3_transformer_dynamic_dunnhumby_final.yaml: "326ec390fabe"
+  experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml: "9f3b131cda90"
 benchmark_run_names:
 - pareto_nbd_cdnow
 - pareto_nbd_uci
 - pareto_nbd_tafeng
 - pareto_nbd_dunnhumby
+benchmark_config_hashes:
+  pareto_nbd_cdnow: "c2416cdfdb88"
+  pareto_nbd_uci: "eda68efa2084"
+  pareto_nbd_tafeng: "a78ac206f93f"
+  pareto_nbd_dunnhumby: "085183624e02"
 diagnostic_run_names: []

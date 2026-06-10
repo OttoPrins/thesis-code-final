@@ -67,6 +67,14 @@ def expected_config_hashes(manifest: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def expected_benchmark_config_hashes(manifest: dict[str, Any]) -> dict[str, str]:
+    """Return frozen benchmark fingerprints keyed by benchmark run name."""
+    return {
+        str(run_name): str(hash_value)
+        for run_name, hash_value in manifest.get("benchmark_config_hashes", {}).items()
+    }
+
+
 def _runtime_expectations(
     manifest: dict[str, Any],
     cfg_norm: str | None = None,
@@ -175,10 +183,17 @@ def result_matches_manifest(
     if stem in benchmark_runs:
         if metrics.get("final_manifest_benchmark_name") != stem:
             return False, "benchmark result lacks matching final_manifest_benchmark_name"
-        cfg_norm = metrics.get("final_manifest_config")
-        hashes = expected_config_hashes(manifest)
-        if cfg_norm in hashes and metrics.get("final_manifest_config_hash") != hashes[cfg_norm]:
-            return False, "benchmark config hash does not match frozen manifest"
+        benchmark_hashes = expected_benchmark_config_hashes(manifest)
+        if stem in benchmark_hashes:
+            if metrics.get("final_manifest_config_hash") != benchmark_hashes[stem]:
+                return False, "benchmark config hash does not match frozen manifest"
+        else:
+            # Backward compatibility for manifests that predate benchmark-specific
+            # fingerprints and tied benchmarks to a deep-learning dataset config.
+            cfg_norm = metrics.get("final_manifest_config")
+            hashes = expected_config_hashes(manifest)
+            if cfg_norm in hashes and metrics.get("final_manifest_config_hash") != hashes[cfg_norm]:
+                return False, "benchmark config hash does not match frozen manifest"
         return True, "ok"
 
     cfg_norm = normalise_config_path(metrics.get("final_manifest_config", ""))

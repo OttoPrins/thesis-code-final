@@ -1,0 +1,803 @@
+{
+  "generated_at_utc": "2026-06-10T20:45:45.549452+00:00",
+  "source_results_dir": "results/final_kaggle",
+  "output_dir": "results/thesis_final_v2",
+  "final_manifest_version": "2026-06-04-valendin-fixed-v1",
+  "final_manifest_status": "fixed_protocol_complete",
+  "result_rows": 64,
+  "deep_learning_seeds": [
+    7,
+    42,
+    2024
+  ],
+  "monetary_ground_truth": "Direct raw holdout aggregation from each dataset's Pareto/NBD array artifact; all monetary models rescored against this common truth.",
+  "significance_method": "Paired customer bootstrap with 5,000 resamples; deep-model statistics averaged across seeds; Holm adjustment across displayed tests.",
+  "source_files": [
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "aa189eaa1f8e60d24d2d79a6569be6ba14c62ea5bf2577051792e25dbc7fc6de"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "f49a0021e50d529e152288d678067a545e11b94a5068d7ea237f1c2cec36cb0e"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "a70e0718d980880e6d5e9b5654df4825af56d1d75ea1c6adb672e4b4884be537"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "142bdd7e613e38b66f8182e58b9f9eab97a9feef1d0c25bc7607f0cc941b26fd"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "25154a6a1bc1bd8fe45a5cb248912399659f14da9a1f4b2b8889ddd3dcf9a2f0"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_dynamic_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "0b676f3f6a63df2af26f9831558c5c090916f551438636318868286b7fcc1c45"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "0e6b96ce3ad620a8b7349ee9e9d14b6c8ddcebb786d21e3dcdb0066c0a30974b"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "ea9cf72f4de7fe6f7aa505981ec0e434a79c49c75f7e73c82a36f5c9f41c7f89"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "5aaa2e3fb861ab2c5ec2ba28899d533ccd909580acf8af1a23eeb6ef157eeab7"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "00ffd4b8a6c2d89a1d318debc330405a5e081b1ba64c4bf2326a48b739f654fa"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "2b671a23fe1ad5d1d38722e248e266a0e27dd3e7375f2d176d78f28c55d050f5"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_full_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "ba68f11b8b295cb1121cb2843849191ec249334652256b62cc80bb0d89a0b611"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "7e2ef63651ed2f5626b4e4fb28b69fc104cbb6bb3b2bcb99e5a17f25e0b93210"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "b23567b3e3b237370ee424dcfbc7b77a9ec3659abef4372d285a2771be0c4afa"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "759213318c9bf88f0906786b6f79de114e6e92f291ab40ede2d258a9fb419d24"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "b906a4f68f7cd0bfb618e475939c595fd0f117ea41270828d8a820e2bcca8f87"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "cdf21c7cb92d5ce248a4e02c6bcf4e7bb90d1c25936cd5099892595a4b8fe7e4"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_none_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "a6f37c4d22d40db54f74cab339790dda15f6d4cd8cdf9a1148f339ceec0d703e"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "add50fc0547384c3bf1168b4d5c3b442871dbc29e552844f143d51a94e69527b"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "1b21ee938a78445a2e440d599384317ee172772973514a4d595939cf0a9d007a"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "0905d28232dd1b62245632719745d02a851ebc3247ce748d8a3e0e55e89b2c1c"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "55c8c2e4dbc966573010e19bd925a73387483890517baabc7665ea4cebdfe6d3"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "cedf49fbff991482d46f29b99cd89c2e5bf9657a1dc6d3e6171d1ba770e63cbc"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_lstm_static_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "b3d2f2f860ff5253e20917dd76c0f7bc803efb06e312d002abb608729cf4d68c"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "cab828ba96c101bd7c859fce05890e5c2539f4d6b9d926c78df5e209412e6494"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "1566ea8dd74796bfd57facb28bf3afd71a6eee11722dcf9a11f410ad11a1535a"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "d6f857cc0fbf8c969767eab0d7138aeb855fd615754b3902bae4603124ac7d54"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "826089c5834953d59c022a7553e4f74d8d0b48af76ed91b6154b985ab1d2aa33"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "1c07861b4b648ee86f70f39af73608006a74bb0080130c08166c0cedea6a2f15"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_dynamic_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "e5ea71381776be29bfb4b8f9c5b70faa3ece4b7bef527b4578a8ed1a1a04e655"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "1ee63b3eb2f1012b45ae0d2f20b2e1858989b5cecf6f70492c8f4433aebad71f"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "0c4c303e4a63ab41f3d9e9a0d5c2f9c09f2c732fe0b865b2b84343ec22a625eb"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "324b48876253b57100682c78c75cddfaafa8a49c4e43a4ddd09f08351a973dcc"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "496cf2fc8fe258421178c739c8daa738b6e9636f8a73664f287cec4fcc5ca6ac"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "7145afab0b7fb05c2274027a8d6effb99c55cc51eed2d588b4c90196080c60c4"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_full_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "d6a648850f87d0d24be526c8a59b63598d2f7fdac064e99dc49268a789682f24"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "71eca42c53fefd6724e8d38c91a74aef9b1c89b6658a4a1ed759d1d8e7067dab"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "e37069a554d861ead1ac348c7c9fc40d03172d3cf846530f4f4782a9eed97717"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "9f459d19498710692416a2abff8cb901cd053d0b633757cb334a04905756a1f0"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "548f5681eb59b0af857010b4f2773b44027c64293f69d84c639bd68f5525094c"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "dde3de56a3db2e14948651ca5bb749570e972114f69df1b22c92137ecf8764b7"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_none_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "c10d13cfa0a3c2a7b5d6d37e6c357f5a9fc885a251a6fcd094c71872abd8abf6"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "df8938c7601215f1e1a526d4027901aa0b137e9be5c9b4532eacf6136fce8978"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "ef13bb3be5f84e24c84b3efb8dcb19afc1097e796099cd1bed1b52080253bce9"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "2df717c3f36fcee435e864cef6b48521621d1eaeedcd4e6100070d8afd46abd5"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "49652cafc87471198774b6f51f7b8d777b909f40bd65492e5e4bca0a119208a8"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "7f8b1aa517325c4a61b1f31c66655e40a09cc03bc754eb1467f71d6fe7a62311"
+    },
+    {
+      "path": "results/final_kaggle/tables/extension3_transformer_static_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "e1374eac875eaea48862cd06fa3a910ab63b6548e039295b1532991453c3ce6a"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed2024_sample_metrics.json",
+      "sha256": "d511f5e2060f6ed7978c2ce416db8bf0a1d29d5e731d80c53d3d96d67b2c81e7"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed2024_sample_arrays.npz",
+      "sha256": "1a2a75fbe49617ab870ed68a6b772a51196ffd8ab60d41c8ab098f0c6f023fc1"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed42_sample_metrics.json",
+      "sha256": "bef9c95f165b066f4111a8a4f271f0f9c17b878adc399bc4be99f9294b2bebff"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed42_sample_arrays.npz",
+      "sha256": "e7c9c1f548c40873aad7367c5f7db0a9121a002b46c56eb22005378ff1a4408f"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed7_sample_metrics.json",
+      "sha256": "bb5b3bd595c264fd22581190e6fde8fb5de193a762190817f6e855ac6ce7f859"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_cdnow_final_seed7_sample_arrays.npz",
+      "sha256": "d846d50bf91bc3f690ee274de5358ff56b2fcb3eadab252d7057bf1c1771b268"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "4a9a5058b0a24ad613635032859536a27be275a7e5f32e38c54387bf78719654"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "84f7b99e23ba4084970facb220eae82f12b2226044bda0d11eb749d4b218cb39"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "49e64ea59b1c8face1b42c31d90c06022ba470ac80934991fd345daad6117134"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "bd84aada038119aea86be3f70d4e85328d1bcb3bc81cd996c15799aba5c009ba"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "bdb1979eb9f4206824b62cf3d63424f0b0473fb112154ff72293d2e6f89301d3"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "5bc323f99c63905d0ba36c6a22c65604ad3718f8ea98def522ad1238e1cf345a"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed2024_sample_metrics.json",
+      "sha256": "d5c78217dd102fdb2c08f8a96a623e12288fac91b17ef82fd5e1dd01fd459160"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed2024_sample_arrays.npz",
+      "sha256": "7be72dd62440f3101436331f23851965f59c47e8e06b973b563a48ca2936d3a7"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed42_sample_metrics.json",
+      "sha256": "bb6c30c3adf497220372a9608e5084bf6c645707e1aea56dda4e6273f5c72970"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed42_sample_arrays.npz",
+      "sha256": "0d81d567d1cb67dfe80188fd05113b19f564d6b6eedbbb08103b189943ae6a81"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed7_sample_metrics.json",
+      "sha256": "8339e1e4488a313ac9d9e91d29c5af53af5c09bf7501db95cf85249f1691486b"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_tafeng_final_seed7_sample_arrays.npz",
+      "sha256": "330087105426f7c7a5050d39980259a6b5aba60f9b6b47cfa481338a3c3dd2d5"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed2024_sample_metrics.json",
+      "sha256": "d5b439f425bfc4259047ff2ac675bcb087854625170e5c247205028445a80052"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed2024_sample_arrays.npz",
+      "sha256": "7454a3ad39d09c465f828bc15e1ab248344c45f89e4085ad81f7d812069e672b"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed42_sample_metrics.json",
+      "sha256": "9898929833553b96c7c34b5de50ba603dbf8b3c3dab5cc20b4cd65610afd041d"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed42_sample_arrays.npz",
+      "sha256": "b5d163f609b2ee3db68f57a854f9d81581e1169f8ce7bcbfa9de724a3afffc91"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed7_sample_metrics.json",
+      "sha256": "189adce07e8190e7caf7a8651e0da238d31d05a35324b468f452756742b277b7"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_base_uci_final_seed7_sample_arrays.npz",
+      "sha256": "006fa99a2161abf2851cda0742b9285884cd2a1c9c0567fbe4fea509e0f1e96b"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed2024_sample_metrics.json",
+      "sha256": "f66f2c74575e07448f6e62f0d0c6699090bcbc1874a37ec45c03ae59f13d14f9"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed2024_sample_arrays.npz",
+      "sha256": "597d65fb9616c4696bcc1eea18ef363813a9feb388aff0484c861410f9e294a1"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed42_sample_metrics.json",
+      "sha256": "872b675495e9c6c0038713899a3380ad89c551fcaa1853c0c3bd68655b96ed81"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed42_sample_arrays.npz",
+      "sha256": "5fd9b1284c937035b61f1bdafcfc7a2b3036a963aa68e1b01904a2b35156aab8"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed7_sample_metrics.json",
+      "sha256": "d35a3b97c7caf828d01222b2057c871fcfb591d6ebfdccf3f117ecd7f3e21969"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_cdnow_final_seed7_sample_arrays.npz",
+      "sha256": "a3e644282c381c67ce7df7b2a2302de45bb983c25ab3e9a4ae66d73ded996290"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "7e0bf015073ea4d7995e92bf135ee24d8b345274ed695c2154aa56e58fad8916"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "10b7c21c5e074ad7dad9f94f24031edb3823887302f90ed6aee43825b68cdfa0"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "37dead96b9c8afc244295d5192b152c7c9ff95948dcefe43696b702ba2a790de"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "e08023a2ec6046ae8abb7be2a9a88eb6008a5bbd4345a93419b855ab08ae7c09"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "b8dfb825a215bf1db8b3fbe8c52752342fc3b0fb239e1751faac14142f665926"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "4fe7f0df5bd017dc88cb46f587523ac8a2e948034346aa1eebb96af960395b6a"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed2024_sample_metrics.json",
+      "sha256": "95755a336713e48a3159ddd9a192f382cbc7e56d9817367bbf0f04cc87e20061"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed2024_sample_arrays.npz",
+      "sha256": "00749205558fac3ab55a1b130bcaa5922603ca1ae465529b25c0d0e576f87497"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed42_sample_metrics.json",
+      "sha256": "d77e5af11913124c604b7e29a8f07fec5aab995f8daf76a8b1f95ce5d4e54872"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed42_sample_arrays.npz",
+      "sha256": "9b923506aa7206902446896438d792593a2fac92c428e80079ea6c160a395a82"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed7_sample_metrics.json",
+      "sha256": "0ba7d1e4c2b09620bf1c2535abcbca1a6cf0a1eda05e9c5e6f10657a08ca77a1"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_tafeng_final_seed7_sample_arrays.npz",
+      "sha256": "c58611fc1853301e3a2835d921d444e732c63c75288ccbfff8cf479f5003ff75"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed2024_sample_metrics.json",
+      "sha256": "afb05ba706e2a7281aad9466f173c9a6ed24eff57f8f2d0fe5ab3db9b26bacfa"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed2024_sample_arrays.npz",
+      "sha256": "548566b8aa060cadf8d51d6c2f9b6d59ef812e352b64f1c326be924493398a39"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed42_sample_metrics.json",
+      "sha256": "085a88e297592667e864d128670622fc30c59fcb207a71946e68ad8c36a8339e"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed42_sample_arrays.npz",
+      "sha256": "12e41ae7b35daab651342929ac2b7cd85a3f3da771a9a904da3f78955ac9c81e"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed7_sample_metrics.json",
+      "sha256": "97bb04eec2cbbb1583ceb98326d2f532dae81550e7c65a327c030f79d73a3e2a"
+    },
+    {
+      "path": "results/final_kaggle/tables/lstm_joint_uci_final_seed7_sample_arrays.npz",
+      "sha256": "cb6217f1005e521dc3c8df2b31cac581a239b740a50db9838c4c057950a662cb"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_cdnow_metrics.json",
+      "sha256": "84cc6be39c21ac98064591e556647eb15da481502515b4ba1b89f9b334a0483f"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_cdnow_arrays.npz",
+      "sha256": "c6a07d2c8f8380743d73532f42801c8787940bde362be162cc0fcebf5b892d19"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_dunnhumby_metrics.json",
+      "sha256": "3ce3635a7f7fbe6a47bcf6f3735b50a173fb5b747c76a70bda148a9887e26166"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_dunnhumby_arrays.npz",
+      "sha256": "041c9232a5c6a96f2152edfa5075a7fa8720b989c0480fc59a7216c9c58d6a0e"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_tafeng_metrics.json",
+      "sha256": "1ce932b586d60484c857155d2417dd8278c587bb388f0be809aa518b0f96d560"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_tafeng_arrays.npz",
+      "sha256": "70d58af9bf07a61c1e22c5712605f3998581455e51f5ef406a89d979b1dbce84"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_uci_metrics.json",
+      "sha256": "b3605f3343b1122ba1d8c657ab9d1bf55ef585748ad49ffbc33bbf8ca3ae2738"
+    },
+    {
+      "path": "results/final_kaggle/tables/pareto_nbd_uci_arrays.npz",
+      "sha256": "951f489ba3e24bcc616084690f31e6373a2265a66fee7acc590dc0c987c8dc5f"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed2024_sample_metrics.json",
+      "sha256": "caecb099010172a59f759d7df2082130e88fcea85851eba8ffdb78ee0ef08bd3"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed2024_sample_arrays.npz",
+      "sha256": "7f2f25e173031d6f74bfbda81e92150af1cf8300d19b76dc0670142b466550d5"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed42_sample_metrics.json",
+      "sha256": "2ca42f8754e63c3c4e6d723f11aa783497e9c8a61ccb6570f3adde3bce947fff"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed42_sample_arrays.npz",
+      "sha256": "2021130f3c5dda32abbdd0d921b0bd290ed12085da92e5faa18e61caaea4cc88"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed7_sample_metrics.json",
+      "sha256": "f334b5373652dad60b24562cd35abb29bb36b9341e8c7cc9bb312128f3f7a68a"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_cdnow_final_seed7_sample_arrays.npz",
+      "sha256": "64ee2cc41451b5d172050de40a7ea13df6970587e6ae7409f9af599c2b2f0e00"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed2024_sample_metrics.json",
+      "sha256": "9747a09c2fe3b9d7db3a2e5d496726ea29a8f3358aca590100d5afb10db44d64"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed2024_sample_arrays.npz",
+      "sha256": "0133decf6734dca5a6e08412dfe16d6260a6bd5b6f6c836dcfd8443443e8febc"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed42_sample_metrics.json",
+      "sha256": "8333d8052d934ac6dbd536016e8373fb1c9ac91909dd8dcc9f1deafe413598fa"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed42_sample_arrays.npz",
+      "sha256": "e52f4febd507a554035e42543e1f9928169278cf7a99fd030cbd90ad5d84ac14"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed7_sample_metrics.json",
+      "sha256": "7e25a72e9790c327bfc128394f489b515a6eaea9aaedeaeff66e3b019f137a16"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_dunnhumby_final_seed7_sample_arrays.npz",
+      "sha256": "94c47eb8b7b9318b8bb57c5f346c055544a872b4127b07653ce6aff6aabbeaa0"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed2024_sample_metrics.json",
+      "sha256": "4d68e87ae28b5dc9a3333c5aaa496d1845ee4f5cb050977b1fe4868428361635"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed2024_sample_arrays.npz",
+      "sha256": "008ee3146443d061eee722b13451a07b8c89b156583456d04c71a478655b04e3"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed42_sample_metrics.json",
+      "sha256": "c72ad897b48336de977e2a6a382e2c52e9e830f0688ad147c695c6e1bf5719ce"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed42_sample_arrays.npz",
+      "sha256": "6e630c6f2f6d14a5288a729acbfab1ed5bac94fe9a3395ea9cb560343a436441"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed7_sample_metrics.json",
+      "sha256": "1e2054e21d05907b1936656cc969995c45af3e9a82f216aead3d3376ee6f0fb2"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_tafeng_final_seed7_sample_arrays.npz",
+      "sha256": "d04420f5c6a723939fc2e24798cd18368d4550389233a1cf2e416f279eca196b"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed2024_sample_metrics.json",
+      "sha256": "c606dfb309b0acc5df0e9562df619b3b3bd120224443a75b183fb1bd5842b83a"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed2024_sample_arrays.npz",
+      "sha256": "b64986ef7feda0d463d1b12c6127e18c563fd09b00b9916f2686a00855842dae"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed42_sample_metrics.json",
+      "sha256": "2041d5064657fa04140e3340e76976c697fef72f860814e4f41bd243d8c0ad11"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed42_sample_arrays.npz",
+      "sha256": "0e81bfe81329d2a7dd08d50b399873f4bfe2170005511d3216b2b0f7dfa2ca15"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed7_sample_metrics.json",
+      "sha256": "45040973520fd7daa7b76e100e0d7af35717a054ae4166caf55649f3eb45af75"
+    },
+    {
+      "path": "results/final_kaggle/tables/transformer_joint_uci_final_seed7_sample_arrays.npz",
+      "sha256": "f505113a452eab4b56c4da9b039ee379f298b813dfde4cb894cc0688ea41b048"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_summary.csv",
+      "sha256": "68178863744011d8303152fde0d4486cb51f7df84a0915d6eca42a13dc11476e"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_summary.csv",
+      "sha256": "68178863744011d8303152fde0d4486cb51f7df84a0915d6eca42a13dc11476e"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_seed_summary.csv",
+      "sha256": "150e3a7ba314a63898adf3dc07155d1210b5bf40ff51f222bc2523af3c84f162"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_additivity.csv",
+      "sha256": "7e61faa13994130a99b0d4271e2809b6f38f450a2e0feb45cb424e5a14afc539"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_convergence.csv",
+      "sha256": "e8f189b47c071c19c3ac20c55acb15ba1d79e4f4c9ddc788154e1a38be573363"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_run_manifest.json",
+      "sha256": "0a3a271a09c1c0324f1c85941efcc62dc8ff67233eb3e0c80f75900e77c45c9e"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_method_notes.md",
+      "sha256": "59d62dbcc30b1665062c0ae3192196988cf7a4e3ed16ab7f6cad88deed896116"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_sensitivity_all_households.csv",
+      "sha256": "c22a9f5b76398aafc324c3d1e635a0eff719750c6ae3e8ccdf5403249ff1e5ad"
+    },
+    {
+      "path": "results/final_kaggle/tables/shap_extension3_customer_values.csv.gz",
+      "sha256": "c5043b07590e178f5a2317095cdb0e373ed207da2caf8ecb8c4aa3af83aede44"
+    }
+  ],
+  "output_files": [
+    {
+      "path": "figures/F1_cohort_bias.pdf",
+      "sha256": "ad1948a657b39f4428a004c8fb51333e1df81cddf54c387accf015005cff0bfc"
+    },
+    {
+      "path": "figures/F1_cohort_bias.png",
+      "sha256": "19de9a2546f9a74d368d35dddbd9ac54b5dc3dfe63abc082aa2f2a06775f9378"
+    },
+    {
+      "path": "figures/F2_freq_mape.pdf",
+      "sha256": "b09ca3b36bc6fa95a39e885c76f90b480deab87f3ceeb50b5343adfc57d2c5f3"
+    },
+    {
+      "path": "figures/F2_freq_mape.png",
+      "sha256": "5e764c9b4b480a03f85d066a7d2aeb5dc37280cde5ccfcc1324bdb77259aca23"
+    },
+    {
+      "path": "figures/F3_weekly_tracking.pdf",
+      "sha256": "3103258dd0e9aa7d9a6768d70264128e6ea6a3c123089cf5a4b1700cc20cea9f"
+    },
+    {
+      "path": "figures/F3_weekly_tracking.png",
+      "sha256": "193b40de492776d4a2fd8272a52cddc407824dd730a5cadacf898f299488ff26"
+    },
+    {
+      "path": "figures/F4_clv_decile.pdf",
+      "sha256": "1c42674e5086daeb2abe64af22a2d8912fe8ff87481012c96479455b84c0120c"
+    },
+    {
+      "path": "figures/F4_clv_decile.png",
+      "sha256": "0ef82241517d48b9b193fe1cd8140279546c83445a33d877851109de71d02fcb"
+    },
+    {
+      "path": "figures/F5_spend_r2.pdf",
+      "sha256": "7746284e103ae72685585bf61dec985917801aab3405ecc089e27b3f45655507"
+    },
+    {
+      "path": "figures/F5_spend_r2.png",
+      "sha256": "948cb4553dddd427e73f11afc594cfe731463580899f9525bb94fffdb6865932"
+    },
+    {
+      "path": "figures/F6_kendall_weights.pdf",
+      "sha256": "4da79fcc1cd8ae984bc1c5075afd7b7f985c80dbab5d32332fce43ada28e9e03"
+    },
+    {
+      "path": "figures/F6_kendall_weights.png",
+      "sha256": "29161ab471f3ccb3a8057db6150d0747da1510ed7f59c43f0556ee4927b62dfe"
+    },
+    {
+      "path": "figures/F7_learning_curves.pdf",
+      "sha256": "070a051b3e667e569b8cf62e251bade26719d2c02fff27b2ca510de984ebe429"
+    },
+    {
+      "path": "figures/F7_learning_curves.png",
+      "sha256": "938d446b45460dd63553b683740cb879733dfb0a47135c45f54a37d8c8611257"
+    },
+    {
+      "path": "figures/F8_covariate_ablation.pdf",
+      "sha256": "1a4c5773285065072fdc7c9ea466a43c77a3b71cb70a1fd5ef789a04ea4bed1a"
+    },
+    {
+      "path": "figures/F8_covariate_ablation.png",
+      "sha256": "c2028346064eb6edc0bd3facfe41dce92357aadee59bbf2de944241d3890f09d"
+    },
+    {
+      "path": "figures/F9_shap_attribution.pdf",
+      "sha256": "cb20eb6b0aed694935ea4236cab932f61a3979e86b4beb88da9eb5df9081370c"
+    },
+    {
+      "path": "figures/F9_shap_attribution.png",
+      "sha256": "398f513f9744a40c6b821f9e594c7ac3b318d94646c481494e42a873f34f06f7"
+    },
+    {
+      "path": "supplementary/extension3_shap/README.md",
+      "sha256": "233ea2f168ce0bc7243145fbea837f000b441c18c888c52cd34eda21c394f839"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_architecture_comparison.pdf",
+      "sha256": "1933ab60f6807347938c93834b517e5e3806a2ee784702eb28e4a8d327ac129b"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_architecture_comparison.png",
+      "sha256": "eedf689cbc4e7080c4b8df7efdc3a7b0357fdc1b1a47980f2223eb86f88e6fba"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_beeswarm_lstm.pdf",
+      "sha256": "c7ae567b10bde49a8b36405286a247ecaf7c0a210d74b4eae1d778e9dabe019a"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_beeswarm_lstm.png",
+      "sha256": "0d84c12907b6ca69a55507358e1cc17cc99837ebac35501f8178c034f5b9f826"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_beeswarm_transformer.pdf",
+      "sha256": "093ecddd68dee86a7ac3eb9964768b3b15fcb5f0932e8c317608e57970c603a8"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_beeswarm_transformer.png",
+      "sha256": "b41008f5624eafb6584a59da550797c299d579bb8f2c212514864f398a0f9964"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_temporal_lstm.pdf",
+      "sha256": "ef1e6e342e696e06817d3392dac0b225770e1dd758b4e0ecba722339f3b09084"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_temporal_lstm.png",
+      "sha256": "b30a82dc00cce15b5ff23f9ae57d1c66ad29d6b4196446498b2aa0ce9ab5248e"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_temporal_transformer.pdf",
+      "sha256": "56b1a6b0a3f6ded460c34a080192db6e5ca54b8e81d9b33140bc9af5c8b46f9d"
+    },
+    {
+      "path": "supplementary/extension3_shap/plots/shap_temporal_transformer.png",
+      "sha256": "576f02f047f0e2b082fb2280490a9ad1c761d8996cb5039cf7470ca561dc67a3"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/all_households__lstm__seed42__nsamples128.json",
+      "sha256": "2cce6000184fc6d8af95d1ab2f9d3bd1445d7c9ad02d23917de76a498f26595f"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/all_households__transformer__seed42__nsamples128.json",
+      "sha256": "71b7eddc3825a06292ab1d6aecb2c6321183e5034e1893187d24d03fd127d3c6"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__lstm__seed2024__nsamples128.json",
+      "sha256": "b890dd24abca025c20fa4492ac3bb3855659ddcb7763c729c268edbb2811edde"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__lstm__seed42__nsamples128.json",
+      "sha256": "11737550eaa146ef59b18c23a9a6cfef84339dc63705a94329ba81cfaea9740d"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__lstm__seed7__nsamples128.json",
+      "sha256": "1a70a18e67529ec4180f8e9fb4503fc317af532d2b21b2595e0fbc033473caac"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__transformer__seed2024__nsamples128.json",
+      "sha256": "5b67f5e8278ed3e2959aad9db0ea1577ba90287cfaf93b64746f1b895989bd0f"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__transformer__seed42__nsamples128.json",
+      "sha256": "69854ffd0333c8d3dc56cf8667979ce85a133e622c7f65079799c1727bef6381"
+    },
+    {
+      "path": "supplementary/extension3_shap/provenance/observed_demographics__transformer__seed7__nsamples128.json",
+      "sha256": "0eacbe942b2a6caa84b583a922b2c0e74d11f4ed70c239ebb39cca2684c0dea1"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_additivity.csv",
+      "sha256": "7e61faa13994130a99b0d4271e2809b6f38f450a2e0feb45cb424e5a14afc539"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_convergence.csv",
+      "sha256": "e8f189b47c071c19c3ac20c55acb15ba1d79e4f4c9ddc788154e1a38be573363"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_customer_values.csv.gz",
+      "sha256": "c5043b07590e178f5a2317095cdb0e373ed207da2caf8ecb8c4aa3af83aede44"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_method_notes.md",
+      "sha256": "59d62dbcc30b1665062c0ae3192196988cf7a4e3ed16ab7f6cad88deed896116"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_run_manifest.json",
+      "sha256": "0a3a271a09c1c0324f1c85941efcc62dc8ff67233eb3e0c80f75900e77c45c9e"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_seed_summary.csv",
+      "sha256": "150e3a7ba314a63898adf3dc07155d1210b5bf40ff51f222bc2523af3c84f162"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_sensitivity_all_households.csv",
+      "sha256": "c22a9f5b76398aafc324c3d1e635a0eff719750c6ae3e8ccdf5403249ff1e5ad"
+    },
+    {
+      "path": "supplementary/extension3_shap/shap_extension3_summary.csv",
+      "sha256": "68178863744011d8303152fde0d4486cb51f7df84a0915d6eca42a13dc11476e"
+    },
+    {
+      "path": "tables/T1_freq_accuracy.csv",
+      "sha256": "d33285529ad57550db2688006c8c6eea89df6e3e03ed0ae6436b578121921594"
+    },
+    {
+      "path": "tables/T1_freq_accuracy.tex",
+      "sha256": "e41124476fc4ced1afa13790f3b4d74e9f869c98265b16366ea48f8188369cf1"
+    },
+    {
+      "path": "tables/T2_monetary_clv.csv",
+      "sha256": "b6086f9160148d969242e8ca8e5de20b09b93a0d945d6ac331e6310985496fd7"
+    },
+    {
+      "path": "tables/T2_monetary_clv.tex",
+      "sha256": "fa83135c554a21618d467d5b4f5b1c13b2f3997577644297a834a45cd28a89a4"
+    },
+    {
+      "path": "tables/T3_headline_summary.tex",
+      "sha256": "f05ebeeb17409b5a2b502c50a08aa017eef225ea7d1c740a0e2b2fa2a3abd730"
+    },
+    {
+      "path": "tables/T3_headline_summary_freq.tex",
+      "sha256": "fc8e67fbf6435ca80aa3754e90c6d7775569d0f105aa0cbaa1acc63579e4c0a8"
+    },
+    {
+      "path": "tables/T3_headline_summary_spend.tex",
+      "sha256": "6c32e6410378f8952cc1c2e706a97aa92715fe1a387313a9f908ee1dbef8054e"
+    },
+    {
+      "path": "tables/T4_significance.csv",
+      "sha256": "1e21e527164a489c1c523845c8ddc011dd3b5c3e87ec8d60b8c61270c3820246"
+    },
+    {
+      "path": "tables/T4_significance.tex",
+      "sha256": "b788d9a5f55704c6d4dde5be1d6e4389d8ce92cace4c93e41b0d9554c750a16a"
+    },
+    {
+      "path": "tables/T5_covariate_ablation.csv",
+      "sha256": "cd4aa747bea325a675e094ba333314497cebc4c892b9015aec180186affdfbdd"
+    },
+    {
+      "path": "tables/T5_covariate_ablation.tex",
+      "sha256": "8d781b6e5f4b105cec80ab30cd457d7977e39ab99048a9af963794ae6433c781"
+    },
+    {
+      "path": "tables/T6_shap_attribution.csv",
+      "sha256": "8edddcbf09fa60a8f3b565e37e46595a724c1592b363a2e175bdcb9aba40e257"
+    },
+    {
+      "path": "tables/T6_shap_attribution.tex",
+      "sha256": "6be39a96bc035592c233ccb1c6aff81619d613dded62389a8340917c5963aec9"
+    },
+    {
+      "path": "RESULTS_WRITING_GUIDE.md",
+      "sha256": "abdc8bb1f00d0e37cc490cea5112f711ce305714a84fc1bdf9141ecbed07957d"
+    }
+  ]
+}

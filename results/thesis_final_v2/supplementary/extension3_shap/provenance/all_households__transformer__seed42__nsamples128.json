@@ -1,0 +1,40 @@
+{
+  "config_sha256": "0e434addbc10c35706387bc34e75cc7fb563ccb9bd676e369dab5db0c4937359",
+  "checkpoint_sha256": "fbaf44276c030d8d433f674ced52aecd5a3f2cdf42824e90cf0fb4b18400f219",
+  "sample_manifest_sha256": "8553426a237d070a9c20a9d441e37c30d8f30284fd006592d5aa931678b021d1",
+  "source_sha256": "7c7de4992aedabf2c0273b158f51fcba95e7ad4fe1e4628223a7bdb787383a14",
+  "heads": [
+    "freq",
+    "spend"
+  ],
+  "n_integration_samples": 128,
+  "analysis_seed": 42,
+  "device_type": "cuda",
+  "shap_version": "0.51.0",
+  "torch_version": "2.9.1+cu126",
+  "cache_key": "2741ef709d0ea3ccaabb1b2d8812b4cda966f1b2da6c91878977ad998f6fe58e",
+  "complete": true,
+  "config_path": "/kaggle/working/thesis-code/experiments/configs_final/extension3_transformer_full_dunnhumby_final.yaml",
+  "checkpoint_path": "/kaggle/working/thesis-code/results/final_kaggle/checkpoints/extension3_transformer_full_dunnhumby_final_seed42_sample.pt",
+  "sample_manifest_path": "/kaggle/working/results/final_kaggle/shap/samples/all_households_seed42_100x100.json",
+  "output_dir": "/kaggle/working/results/final_kaggle/shap/all_households/transformer/seed42/nsamples128",
+  "run_name": "extension3_transformer_full_dunnhumby_final",
+  "architecture": "transformer",
+  "seed": 42,
+  "cohort": "all_households",
+  "n_background": 100,
+  "n_explain": 100,
+  "calibration_weeks": 80,
+  "method": "shap.GradientExplainer",
+  "explanation_target": {
+    "freq": "first-holdout-week expected transaction count",
+    "spend": "first-holdout-week conditional log1p-spend"
+  },
+  "history_policy": "each explained household retains its own calibration history",
+  "dynamic_aggregation": "sum_signed_over_time_then_absolute_for_importance",
+  "normalized_additivity_error": {
+    "freq": 0.08315356781780234,
+    "spend": 0.09324151199337188
+  },
+  "causal_warning": "Interventional model attribution conditional on transaction history; not a causal campaign-effect estimate."
+}

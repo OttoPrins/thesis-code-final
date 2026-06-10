@@ -1,0 +1,5 @@
+architecture,head,low_samples,main_samples,feature_rank_correlation,max_relative_importance_change_pp,normalized_additivity_error,requires_128_samples,selected_samples,selection_basis
+lstm,freq,32,64,1.0,3.600197047307354,0.2678151550386817,True,128,Prior fixed-sample convergence pilot
+lstm,spend,32,64,1.0,0.6413945330481496,0.1726538634214608,True,128,Prior fixed-sample convergence pilot
+transformer,freq,32,64,1.0,0.97550795771906,0.1232697049956551,True,128,Prior fixed-sample convergence pilot
+transformer,spend,32,64,1.0,0.8777640334216059,0.1441175457219725,True,128,Prior fixed-sample convergence pilot

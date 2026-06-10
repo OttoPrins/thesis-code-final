@@ -265,6 +265,12 @@ def _filter_metric_files(
             "final_manifest_benchmark_name" in metrics
             or metrics.get("model") in _BENCHMARK_MODELS
         )
+        if not is_benchmark and metrics.get("run_valid") is not True:
+            logger.info(
+                "Skipping %s: deep-learning result lacks run_valid=True.",
+                Path(fpath).name,
+            )
+            return False
         # Apply the 3-tier quality gate.  Benchmarks bypass the DL validity check.
         if not is_benchmark:
             tier = quality_tier(metrics)
@@ -972,7 +978,7 @@ def export_latex_table_aggregated(
 
     Generates three files derived from out_path stem:
       comparison_thesis.tex       — compact (freq bias, freq MAPE, spend R², CLV ρ)
-      comparison_thesis_freq.tex  — frequency metrics (bias, MAPE, MASE, CLV ρ)
+      comparison_thesis_freq.tex  — frequency metrics (bias, MAPE, MASE)
       comparison_thesis_spend.tex — spend metrics (R², MAE, MAPE, MASE, bias)
 
     Selection rule: for each (model, dataset), choose the best non-HPO version row
@@ -986,7 +992,7 @@ def export_latex_table_aggregated(
     freq_path = out_path.with_name(out_path.stem + "_freq" + out_path.suffix)
     spend_path = out_path.with_name(out_path.stem + "_spend" + out_path.suffix)
 
-    DATASETS = ["cdnow", "tafeng", "uci", "dunnhumby"]
+    DATASETS = ["cdnow", "uci", "tafeng", "dunnhumby"]
     MODELS = ["pareto_nbd", "lstm_base", "lstm_joint", "transformer_joint"]
     MODEL_LABELS_TEX = {
         "pareto_nbd":         "Pareto/NBD",
@@ -1092,6 +1098,9 @@ def export_latex_table_aggregated(
         return
 
     out_df = pd.DataFrame(rows)
+    monetary_model_labels = {
+        "Pareto/NBD": "Pareto/NBD + Gamma--Gamma",
+    }
 
     def _write_latex(df_disp, path, cap, lbl):
         latex_str = df_disp.to_latex(
@@ -1100,6 +1109,11 @@ def export_latex_table_aggregated(
             escape=False,
             caption=cap,
             label=lbl,
+        )
+        latex_str = latex_str.replace(
+            "\\begin{table}",
+            "\\begin{table}\n\\centering\n\\small",
+            1,
         )
         if "\\toprule" not in latex_str:
             latex_str = latex_str.replace("\\hline\n", "\\toprule\n", 1)
@@ -1117,11 +1131,18 @@ def export_latex_table_aggregated(
     # Compact table (backward-compatible): bias, freq MAPE, spend R², CLV ρ
     compact_cols = ["Model", "Dataset", "Seeds",
                     "Freq Bias \\%", "Freq MAPE \\%", "Spend $R^2$", "CLV $\\rho$"]
-    _write_latex(out_df[compact_cols], out_path, caption, label)
+    compact_df = out_df[compact_cols].copy()
+    compact_df["Model"] = compact_df["Model"].replace(monetary_model_labels)
+    _write_latex(
+        compact_df,
+        out_path,
+        caption + " Pareto/NBD monetary and CLV metrics use Gamma--Gamma.",
+        label,
+    )
 
-    # Frequency-detailed table: bias, MAPE, MASE, CLV ρ
+    # Frequency-detailed table: bias, MAPE, and MASE.
     freq_cols = ["Model", "Dataset", "Seeds",
-                 "Freq Bias \\%", "Freq MAPE \\%", "Freq MASE", "CLV $\\rho$"]
+                 "Freq Bias \\%", "Freq MAPE \\%", "Freq MASE"]
     _write_latex(
         out_df[freq_cols], freq_path,
         caption.replace("performance", "frequency performance"),
@@ -1131,9 +1152,12 @@ def export_latex_table_aggregated(
     # Spend-detailed table: R², MAE, MAPE, MASE, bias
     spend_cols = ["Model", "Dataset",
                   "Spend $R^2$", "Spend MAE (\\$)", "Spend MAPE \\%", "Spend MASE", "Spend Bias \\%"]
+    spend_df = out_df[spend_cols].copy()
+    spend_df["Model"] = spend_df["Model"].replace(monetary_model_labels)
     _write_latex(
-        out_df[spend_cols], spend_path,
-        caption.replace("performance", "spend performance"),
+        spend_df, spend_path,
+        caption.replace("performance", "spend performance")
+        + " Pareto/NBD is paired with Gamma--Gamma for monetary prediction.",
         label + "_spend",
     )
 

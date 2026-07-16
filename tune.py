@@ -7,7 +7,8 @@ Two modes (selected with --mode):
   exhaustive GridSampler (reproducible, no stochasticity); a TPE sampler is also
   available (--sampler tpe) for a wider, randomised search. The winning config is
   dumped back to experiments/configs/<run_name>_hpo.yaml for the multi-seed eval.
-  These HPO winners are promoted to primary thesis results by kaggle_runner.ipynb.
+  The primary thesis results use fixed (untuned) configs; HPO winners feed the
+  separate tuned-performance analysis (kaggle_tuned_runner.ipynb).
 
 * sensitivity — a plain one-at-a-time sweep (NO Optuna) over a single dotted config
   key (--param) across a list of --values, writing a summary CSV. Used to fill the
@@ -24,12 +25,14 @@ Design notes
 
 Methodological note on HPO evaluation
 --------------------------------------
-HPO trials are scored on the same holdout period that is used for final reporting.
-There is no separate validation fold. The grid is intentionally small (9 LSTM trials,
-15 Transformer trials per dataset) so the risk of data-driven overfitting is bounded;
-the 3-seed final evaluation provides an additional variance check. Thesis write-up
-should acknowledge that hyperparameter selection and held-out evaluation share the
-same temporal holdout window.
+By default (--hpo-val-pct 0) HPO trials are scored on the same holdout period that is
+used for final reporting; there is no separate validation fold. The grid is
+intentionally small (18 LSTM trials, 15 Transformer trials per dataset) so the risk of
+data-driven overfitting is bounded; the 3-seed final evaluation provides an additional
+variance check. With --hpo-val-pct > 0 the last fraction of *calibration* weeks is
+carved off as an HPO-only validation window instead, so the true holdout is never seen
+during hyperparameter selection — this is the protocol used by the tuned-performance
+workflow (kaggle_tuned_runner.ipynb).
 
 LSTM hidden_size (64 / 128 / 256) is included in the search even for the Base LSTM
 (Stage 1 replication). Valendin et al. use 128, which serves as the reference point,
@@ -92,10 +95,13 @@ def build_grid(model_type: str) -> dict:
     architecture (single layer, return_sequences, same embeddings) matches exactly.
     """
     if model_type == "lstm":
-        # 3 × 3 = 9 combinations.
+        # 3 × 3 × 2 = 18 combinations. dropout {0.0, 0.1} gives the search a
+        # regularisation axis; 0.0 is the Valendin default, so the fixed
+        # configuration is always a member of the grid.
         return {
             "lr": [3e-4, 1e-3, 3e-3],
             "hidden_size": [64, 128, 256],
+            "dropout": [0.0, 0.1],
         }
     if model_type == "transformer":
         # 3 × 5 = 15 combinations. "arch" = "<d_model>_<n_heads>" (all valid pairs).
@@ -130,13 +136,14 @@ def _suggest(trial, config: dict, sampler_name: str) -> None:
 
     if sampler_name == "grid":
         # Grid mode: non-grid params fixed to base config. We ONLY suggest the
-        # parameters present in build_grid(); everything else (dropout,
-        # weight_decay, d_ff, dense_units, n_layers, all Kendall loss params, all
+        # parameters present in build_grid(); everything else (weight_decay,
+        # d_ff, dense_units, n_layers, all Kendall loss params, all
         # scheduled-sampling params, max_grad_norm) keeps its base-config value.
         grid = build_grid(model_type)
         tr["lr"] = trial.suggest_categorical("lr", grid["lr"])
         if is_lstm:
             md["hidden_size"] = trial.suggest_categorical("hidden_size", grid["hidden_size"])
+            md["dropout"] = trial.suggest_categorical("dropout", grid["dropout"])
         else:  # transformer — unpack the "<d_model>_<n_heads>" arch string
             arch = trial.suggest_categorical("arch", grid["arch"])
             d_model, n_heads = int(arch.split("_")[0]), int(arch.split("_")[1])
@@ -373,17 +380,16 @@ def main() -> None:
             "Fraction of calibration weeks to hold back as an HPO validation window "
             "(0.0 = default, scores trials on the true holdout). When > 0, the last "
             "hpo_val_pct of calibration is used as the HPO objective target and the "
-            "true holdout is never seen during HPO. The notebook appends '_valNN' to "
-            "the study name so existing holdout-scored .db files are never mixed with "
-            "val-fold-scored trials. Activate by setting HPO_VAL_PCT > 0 in Cell 4 "
-            "of kaggle_runner.ipynb and deleting the old .db files."
+            "true holdout is never seen during HPO. Callers should append '_valNN' to "
+            "the study name so holdout-scored .db files are never mixed with "
+            "val-fold-scored trials (kaggle_tuned_runner.ipynb does this)."
         ),
     )
     args = p.parse_args()
 
     print(
-        "[tune.py] HPO winners are promoted to primary thesis results by "
-        "kaggle_runner.ipynb. See module docstring for holdout-leakage discussion."
+        "[tune.py] Primary thesis results use fixed configs; HPO winners feed the "
+        "tuned-performance analysis. See module docstring for leakage discussion."
     )
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     base_config = load_config(args.config)
@@ -421,13 +427,17 @@ def main() -> None:
         _suggest(trial, cfg, sampler_name)
         # Validation-fold mode: carve the last hpo_val_pct of calibration as a
         # proxy evaluation window so the true holdout is never seen during HPO.
-        # lookback_weeks shrinks; the carved tail acts as a short holdout for
+        # calibration_weeks shrinks; the carved tail acts as a short holdout for
         # scoring only — the final 3-seed eval still uses the full calibration +
         # original holdout.  Default (hpo_val_pct=0) leaves config unchanged.
+        # (TemporalSplitter anchors at week 0, so new_cal + val window together
+        # span exactly the original calibration weeks.)
         if args.hpo_val_pct > 0.0:
-            orig_cal = cfg["dataset"]["lookback_weeks"]
+            cal_key = "calibration_weeks" if "calibration_weeks" in cfg["dataset"] \
+                else "lookback_weeks"
+            orig_cal = cfg["dataset"][cal_key]
             new_cal = max(10, round(orig_cal * (1.0 - args.hpo_val_pct)))
-            cfg["dataset"]["lookback_weeks"] = new_cal
+            cfg["dataset"][cal_key] = new_cal
             cfg["dataset"]["holdout_weeks"] = orig_cal - new_cal
         # Remap raw_dir/results_dir for Kaggle's read-only input layout so the
         # data pipeline finds the mounted datasets (results aren't written —
@@ -479,13 +489,22 @@ def main() -> None:
     if out_path.exists():
         print(f"\nWinning config already present (another worker wrote it): {out_path}")
     else:
+        if args.hpo_val_pct > 0.0:
+            scoring_note = (
+                f"# HPO note: trials were scored on an HPO validation window carved from\n"
+                f"# the last {args.hpo_val_pct:.0%} of calibration weeks (--hpo-val-pct); the\n"
+                f"# true holdout was never seen during hyperparameter selection.\n"
+            )
+        else:
+            scoring_note = (
+                f"# HPO note: trials were scored on the holdout period; grid size={n_trials} bounds\n"
+                f"# data-driven overfitting risk. See tune.py docstring for full discussion.\n"
+            )
         out_path.write_text(
             f"# Auto-generated by tune.py from {args.config}\n"
-            f"# HPO-selected config (sampler={sampler_name}). Promoted to primary thesis\n"
-            f"# results by kaggle_runner.ipynb (3-seed final eval in Cell 10).\n"
-            f"# HPO note: trials were scored on the holdout period; grid size={n_trials} bounds\n"
-            f"# data-driven overfitting risk. See tune.py docstring for full discussion.\n"
-            f"# Best Optuna objective={best.value:.4f} "
+            f"# HPO-selected config (sampler={sampler_name}).\n"
+            + scoring_note
+            + f"# Best Optuna objective={best.value:.4f} "
             f"(trial #{best.number}, {n_trials} trials, max_epochs={args.max_epochs})\n"
             + yaml.safe_dump(winner, sort_keys=False, default_flow_style=False)
         )

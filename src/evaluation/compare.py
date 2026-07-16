@@ -57,7 +57,7 @@ _DATASET_ALIASES: tuple[tuple[str, str], ...] = (
 )
 _MODE_RE = re.compile(r"_(sample|expected)$")
 _SEED_RE = re.compile(r"_seed(\d+)$")
-_VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final_hpo|final)$")
+_VERSION_RE = re.compile(r"_(v\d+(?:[a-z]|_[a-z]+)?|final_hpo|final|tuned)$")
 _REPAIR_SUFFIX = "_repair"
 _RESCORE_SUFFIX = "_rescore"
 

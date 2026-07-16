@@ -730,6 +730,26 @@ def main() -> None:
     )
     parser.add_argument("--checkpoint_root")
     parser.add_argument("--output_root")
+    parser.add_argument(
+        "--lstm_config", default=None,
+        help="Override the LSTM full-covariate config YAML "
+             "(default: the frozen configs_final path; the tuned workflow "
+             "passes experiments/configs_tuned/extension3_lstm_full_dunnhumby_tuned.yaml).",
+    )
+    parser.add_argument(
+        "--transformer_config", default=None,
+        help="Override the Transformer full-covariate config YAML.",
+    )
+    parser.add_argument(
+        "--lstm_run_prefix", default=None,
+        help="Override the LSTM checkpoint run prefix "
+             "(default: extension3_lstm_full_dunnhumby_final; checkpoints are "
+             "expected at <checkpoint_root>/<prefix>_seed<seed>_sample.pt).",
+    )
+    parser.add_argument(
+        "--transformer_run_prefix", default=None,
+        help="Override the Transformer checkpoint run prefix.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--analysis_seed", type=int, default=42)
     parser.add_argument("--n_background", type=int, default=100)
@@ -764,6 +784,18 @@ def main() -> None:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip_sensitivity", action="store_true")
     args = parser.parse_args()
+
+    # Optional overrides so the same orchestration can score the tuned
+    # full-covariate checkpoints (kaggle_tuned_runner.ipynb). All downstream
+    # helpers read these module-level dicts at call time.
+    if args.lstm_config:
+        CONFIGS["lstm"] = Path(args.lstm_config)
+    if args.transformer_config:
+        CONFIGS["transformer"] = Path(args.transformer_config)
+    if args.lstm_run_prefix:
+        RUN_PREFIXES["lstm"] = args.lstm_run_prefix
+    if args.transformer_run_prefix:
+        RUN_PREFIXES["transformer"] = args.transformer_run_prefix
 
     results_root = Path(args.results_root)
     checkpoint_root = Path(

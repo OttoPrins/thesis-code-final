@@ -1,0 +1,15 @@
+{
+  "id": "ottoprins/clv-thesis-tuned-runner",
+  "title": "CLV Thesis Tuned Runner",
+  "code_file": "kaggle_tuned_runner.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "ottoprins/dunnhumby"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

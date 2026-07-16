@@ -35,11 +35,14 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Dotted keys the grid search may set (superset across samplers; keys absent
-# from a winner are simply not transferred).
+# from a winner are simply not transferred). Includes the expanded tuned-performance
+# grid axes: weight_decay (both LSTM/Transformer), scheduled_sampling.* (LSTM only),
+# and n_layers (Transformer only).
 HP_KEYS = [
     ("training", "lr"),
     ("training", "weight_decay"),
     ("training", "max_grad_norm"),
+    ("training", "scheduled_sampling"),
     ("model", "hidden_size"),
     ("model", "dropout"),
     ("model", "d_model"),

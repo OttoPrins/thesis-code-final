@@ -84,30 +84,49 @@ SENSITIVITY_METRICS = [
 def build_grid(model_type: str) -> dict:
     """Return the GridSampler search_space dict for a model family.
 
-    The grids are the pre-specified HPO spaces for the thesis. Transformer
-    (d_model, n_heads) pairs are encoded as "<d_model>_<n_heads>" strings so the
-    GridSampler never proposes an invalid head/dim combination (e.g. 64/8 with
-    d_model not divisible by n_heads is simply not in the list).
+    The grids are the pre-specified HPO spaces. Transformer (d_model, n_heads) pairs are
+    encoded as "<d_model>_<n_heads>" strings so the GridSampler never proposes an invalid
+    head/dim combination (e.g. 64/8 with d_model not divisible by n_heads).
 
-    LSTM hidden_size {64, 128, 256} is searched for ALL LSTM configs (base and joint).
+    NOTE: This is the tuned-performance grid (kaggle_tuned_runner.ipynb only). The frozen
+    thesis uses fixed hyperparameters; no HPO grid from this function appears in
+    final_manifest.yaml or thesis replication. That separation ensures reproducibility.
+
+    LSTM hidden_size {64, 128, 256, 384} is searched for ALL LSTM configs (base and joint).
     Valendin et al. (2022) use 128; that is the reference point but not a constraint.
-    Finding a better hidden_size is a valid empirical result as long as the rest of the
+    Finding a better hidden_size is valid empirical work as long as the rest of the
     architecture (single layer, return_sequences, same embeddings) matches exactly.
     """
     if model_type == "lstm":
-        # 3 × 3 × 2 = 18 combinations. dropout {0.0, 0.1} gives the search a
-        # regularisation axis; 0.0 is the Valendin default, so the fixed
-        # configuration is always a member of the grid.
+        # 4 × 4 × 3 × 2 × 2 = 192 combinations.
+        # lr: broad sweep including sub-default and super-default edges.
+        # hidden_size: {64, 128, 256, 384} continues Valendin's ascending scale.
+        # dropout: {0.0, 0.1, 0.2} adds a regularisation axis (0.0 is the default).
+        # weight_decay: {0.0, 1e-4} enables a form of regularisation already available in TPE mode.
+        # scheduled_sampling: [False, True] is the dominant lever for autoregressive bias
+        #   (tune.py's TPE docstring). Grid mode can't tune continuous sub-params; True
+        #   branch fixes: max_prob=0.2, start_epoch=20, schedule="linear" (mid-range defaults).
         return {
-            "lr": [3e-4, 1e-3, 3e-3],
-            "hidden_size": [64, 128, 256],
-            "dropout": [0.0, 0.1],
+            "lr": [1e-4, 3e-4, 1e-3, 3e-3],
+            "hidden_size": [64, 128, 256, 384],
+            "dropout": [0.0, 0.1, 0.2],
+            "weight_decay": [0.0, 1e-4],
+            "scheduled_sampling": [False, True],
         }
     if model_type == "transformer":
-        # 3 × 5 = 15 combinations. "arch" = "<d_model>_<n_heads>" (all valid pairs).
+        # 3 × 6 × 2 × 2 × 2 = 144 combinations.
+        # lr: unchanged (3 values; arch axis carries the expansion).
+        # arch: added "256_16" (valid pair, 256-dim / 16-head = 16 dims/head; consistent).
+        # dropout: {0.0, 0.1} (new axis; regularisation).
+        # weight_decay: {0.0, 1e-4} (new axis).
+        # n_layers: {2, 3} (new axis). CLAUDE.md §8 explicitly allows "2-3 layers" so this
+        #   exercises an already-blessed range, not a new architectural decision.
         return {
             "lr": [1e-4, 5e-4, 1e-3],
-            "arch": ["64_4", "128_4", "128_8", "256_4", "256_8"],
+            "arch": ["64_4", "128_4", "128_8", "256_4", "256_8", "256_16"],
+            "dropout": [0.0, 0.1],
+            "weight_decay": [0.0, 1e-4],
+            "n_layers": [2, 3],
         }
     raise ValueError(f"build_grid: unsupported model.type={model_type!r}")
 
@@ -136,19 +155,33 @@ def _suggest(trial, config: dict, sampler_name: str) -> None:
 
     if sampler_name == "grid":
         # Grid mode: non-grid params fixed to base config. We ONLY suggest the
-        # parameters present in build_grid(); everything else (weight_decay,
-        # d_ff, dense_units, n_layers, all Kendall loss params, all
-        # scheduled-sampling params, max_grad_norm) keeps its base-config value.
+        # parameters present in build_grid(); everything else (d_ff, dense_units,
+        # all Kendall loss params, max_grad_norm) keeps its base-config value.
         grid = build_grid(model_type)
         tr["lr"] = trial.suggest_categorical("lr", grid["lr"])
+        tr["weight_decay"] = trial.suggest_categorical("weight_decay", grid["weight_decay"])
         if is_lstm:
             md["hidden_size"] = trial.suggest_categorical("hidden_size", grid["hidden_size"])
             md["dropout"] = trial.suggest_categorical("dropout", grid["dropout"])
+            # scheduled_sampling: new grid axis (True branch uses mid-range TPE defaults).
+            ss_enabled = trial.suggest_categorical("scheduled_sampling", grid["scheduled_sampling"])
+            if ss_enabled:
+                ss = tr.setdefault("scheduled_sampling", {})
+                ss["enabled"] = True
+                ss["max_prob"] = 0.2
+                ss["start_epoch"] = 20
+                ss["schedule"] = "linear"
+            else:
+                ss = tr.setdefault("scheduled_sampling", {})
+                ss["enabled"] = False
         else:  # transformer — unpack the "<d_model>_<n_heads>" arch string
             arch = trial.suggest_categorical("arch", grid["arch"])
             d_model, n_heads = int(arch.split("_")[0]), int(arch.split("_")[1])
             md["d_model"] = d_model
             md["n_heads"] = n_heads
+            # New grid axes for Transformer.
+            md["dropout"] = trial.suggest_categorical("dropout", grid["dropout"])
+            md["n_layers"] = trial.suggest_categorical("n_layers", grid["n_layers"])
         return
 
     # ── TPE mode: wider randomised search ────────────────────────────────────

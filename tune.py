@@ -98,32 +98,32 @@ def build_grid(model_type: str) -> dict:
     architecture (single layer, return_sequences, same embeddings) matches exactly.
     """
     if model_type == "lstm":
-        # 4 × 4 × 3 × 2 × 2 = 192 combinations.
+        # 4 × 4 × 3 × 2 = 96 combinations.
         # lr: broad sweep including sub-default and super-default edges.
         # hidden_size: {64, 128, 256, 384} continues Valendin's ascending scale.
         # dropout: {0.0, 0.1, 0.2} adds a regularisation axis (0.0 is the default).
         # weight_decay: {0.0, 1e-4} enables a form of regularisation already available in TPE mode.
-        # scheduled_sampling: [False, True] is the dominant lever for autoregressive bias
-        #   (tune.py's TPE docstring). Grid mode can't tune continuous sub-params; True
-        #   branch fixes: max_prob=0.2, start_epoch=20, schedule="linear" (mid-range defaults).
+        # NOTE: scheduled_sampling was deliberately excluded — feeding predictions back in during
+        # training breaks time-axis parallelisation (closer in cost profile to autoregressive
+        # inference than to a normal training epoch), making its per-trial wall-clock cost too
+        # uncertain to size a Kaggle time budget around. TPE mode still explores it.
         return {
             "lr": [1e-4, 3e-4, 1e-3, 3e-3],
             "hidden_size": [64, 128, 256, 384],
             "dropout": [0.0, 0.1, 0.2],
             "weight_decay": [0.0, 1e-4],
-            "scheduled_sampling": [False, True],
         }
     if model_type == "transformer":
-        # 3 × 6 × 2 × 2 × 2 = 144 combinations.
-        # lr: unchanged (3 values; arch axis carries the expansion).
-        # arch: added "256_16" (valid pair, 256-dim / 16-head = 16 dims/head; consistent).
+        # 3 × 5 × 2 × 2 × 2 = 120 combinations.
+        # lr: unchanged (3 values; arch axis carries most of the expansion).
+        # arch: unchanged 5-option set (all valid d_model/n_heads pairs).
         # dropout: {0.0, 0.1} (new axis; regularisation).
         # weight_decay: {0.0, 1e-4} (new axis).
         # n_layers: {2, 3} (new axis). CLAUDE.md §8 explicitly allows "2-3 layers" so this
         #   exercises an already-blessed range, not a new architectural decision.
         return {
             "lr": [1e-4, 5e-4, 1e-3],
-            "arch": ["64_4", "128_4", "128_8", "256_4", "256_8", "256_16"],
+            "arch": ["64_4", "128_4", "128_8", "256_4", "256_8"],
             "dropout": [0.0, 0.1],
             "weight_decay": [0.0, 1e-4],
             "n_layers": [2, 3],
@@ -163,17 +163,6 @@ def _suggest(trial, config: dict, sampler_name: str) -> None:
         if is_lstm:
             md["hidden_size"] = trial.suggest_categorical("hidden_size", grid["hidden_size"])
             md["dropout"] = trial.suggest_categorical("dropout", grid["dropout"])
-            # scheduled_sampling: new grid axis (True branch uses mid-range TPE defaults).
-            ss_enabled = trial.suggest_categorical("scheduled_sampling", grid["scheduled_sampling"])
-            if ss_enabled:
-                ss = tr.setdefault("scheduled_sampling", {})
-                ss["enabled"] = True
-                ss["max_prob"] = 0.2
-                ss["start_epoch"] = 20
-                ss["schedule"] = "linear"
-            else:
-                ss = tr.setdefault("scheduled_sampling", {})
-                ss["enabled"] = False
         else:  # transformer — unpack the "<d_model>_<n_heads>" arch string
             arch = trial.suggest_categorical("arch", grid["arch"])
             d_model, n_heads = int(arch.split("_")[0]), int(arch.split("_")[1])
